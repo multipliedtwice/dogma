@@ -43,7 +43,7 @@ def metadata(language):
     tags.extend(f'<meta name="{key}" content="{escape(value,quote=True)}">' for key,value in twitter.items())
     graph=[{'@type':'WebPage','@id':page['url']+'#webpage','url':page['url'],'name':page['title'],
             'description':page['description'],'inLanguage':language,'isPartOf':{'@id':BASE+'#website'},
-            'about':{'@type':'SoftwareSourceCode','name':'Dogma','codeRepository':'https://github.com/multipliedtwice/dogma'}}]
+            'about':{'@type':'Thing','name':'Dogma'}}]
     if language=='en':
         graph.insert(0,{'@type':'WebSite','@id':BASE+'#website','name':'Dogma','url':BASE,'inLanguage':['en','ru']})
     structured=json.dumps({'@context':'https://schema.org','@graph':graph},ensure_ascii=False,separators=(',',':')).replace('<','\\u003c')

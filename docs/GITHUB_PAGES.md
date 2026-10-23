@@ -1,6 +1,6 @@
 # Public demo website
 
-The Dogma product repository is public by the user's decision. The public site is
+The public site is
 <https://multipliedtwice.github.io/dogma-demo/>; its separate repository,
 `multipliedtwice/dogma-demo`, contains only static website assets.
 The separate site repository keeps the existing public URL stable and its
@@ -67,7 +67,8 @@ and projecting caption fields. It never copies the workspace or its public
 directory wholesale. Duration is measured from the actual MP3. Audio and caption
 filenames include their byte hashes. Unready catalog entries cannot reference
 audio. The checker rejects unselected files, altered asset hashes, linked paths,
-private local paths. Links to the now-public product repository are permitted.
+private local paths. The site links only to publicly accessible repositories;
+product repository visibility is managed separately from site publication.
 
 Keep the previous public snapshot available when preparing a new one. The checker
 rejects obsolete unreferenced assets; only the selected snapshot belongs in the
