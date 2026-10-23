@@ -15,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'runtime'), str(ROOT / 'scripts')]
 
-from rimsky.spoken_pronunciation import ACUTE, unmarked, validate_marks
+from rimsky.spoken_pronunciation import ACUTE, unmarked, validate_marks, yo_fold, yo_bound_differences
+from rimsky.respelling import validate_respelled_stress
 from rimsky.production_higgs_model import resolve_production_higgs_model
 from rimsky.util import AppError, file_digest, now, write_json
 
@@ -85,12 +86,13 @@ def _selection_matches(text, selected):
     """Return original-string spans while matching against its unmarked text."""
     positions=[]
     plain=[]
-    for index, character in enumerate(text):
+    # ё is folded to е (same length) so a spoken ё still finds its printed е.
+    for index, character in enumerate(yo_fold(text)):
         if character == ACUTE:
             continue
         positions.append(index)
         plain.append(character)
-    pattern = re.compile(rf'(?<![{LETTER}]){re.escape(selected)}(?![{LETTER}])')
+    pattern = re.compile(rf'(?<![{LETTER}]){re.escape(yo_fold(selected))}(?![{LETTER}])')
     result=[]
     for match in pattern.finditer(''.join(plain)):
         start=positions[match.start()]
@@ -160,8 +162,11 @@ def _selected_take(folder, unit_id):
     return matches[0], False
 
 
-def stress_native_text(before, report):
-    """Apply one or more source-bound marks to one synthesis unit."""
+def stress_native_edits(before, report):
+    """Return (native text, yo_edits): one or more source-bound marks on one synthesis unit.
+
+    yo_edits lists each selected word whose е/ё letter differs from the heard input, in native
+    unmarked coordinates; the final guard allows differences only inside them."""
     corrections = report.get('corrections') or [{key: report.get(key) for key in
                                                   ('selected_text', 'intended_stress', 'text_offset')}]
     unit = before['unit']
@@ -177,7 +182,12 @@ def stress_native_text(before, report):
         if not isinstance(correction.get('text_offset'), int):
             raise AppError('The queued stress word has no exact source-text offset.')
         validate_marks(intended)
-        if unmarked(intended) != selected or intended.count(ACUTE) != 1:
+        try:
+            substitutions = validate_respelled_stress(selected, intended)
+        except ValueError as error:
+            raise AppError('The queued stress choice changes the selected source word.') from error
+        # Only е->ё is orthographic here; э respellings belong to the names path.
+        if any(row['spoken'] not in 'ёЁ' for row in substitutions):
             raise AppError('The queued stress choice changes the selected source word.')
         local = correction['text_offset'] - unit['start']
         # A listener may select the lexical component of a compound name
@@ -186,26 +196,39 @@ def stress_native_text(before, report):
         source_matches = _selection_matches(source,selected)
         source_index = next((index for index, match in enumerate(source_matches)
                              if match[0] == local), None)
-        if source_index is None:
+        if source_index is None or unmarked(source[local:source_matches[source_index][1]]) != selected:
             raise AppError('The queued stress word is not bound to this synthesis unit.')
         spoken_matches = _selection_matches(spoken,selected)
         if source_index >= len(spoken_matches):
             raise AppError('The selected source word has no unambiguous spoken-text occurrence.')
         target = spoken_matches[source_index]
-        edits.append((target[0], target[1], intended))
-    native = spoken
-    for start, end, intended in sorted(edits, reverse=True):
-        native = native[:start] + intended + native[end:]
-    if unmarked(native) != unmarked(spoken):
+        edits.append((target[0], target[1], intended, selected))
+    native = ''
+    position = 0
+    yo_edits = []
+    for start, end, intended, selected in sorted(edits):
+        native += spoken[position:start]
+        if unmarked(spoken[start:end]) != unmarked(intended):
+            offset = len(unmarked(native))
+            yo_edits.append({'start': offset, 'end': offset + len(unmarked(intended)),
+                             'printed': selected, 'intended': unmarked(intended)})
+        native += intended
+        position = end
+    native += spoken[position:]
+    if not yo_bound_differences(unmarked(native), unmarked(spoken), yo_edits):
         raise AppError('The stress correction changed the spoken words.')
-    return native
+    return native, yo_edits
+
+
+def stress_native_text(before, report):
+    return stress_native_edits(before, report)[0]
 
 
 def build_revision(folder, item):
     report = item['report']
     before, revised = _selected_take(folder, report['segment_id'])
     manifest = read(folder / 'manifest.json')
-    native_text = stress_native_text(before, report)
+    native_text, yo_edits = stress_native_edits(before, report)
     request = {
         'schema': 1,
         'generation': folder.name,
@@ -225,7 +248,9 @@ def build_revision(folder, item):
         'human_audio_approval': False,
     }
     previous_native = before['unit']['synthesis']['text']
-    if unmarked(native_text) == unmarked(previous_native):
+    if yo_edits:
+        request['listener_yo_edits'] = yo_edits
+    if yo_bound_differences(unmarked(native_text), unmarked(previous_native), yo_edits):
         request.update(recovery_kind='listener_pronunciation_from_synthesis',
                        previous_native_text=previous_native)
     if revised:

@@ -52,6 +52,21 @@ def unmarked(text):
     return text.replace(ACUTE,'')
 
 
+def yo_fold(text):
+    return text.replace('ё','е').replace('Ё','Е')
+
+
+def yo_bound_differences(a,b,words):
+    """True when unmarked a (native, whose coordinates `words` use) equals b, or differs from it only by
+    е<->ё letters inside a listener-edited word: each entry {'start','end','printed','intended'} must name
+    a[start:end]==intended whose yo-folded form is the folded printed word."""
+    if len(a)!=len(b) or yo_fold(a)!=yo_fold(b):return False
+    spans=[(w['start'],w['end']) for w in words or ()
+        if 0<=w['start']<w['end']<=len(a) and a[w['start']:w['end']]==unmarked(w['intended'])
+        and yo_fold(a[w['start']:w['end']])==yo_fold(w['printed'])]
+    return all(any(s<=i<e for s,e in spans) for i in range(len(a)) if a[i]!=b[i])
+
+
 def validate_marks(text):
     for i,char in enumerate(text):
         if char==ACUTE and (not i or text[i-1] not in VOWELS):

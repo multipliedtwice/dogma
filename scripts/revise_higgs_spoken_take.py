@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'runtime'),str(ROOT/'scripts')]
 from rimsky.util import file_digest,digest,write_json
-from rimsky.spoken_pronunciation import unmarked,validate_marks,phrase_stress
+from rimsky.spoken_pronunciation import unmarked,validate_marks,phrase_stress,yo_bound_differences
 from rimsky.audio_join import boundary_check,prepare_clip
 
 def read(p):return json.loads(Path(p).read_text('utf-8'))
@@ -100,7 +100,11 @@ def validate_revision(before,after,request,replacement_model_sha256=None):
         and ',' in old['spoken'] and plain==old['spoken'].replace(',',''))
     synthesis_bound=(request.get('recovery_kind')=='listener_pronunciation_from_synthesis'
         and plain==unmarked(a['text']))
-    equivalent=plain==old['spoken'] or comma_phrasing or synthesis_bound or (plain==old['spoken'].rstrip()+'.'
+    # A listener-bound е<->ё letter inside the selected word is orthographic, not a respelling.
+    yo_bound=bool(request.get('listener_yo_edits')) and (yo_bound_differences(plain,old['spoken'],request['listener_yo_edits'])
+        or (request.get('recovery_kind')=='listener_pronunciation_from_synthesis'
+            and yo_bound_differences(plain,unmarked(a['text']),request['listener_yo_edits'])))
+    equivalent=plain==old['spoken'] or comma_phrasing or synthesis_bound or yo_bound or (plain==old['spoken'].rstrip()+'.'
         and not old['spoken'].rstrip().endswith(('.', '!', '?', '…')))
     if not equivalent:raise ValueError('Pronunciation revision changed source words')
     validate_marks(request['native_text'])
@@ -304,6 +308,7 @@ def main():
             raise ValueError('Listener pronunciation request changed its previous native input')
         unit['spoken_text_plan']['recovery_kind']='listener_pronunciation_from_synthesis'
         unit['spoken_text_plan']['previous_native_text']=previous_native
+        if request.get('listener_yo_edits'):unit['spoken_text_plan']['listener_yo_edits']=request['listener_yo_edits']
     elif unmarked(request['native_text'])==expected.rstrip()+'.':
         unit['spoken_text_plan']['recovery_kind']='listener_pronunciation'
     assignment={**original,'units':[unit]};path=take/'assignment.json'

@@ -1,6 +1,6 @@
 """Apply exact, provenance-bound pronunciation/punctuation recipes to new takes."""
 import re
-from .spoken_pronunciation import unmarked, validate_marks
+from .spoken_pronunciation import unmarked, validate_marks, yo_bound_differences
 from .speech_quality import word_tokens
 
 
@@ -46,7 +46,8 @@ def apply_spoken_edit(spoken, plan):
         source_words = [word.replace('ё', 'е') for word in word_tokens(unmarked(spoken))]
         native_words = [word.replace('ё', 'е') for word in word_tokens(unmarked(native))]
         if (plan.get('evidence', {}).get('source') != 'explicit_listener_instruction'
-                or not previous or unmarked(native) != unmarked(previous)
+                or not previous
+                or not yo_bound_differences(unmarked(native), unmarked(previous), plan.get('listener_yo_edits'))
                 or source_words != native_words):
             raise ValueError('Listener pronunciation changed prior native wording')
         validate_marks(native)
