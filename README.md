@@ -4,7 +4,7 @@ A local EPUB/FB2 reader and chapter-based audiobook player built with React, Tau
 
 **Listen to the public demo:** [Dogma listening room](https://multipliedtwice.github.io/dogma/).
 The website publishes selected recordings only. Model weights, training data
-and labeling records stay local. See [website publishing](docs/GITHUB_PAGES.md).
+and labeling records stay local. New demos use [one-shot generation](docs/PUBLIC_DEMO_ONE_SHOT.md), with automatic recognition and retakes disabled. See [website publishing](docs/GITHUB_PAGES.md).
 
 **Version 0.1.19 is source-only, not an offline installer.** Model weights, narrator recordings and compiled runtimes are not included. Real-model narration, fine-tuning gains and complete native acceptance remain unverified. See [STATUS.md](STATUS.md).
 

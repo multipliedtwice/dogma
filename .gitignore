@@ -51,6 +51,9 @@ playwright-report/
 blob-report/
 playwright/.cache/
 /scripts/book1_role_voice_proposals.json
+# One-off local startup-incident handoff; retain evidence without publishing it.
+/scripts/render_public_demo_one_shot_v2.py
+/verification/test_public_demo_one_shot_v2.py
 .english-player-demo
 .english-player-library
 .english-demo-library

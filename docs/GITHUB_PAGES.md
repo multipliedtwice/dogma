@@ -10,9 +10,10 @@ runtime, model weights, narrator references, training data, labeling records,
 private library files or credentials. The deployment artifact contains only
 this static directory, rather than the full repository checkout.
 
-The English demo is available. The Russian entry remains in preparation and
-exposes no recording or captions until its completed export is ready. This is
-a listening site, not a browser-hosted copy of the desktop application.
+New demos use the [one-shot pipeline](PUBLIC_DEMO_ONE_SHOT.md): one generated
+take per passage, without automatic recognition, adjudication or retakes.
+The English and Russian players expose their matching recordings and original
+story text. This is a listening site, not a browser-hosted desktop application.
 
 ## Languages, themes and search metadata
 
@@ -20,10 +21,9 @@ English is served at the site root; Russian is served at `ru/`. Both documents
 contain translated landing content without JavaScript and header language links.
 Each page selects only its matching catalog language: English features
 O. Henry's *The Gift of the Magi*; Russian features Chekhov's *Хамелеон*.
-Russian narration remains in preparation, with its player and read-along
-controls unavailable until the Russian catalog entry is ready. It never falls
-back to an English recording or fetches English audio/captions. An explicit
-link on the Russian page leads to the available English demo. Ready recordings
+An unready catalog entry keeps its player and read-along controls unavailable.
+It never falls back to another language's recording or captions. Header and
+demo links let listeners choose either language explicitly. Ready recordings
 and read-along text remain in their original language, with separate listening
 positions for each book. The header theme switch persists the user's
 choice; without a saved choice it follows the system light/dark preference.
@@ -56,7 +56,28 @@ preview but does not support audio byte ranges; test seeking on GitHub Pages or
 a byte-range-capable development server. All site URLs are relative, including
 the catalog, MP3s and captions, so the project path `/dogma/` works.
 
-## Export a completed local recording
+## Preparation and legacy audited export
+
+Use the one-shot entrypoint above for new listening renders. The strict export
+command below is retained for explicitly audited historical recordings; it is
+not part of one-shot generation and must not certify unchecked audio.
+
+For Russian demo pronunciation, use the development v4 entrypoint after a
+source-bound v3 pronunciation checkpoint has prepared the character names and
+homograph evidence. It reads that checkpoint and writes a separate generation
+workspace before any new synthesis:
+
+```sh
+python scripts/prepare_public_demo_pronunciation_v4.py --folder /path/to/source-demo --output /path/to/new-v4-demo --stage prepare
+python scripts/prepare_public_demo_pronunciation_v4.py --output /path/to/new-v4-demo --stage freeze --music-path /path/to/verified/music/selected.json
+```
+
+This path uses the shared context-aware е/ё layer and requires a context decision
+for ambiguous finite-verb readings even when the stress models agree. A plain-е
+reading receives an explicit stress mark, such as `узна́ет`; the original book
+text and captions stay unchanged. Conflicting stress decisions prevent freezing.
+The old v3 entrypoint and existing recordings remain historical evidence. These
+commands prepare inputs only; they do not synthesize or retake any audio.
 
 Run in the existing Python environment against a completed local demo workspace:
 

@@ -6,10 +6,10 @@
     "source": "https://www.gutenberg.org/ebooks/7256",
     "id": "en",
     "status": "ready",
-    "duration": 723.296042,
-    "audio_sha256": "4d680a3969dd7ab755cc46321bde637ed583c19f47ae6c8652a076b17e6bde08",
-    "audio": "demos/en/4d680a3969dd7ab755cc46321bde637ed583c19f47ae6c8652a076b17e6bde08.mp3",
-    "captions": "demos/en/captions-3b95e33da666b884c68d328d247a3c2a7ed99314c39241f46ddf89c260f116bc.json"
+    "duration": 758.3586666666666,
+    "audio_sha256": "539028c6d9c29a2679bf8a379fa8ec624cb8814f1eee1efae42c675c67aab70d",
+    "audio": "demos/en/539028c6d9c29a2679bf8a379fa8ec624cb8814f1eee1efae42c675c67aab70d.mp3",
+    "captions": "demos/en/captions-cbd4b00a79ba8a85193625b71fc07e25b7bbea6d0030ed30a683ad512fd45546.json"
   },
   {
     "id": "ru",
@@ -17,6 +17,10 @@
     "title": "Хамелеон",
     "author": "Антон Павлович Чехов",
     "source": "https://ru.wikisource.org/wiki/Хамелеон_(Чехов)/Версия_2",
-    "status": "preparing"
+    "status": "ready",
+    "duration": 480.9986666666667,
+    "audio_sha256": "84362c2ede28c6540801bc7d3fd6ebffe3b603ff13f14c9e8e9e2be8c26c25a7",
+    "audio": "demos/ru/84362c2ede28c6540801bc7d3fd6ebffe3b603ff13f14c9e8e9e2be8c26c25a7.mp3",
+    "captions": "demos/ru/captions-bf752e30969bd125c6f63d26fad1c0006ab1888784f5f501f5070e17724aee21.json"
   }
 ]

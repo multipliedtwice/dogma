@@ -16,12 +16,12 @@ PAGES={
     'en':{'path':'index.html','url':BASE,'locale':'en_US',
           'title':'Dogma — Local EPUB reader & AI audiobook narration',
           'description':'Read EPUB and FB2 books locally and hear AI narration with Dogma. '
-                        'Listen to a complete English audiobook demo with synchronized text.',
+                        'Listen to English and Russian audiobook demos with read-along text.',
           'image_alt':'Dogma: local reading and AI audiobook narration. English and Russian website.'},
     'ru':{'path':'ru/index.html','url':BASE+'ru/','locale':'ru_RU',
           'title':'Dogma — читалка EPUB и озвучка книг',
           'description':'Dogma — локальная читалка EPUB и FB2 с озвучкой книг. '
-                        'Русское демо рассказа Чехова «Хамелеон» готовится. Английский рассказ доступен на английской странице.',
+                        'Слушайте «Хамелеона» Чехова на русском и «Дары волхвов» О. Генри на английском с текстом рассказов.',
           'image_alt':'Dogma: чтение и озвучка книг. Сайт на русском и английском.'},
 }
 
