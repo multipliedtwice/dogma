@@ -5,22 +5,109 @@ workspace and never uploads or copies its private inputs.
 """
 from __future__ import annotations
 import argparse
+from html.parser import HTMLParser
 import hashlib
 import json
 import math
 from pathlib import Path
 import re
 import stat
+from urllib.parse import urljoin
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 HASH = r'[a-f0-9]{64}'
 PRIVATE = re.compile(r'(?i)manual-labeling[\\/]|training-work[\\/]|corpora[\\/]|datasets[\\/]|'
-                     r'(?<![a-z0-9])[a-z]:[\\/]|file://|PRIVATE_TRAINING_PATH|'
-                     r'https://github\.com/multipliedtwice/dogma(?=[/\s\"\'?#<]|$)')
+                     r'(?<![a-z0-9])[a-z]:[\\/]|file://|PRIVATE_TRAINING_PATH')
 CATALOG_KEYS = {'id','language','title','author','status','duration','audio','captions','source','audio_sha256'}
 CAPTION_FIELDS = ('id','source_id','text','start','end')
 CAPTION_KEYS = set(CAPTION_FIELDS)
-STATIC = {'index.html','styles.css','script.js','.nojekyll','favicon.svg','assets/column.svg'}
+STATIC = {'index.html','ru/index.html','styles.css','script.js','theme.js','.nojekyll','favicon.svg',
+          'assets/column.svg','assets/social-en.png','assets/social-ru.png','sitemap.xml'}
+SITE_URL='https://multipliedtwice.github.io/dogma-demo/'
+
+
+class LandingPage(HTMLParser):
+    def __init__(self):
+        super().__init__();self.language=None;self.head=False;self.title=False;self.titles=[]
+        self.metadata={};self.links=[];self.anchors=[];self.h1=0;self.jsonld=[];self.capture=False
+
+    def handle_starttag(self,tag,attrs):
+        attrs=dict(attrs)
+        if tag=='html':self.language=attrs.get('lang')
+        if tag=='head':self.head=True
+        if tag=='h1':self.h1+=1
+        if tag=='a':self.anchors.append(attrs)
+        if not self.head:return
+        if tag=='title':self.title=True;self.titles.append('')
+        if tag=='meta':
+            key=attrs.get('name',attrs.get('property'))
+            self.metadata.setdefault(key,[]).append(attrs.get('content',''))
+        if tag=='link':self.links.append(attrs)
+        if tag=='script' and attrs.get('type')=='application/ld+json':
+            self.capture=True;self.jsonld.append('')
+
+    def handle_endtag(self,tag):
+        if tag=='head':self.head=False
+        if tag=='title':self.title=False
+        if tag=='script':self.capture=False
+
+    def handle_data(self,data):
+        if self.title:self.titles[-1]+=data
+        if self.capture:self.jsonld[-1]+=data
+
+
+def check_seo(site):
+    """Require crawlable, reciprocal localized documents and honest share data."""
+    site=Path(site);urls={'en':SITE_URL,'ru':SITE_URL+'ru/','x-default':SITE_URL}
+    for language,path in [('en','index.html'),('ru','ru/index.html')]:
+        page=LandingPage();page.feed(safe(site/path).read_text(encoding='utf-8'));page.close()
+        if page.language!=language or page.h1!=1 or len(page.titles)!=1 or not page.titles[0].strip():
+            raise ValueError('Landing page needs its explicit language, one title and one H1')
+        canonical=[r.get('href') for r in page.links if r.get('rel')=='canonical']
+        alternates=[r for r in page.links if r.get('rel')=='alternate' and 'hreflang' in r]
+        if (canonical!=[urls[language]] or len(alternates)!=3
+                or {r['hreflang']:r.get('href') for r in alternates}!=urls):
+            raise ValueError('Self-canonical and reciprocal language alternates must match both public pages')
+        for code in ('en','ru'):
+            if not any(a.get('hreflang')==code and a.get('lang')==code
+                       and urljoin(urls[language],a.get('href',''))==urls[code] for a in page.anchors):
+                raise ValueError('Visible language links must work without JavaScript')
+        def one(key):
+            values=page.metadata.get(key,[])
+            if len(values)!=1 or not values[0].strip():raise ValueError('Missing or duplicate SEO metadata: '+str(key))
+            return values[0]
+        description=one('description');robots=one('robots').casefold().split(',')
+        if 'index' not in robots or 'follow' not in robots or any(x in robots for x in ('noindex','nofollow')):
+            raise ValueError('Public landing pages must allow indexing and following links')
+        image=SITE_URL+f'assets/social-{language}.png'
+        expected={'og:type':'website','og:site_name':'Dogma','og:url':urls[language],
+                  'og:title':page.titles[0],'og:description':description,
+                  'og:locale':{'en':'en_US','ru':'ru_RU'}[language],
+                  'og:locale:alternate':{'en':'ru_RU','ru':'en_US'}[language],
+                  'og:image':image,'og:image:type':'image/png','og:image:width':'1200','og:image:height':'630',
+                  'twitter:card':'summary_large_image','twitter:title':page.titles[0],
+                  'twitter:description':description,'twitter:image':image}
+        if any(one(k)!=v for k,v in expected.items()):raise ValueError('Localized search/share metadata differs')
+        one('og:image:alt');one('twitter:image:alt')
+        raw=safe(site/f'assets/social-{language}.png').read_bytes()
+        if (not raw.startswith(b'\x89PNG\r\n\x1a\n') or len(raw)>2*1024*1024
+                or tuple(int.from_bytes(raw[i:i+4],'big') for i in (16,20))!=(1200,630)):
+            raise ValueError('Social image must be a real 1200 by 630 PNG')
+        try:
+            structured=[json.loads(text) for text in page.jsonld]
+            nodes=[node for value in structured for node in value.get('@graph',[value])]
+        except (ValueError,TypeError,AttributeError) as error:raise ValueError('Invalid JSON-LD') from error
+        if not any(node.get('@type')=='WebPage' and node.get('url')==urls[language]
+                   and node.get('inLanguage')==language and node.get('name')==page.titles[0] for node in nodes):
+            raise ValueError('JSON-LD must describe the actual localized page')
+    try:
+        tree=ET.parse(safe(site/'sitemap.xml'))
+    except ET.ParseError as error:raise ValueError('Invalid XML sitemap') from error
+    locations=[node.text for node in tree.findall('{http://www.sitemaps.org/schemas/sitemap/0.9}url/{http://www.sitemaps.org/schemas/sitemap/0.9}loc')]
+    if len(locations)!=2 or set(locations)!={SITE_URL,SITE_URL+'ru/'}:
+        raise ValueError('Sitemap must contain the two canonical landing pages')
+    return {'languages':['en','ru'],'canonical_pages':2}
 
 
 def sha(raw):
@@ -66,7 +153,7 @@ def captions_valid(rows,duration):
         ids.add(row['id']);end=row['end']
 
 
-def check(site):
+def check(site,*,seo=True):
     site=safe(site)
     catalog=read(site/'demos/catalog.json')
     if not isinstance(catalog,list) or {r.get('id') for r in catalog}!={'en','ru'} or len(catalog)!=2:
@@ -116,13 +203,17 @@ def check(site):
         if name not in allowed:
             raise ValueError('Unexpected file in deployable site: '+name)
         raw=path.read_bytes()
-        if path.suffix!='.mp3':
+        if path.suffix=='.png':
+            if not raw.startswith(b'\x89PNG\r\n\x1a\n'):
+                raise ValueError('Invalid social preview image')
+        elif path.suffix!='.mp3':
             text=raw.decode('utf-8')
             if PRIVATE.search(text):
                 raise ValueError('Private source path in site: '+name)
         inventory.append({'path':name,'bytes':len(raw),'sha256':sha(raw)})
     if not (site/'index.html').is_file() or not (site/'script.js').is_file() or not (site/'styles.css').is_file():
         raise ValueError('Site HTML, script and stylesheet are required')
+    if seo:check_seo(site)
     return {'ready_demos':ready,'files':len(inventory),'bytes':sum(r['bytes'] for r in inventory),
             'inventory_sha256':sha(encoded(inventory))}
 

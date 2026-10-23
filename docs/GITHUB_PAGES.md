@@ -1,9 +1,10 @@
 # Public demo website
 
-The Dogma product repository stays private. The public site is
+The Dogma product repository is public by the user's decision. The public site is
 <https://multipliedtwice.github.io/dogma-demo/>; its separate repository,
 `multipliedtwice/dogma-demo`, contains only static website assets.
-The current GitHub plan does not support Pages from the private product repo.
+The separate site repository keeps the existing public URL stable and its
+publication boundary limited to website assets.
 
 `website/` is the publication boundary. It contains the landing page, player,
 existing column mark, a minimal demo catalog, public-domain story captions,
@@ -15,6 +16,28 @@ repository into the public repository.
 The English demo is available. The Russian entry remains in preparation and
 exposes no recording or captions until its completed export is ready. This is
 a listening site, not a browser-hosted copy of the desktop application.
+
+## Languages, themes and search metadata
+
+English is served at the site root; Russian is served at `ru/`. Both documents
+contain translated landing content without JavaScript and header language links.
+The story recording and read-along stay in their original English. Russian
+narration remains in preparation. The header theme switch persists the user's
+choice; without a saved choice it follows the system light/dark preference.
+
+Each page has its own title, description, canonical URL and sharing PNG, plus
+reciprocal `en`, `ru` and `x-default` links. `sitemap.xml` contains only the two
+canonical landing URLs. Structured data describes the actual pages/project;
+there are no invented prices, ratings or reviews. A project-path `robots.txt`
+would not control crawling at the hostname root, so page-level robots metadata
+allows indexing instead. Indexing and search previews are controlled by search
+engines, not guaranteed by this configuration.
+
+After editing metadata text, run `python scripts/build_website_metadata.py`.
+The checked-in 1200×630 PNG cards can be regenerated on the development machine
+with `scripts/build_website_social_cards.py` (Pillow and installed fonts). No
+font files are distributed. Site checking validates the metadata, alternate
+links, sitemap, image dimensions and public-only asset boundary in CI.
 
 ## Validate and preview
 
@@ -44,7 +67,7 @@ and projecting caption fields. It never copies the workspace or its public
 directory wholesale. Duration is measured from the actual MP3. Audio and caption
 filenames include their byte hashes. Unready catalog entries cannot reference
 audio. The checker rejects unselected files, altered asset hashes, linked paths,
-private local paths and links to the private product repository.
+private local paths. Links to the now-public product repository are permitted.
 
 Keep the previous public snapshot available when preparing a new one. The checker
 rejects obsolete unreferenced assets; only the selected snapshot belongs in the
@@ -52,16 +75,16 @@ publication directory.
 
 ## Publish
 
-The private repository's `Public website checks` workflow validates the static
-site; it does not publish the private repository or store deployment credentials.
+The product repository's `Public website checks` workflow validates the static
+site; it does not copy the product checkout or store deployment credentials.
 After validation, copy only `website/` contents into a clean checkout of the
 public `dogma-demo` repository, inspect the complete file list, and commit/push
 that static snapshot to its `main` branch. Never copy the product checkout.
 
 The public repository uses GitHub Pages **Deploy from a branch**, `main`, `/`
 (root), with `.nojekyll`. No production backend, model server, external font,
-analytics service or secret is required. Changes to the product source remain
-private unless a maintainer explicitly makes a separate publication decision.
+analytics service or secret is required. Model weights, training corpora,
+protected labels and local library data remain excluded in both repositories.
 
 Opening and background music use YuE2-3B, CC BY-NC 4.0. Preserve the visible
 attribution and non-commercial-use notice when distributing these recordings.

@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -36,7 +37,7 @@ class PagesBoundary(unittest.TestCase):
         (self.site/'demos/catalog.json').write_bytes(m.encoded(self.catalog))
 
     def test_partial_catalog_can_only_publish_ready_english(self):
-        self.assertEqual(m.check(self.site)['ready_demos'],1)
+        self.assertEqual(m.check(self.site,seo=False)['ready_demos'],1)
         self.catalog[1]['audio']=self.catalog[0]['audio'];self.save_catalog()
         with self.assertRaisesRegex(ValueError,'Unready'):m.check(self.site)
 
@@ -52,14 +53,12 @@ class PagesBoundary(unittest.TestCase):
         audio.write_bytes(original);(self.site/self.caption_path).write_bytes(b'[]')
         with self.assertRaisesRegex(ValueError,'Caption checksum'):m.check(self.site)
 
-    def test_private_paths_and_private_repository_link_are_rejected(self):
-        for text in ('manual-labeling/fixture','C:\\Users\\private\\secret',
-                     'https://github.com/multipliedtwice/dogma',
-                     '<a href="https://github.com/multipliedtwice/dogma/">Source</a>'):
+    def test_private_paths_are_rejected_and_public_source_link_is_allowed(self):
+        for text in ('manual-labeling/fixture','C:\\Users\\private\\secret'):
             (self.site/'index.html').write_text(text,encoding='utf-8')
             with self.subTest(text=text),self.assertRaisesRegex(ValueError,'Private'):m.check(self.site)
-        (self.site/'index.html').write_text('https://github.com/multipliedtwice/dogma-demo',encoding='utf-8')
-        self.assertEqual(m.check(self.site)['ready_demos'],1)
+        (self.site/'index.html').write_text('https://github.com/multipliedtwice/dogma',encoding='utf-8')
+        self.assertEqual(m.check(self.site,seo=False)['ready_demos'],1)
 
     def test_caption_schema_cannot_carry_private_metadata(self):
         rows=copy.deepcopy(self.rows);rows[0]['reference_text']='Private example'
@@ -70,6 +69,48 @@ class PagesBoundary(unittest.TestCase):
     def test_relative_assets_cannot_escape_site(self):
         for path in ('../secret.mp3','/demos/en/file.mp3','demos/en/../../private', 'https://example.org/a.mp3'):
             with self.subTest(path=path),self.assertRaises(ValueError):m.local(self.site,path)
+
+
+class LocalizedSEO(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.site=Path(self.temp.name)
+        for name in ('index.html','ru/index.html','sitemap.xml','assets/social-en.png','assets/social-ru.png'):
+            target=self.site/name;target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(ROOT/'website'/name,target)
+
+    def change(self,name,before,after):
+        path=self.site/name;text=path.read_text(encoding='utf-8')
+        self.assertIn(before,text);path.write_text(text.replace(before,after,1),encoding='utf-8')
+
+    def test_both_static_languages_have_consistent_crawl_and_share_metadata(self):
+        self.assertEqual(m.check_seo(self.site)['canonical_pages'],2)
+        russian=(self.site/'ru/index.html').read_text(encoding='utf-8')
+        self.assertIn('Книги',russian)
+
+    def test_russian_page_cannot_canonicalize_to_english(self):
+        self.change('ru/index.html','rel="canonical" href="'+m.SITE_URL+'ru/"',
+                    'rel="canonical" href="'+m.SITE_URL+'"')
+        with self.assertRaisesRegex(ValueError,'canonical'):m.check_seo(self.site)
+
+    def test_missing_return_language_link_is_rejected(self):
+        self.change('ru/index.html','hreflang="en"','hreflang="de"')
+        with self.assertRaisesRegex(ValueError,'language'):m.check_seo(self.site)
+
+    def test_missing_html_language_or_duplicate_description_is_rejected(self):
+        self.change('ru/index.html','<html lang="ru">','<html lang="en">')
+        with self.assertRaisesRegex(ValueError,'language'):m.check_seo(self.site)
+        self.change('ru/index.html','<html lang="en">','<html lang="ru">')
+        self.change('index.html','</head>','<meta name="description" content="Duplicate"></head>')
+        with self.assertRaisesRegex(ValueError,'duplicate'):m.check_seo(self.site)
+
+    def test_changed_social_card_dimensions_are_rejected(self):
+        path=self.site/'assets/social-ru.png';raw=bytearray(path.read_bytes());raw[16:20]=(500).to_bytes(4,'big');path.write_bytes(raw)
+        with self.assertRaisesRegex(ValueError,'1200'):m.check_seo(self.site)
+
+    def test_sitemap_cannot_point_to_wrong_deployment_path(self):
+        self.change('sitemap.xml',m.SITE_URL+'ru/',m.SITE_URL+'russian/')
+        with self.assertRaisesRegex(ValueError,'Sitemap'):m.check_seo(self.site)
 
 
 if __name__=='__main__':unittest.main()

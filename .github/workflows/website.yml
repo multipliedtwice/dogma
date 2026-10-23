@@ -1,18 +1,20 @@
 name: Public website checks
 
-# The product repository stays private. GitHub Pages is served from the
-# separate public dogma-demo repository containing only validated site files.
+# GitHub Pages is served from a separate dogma-demo repository containing only
+# validated site files. Training and labeling data are never site inputs.
 on:
   push:
     paths:
       - 'website/**'
       - 'scripts/github_pages.py'
+      - 'scripts/build_website_metadata.py'
       - 'verification/test_github_pages.py'
       - '.github/workflows/website.yml'
   pull_request:
     paths:
       - 'website/**'
       - 'scripts/github_pages.py'
+      - 'scripts/build_website_metadata.py'
       - 'verification/test_github_pages.py'
       - '.github/workflows/website.yml'
   workflow_dispatch:

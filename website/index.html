@@ -3,22 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Dogma is a local book reader and audiobook project. Hear O. Henry’s The Gift of the Magi, narrated with Dogma, with text to read alongside it.">
+  <meta name="description" content="Read EPUB and FB2 books locally and hear AI narration with Dogma. Listen to a complete English audiobook demo with synchronized text.">
   <meta name="theme-color" content="#161b18">
-  <title>Dogma — Books, brought to voice.</title>
+  <title>Dogma — Local EPUB reader &amp; AI audiobook narration</title>
+  <script src="theme.js"></script>
   <link rel="icon" href="assets/column.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script src="script.js" defer></script>
+  <!-- seo:start -->
+  <meta name="robots" content="index,follow,max-image-preview:large">
+  <link rel="canonical" href="https://multipliedtwice.github.io/dogma-demo/">
+  <link rel="alternate" hreflang="en" href="https://multipliedtwice.github.io/dogma-demo/">
+  <link rel="alternate" hreflang="ru" href="https://multipliedtwice.github.io/dogma-demo/ru/">
+  <link rel="alternate" hreflang="x-default" href="https://multipliedtwice.github.io/dogma-demo/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Dogma">
+  <meta property="og:title" content="Dogma — Local EPUB reader &amp; AI audiobook narration">
+  <meta property="og:description" content="Read EPUB and FB2 books locally and hear AI narration with Dogma. Listen to a complete English audiobook demo with synchronized text.">
+  <meta property="og:url" content="https://multipliedtwice.github.io/dogma-demo/">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ru_RU">
+  <meta property="og:image" content="https://multipliedtwice.github.io/dogma-demo/assets/social-en.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Dogma: local reading and AI audiobook narration. English and Russian website.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Dogma — Local EPUB reader &amp; AI audiobook narration">
+  <meta name="twitter:description" content="Read EPUB and FB2 books locally and hear AI narration with Dogma. Listen to a complete English audiobook demo with synchronized text.">
+  <meta name="twitter:image" content="https://multipliedtwice.github.io/dogma-demo/assets/social-en.png">
+  <meta name="twitter:image:alt" content="Dogma: local reading and AI audiobook narration. English and Russian website.">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://multipliedtwice.github.io/dogma-demo/#website","name":"Dogma","url":"https://multipliedtwice.github.io/dogma-demo/","inLanguage":["en","ru"]},{"@type":"WebPage","@id":"https://multipliedtwice.github.io/dogma-demo/#webpage","url":"https://multipliedtwice.github.io/dogma-demo/","name":"Dogma — Local EPUB reader & AI audiobook narration","description":"Read EPUB and FB2 books locally and hear AI narration with Dogma. Listen to a complete English audiobook demo with synchronized text.","inLanguage":"en","isPartOf":{"@id":"https://multipliedtwice.github.io/dogma-demo/#website"},"about":{"@type":"SoftwareSourceCode","name":"Dogma","codeRepository":"https://github.com/multipliedtwice/dogma"}}]}</script>
+  <!-- seo:end -->
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header wrap">
     <a class="wordmark" href="./" aria-label="Dogma home"><img src="assets/column.svg" alt="" width="36" height="36"><span>dogma<span class="wordmark-period">.</span></span></a>
-    <nav aria-label="Main navigation">
+    <nav class="primary-nav" aria-label="Main navigation">
       <a href="#listen">Listen</a>
       <a href="#about">The project</a>
-      <a class="source-link" href="#listen">The demo <span aria-hidden="true">↗</span></a>
     </nav>
+    <div class="header-tools"><nav class="language-links" aria-label="Language"><a href="./" lang="en" hreflang="en" aria-current="page">EN</a><a href="ru/" lang="ru" hreflang="ru">RU</a></nav><button class="theme-toggle" type="button" aria-label="Switch color theme"><svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg><svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z"/></svg></button></div>
   </header>
 
   <main id="main">
@@ -50,7 +76,7 @@
         <article class="featured-demo" aria-labelledby="demo-title">
           <div class="demo-info">
             <div class="demo-kicker"><span class="status-pill" id="demo-status">Preparing audio</span><span>ENGLISH · SHORT STORY</span></div>
-            <h3 id="demo-title">The Gift of the Magi</h3><p class="demo-author">O. Henry</p>
+            <h3 id="demo-title" lang="en">The Gift of the Magi</h3><p class="demo-author" lang="en">O. Henry</p>
             <p class="demo-description">Two gifts, one Christmas, and the things that matter most. A small story with a generous heart.</p>
             <div class="demo-details"><span id="demo-duration">Complete short story</span><span class="detail-dot" aria-hidden="true">·</span><span>Narrated with Dogma</span></div>
             <div id="player-region" hidden>
@@ -63,7 +89,7 @@
           </div>
           <div class="reader-panel">
             <div class="reader-toolbar"><span class="reader-label">READ ALONG</span><label class="follow-toggle"><input type="checkbox" id="follow-audio" checked> Follow audio</label></div>
-            <div id="story-reader" class="story-reader" tabindex="0" aria-label="Story text. Select a passage to seek the audio."><div class="reader-placeholder"><span class="quote-mark" aria-hidden="true">“</span><p>One dollar and eighty-seven cents.<br>That was all.</p><span>O. HENRY</span></div></div>
+            <div id="story-reader" class="story-reader" lang="en" tabindex="0" aria-label="Story text. Select a passage to seek the audio."><div class="reader-placeholder"><span class="quote-mark" aria-hidden="true">“</span><p>One dollar and eighty-seven cents.<br>That was all.</p><span>O. HENRY</span></div></div>
             <p class="reader-hint" id="reader-hint">The story text will appear with the recording.</p>
           </div>
         </article>
@@ -89,7 +115,7 @@
   </main>
 
   <footer class="site-footer wrap">
-    <div class="footer-top"><a class="wordmark" href="./" aria-label="Dogma home"><img src="assets/column.svg" alt="" width="29" height="29"><span>dogma<span class="wordmark-period">.</span></span></a><p>For the love of a good story.</p><a href="https://github.com/multipliedtwice">An independent project by multipliedtwice <span aria-hidden="true">↗</span></a></div>
+    <div class="footer-top"><a class="wordmark" href="./" aria-label="Dogma home"><img src="assets/column.svg" alt="" width="29" height="29"><span>dogma<span class="wordmark-period">.</span></span></a><p>For the love of a good story.</p><a href="https://github.com/multipliedtwice/dogma">Source on GitHub <span aria-hidden="true">↗</span></a></div>
     <div class="footer-bottom"><p>The English demo uses O. Henry’s original story. <a href="https://www.gutenberg.org/ebooks/7256">Text source</a>.</p><details id="credits"><summary>Audio &amp; music credits</summary><p>Narration generated with Dogma. The branded opening and scene music were generated with <a href="https://huggingface.co/m-a-p/YuE2-3B">YuE2-3B by Multimodal Art Projection (m-a-p)</a>, using the <a href="https://huggingface.co/audio-cpp/Yue2-3B-GGUF">audio.cpp GGUF conversion</a>. Music is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> (non-commercial use with attribution).</p><p>The prerecorded demo passed automated source-bound checks. No human listening approval is recorded.</p></details><p class="music-license">Demo music: <a href="#credits">YuE2 · CC BY-NC 4.0</a></p></div>
   </footer>
 </body>

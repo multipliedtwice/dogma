@@ -5,8 +5,32 @@
   const reader = document.querySelector('#story-reader');
   const follow = document.querySelector('#follow-audio');
   const note = document.querySelector('#playback-note');
-  const base = new URL('.', document.baseURI);
+  const base = new URL('.', document.currentScript.src);
   const MEDIA_TIME_EPSILON = .001;
+  const russian = document.documentElement.lang === 'ru';
+  const messages = russian ? {
+    preparing: 'Готовится', ready: 'Можно слушать', complete: 'Рассказ целиком',
+    preparingAudio: 'Английская запись готовится. Пожалуйста, загляните чуть позже.',
+    unavailable: 'Английская запись временно недоступна. Пожалуйста, попробуйте чуть позже.',
+    failedAudio: 'Не удалось загрузить запись. Обновите страницу или попробуйте чуть позже.',
+    missingText: 'Текст пока недоступен. Аудио можно слушать.',
+    hint: 'Выберите фрагмент текста, чтобы перейти к его началу в аудио.',
+    resume: value => `Продолжаем с ${value}. Позиция сохраняется в этом браузере.`,
+    seek: value => `Перейти к ${value}`,
+    selected: value => `Выбран фрагмент с ${value}. Нажмите «Воспроизвести», чтобы слушать.`,
+    ended: 'Конец. Спасибо, что слушали.', album: 'Озвучено в Dogma'
+  } : {
+    preparing: 'In preparation', ready: 'Ready to listen', complete: 'Complete story',
+    preparingAudio: 'The English recording is being prepared. Please check back shortly.',
+    unavailable: 'The English recording is temporarily unavailable. Please check back shortly.',
+    failedAudio: 'The recording could not be loaded. Please refresh or try again shortly.',
+    missingText: 'Read-along text is unavailable. The audio is still ready to listen.',
+    hint: 'Select any passage to move the audio to its beginning.',
+    resume: value => `Resumed at ${value}. Your place is saved in this browser.`,
+    seek: value => `Seek to ${value}`,
+    selected: value => `Ready at ${value}. Press play to listen.`,
+    ended: 'The end. Thank you for listening.', album: 'Narrated with Dogma'
+  };
   let book, captions = [], captionButtons = [], current = -1, lastSaved = 0;
 
   const time = value => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
@@ -65,7 +89,7 @@
       audio.playbackRate = saved.rate;
       document.querySelector('#playback-rate').value = String(saved.rate);
     }
-    if (position > 1) note.textContent = `Resumed at ${time(position)}. Your place is saved in this browser.`;
+    if (position > 1) note.textContent = messages.resume(time(position));
   }
   function updateReader() {
     const index = captionAt(audio.currentTime);
@@ -104,19 +128,19 @@
       }
       const button = document.createElement('button');
       button.className = 'caption'; button.type = 'button'; button.textContent = caption.text.trim();
-      button.title = `Seek to ${time(caption.start)}`;
+      button.title = messages.seek(time(caption.start));
       button.addEventListener('click', () => {
         audio.currentTime = caption.start;
         updateReader(); savePosition();
-        if (audio.paused) note.textContent = `Ready at ${time(caption.start)}. Press play to listen.`;
+        if (audio.paused) note.textContent = messages.selected(time(caption.start));
       });
       paragraph.append(button, document.createTextNode(' ')); captionButtons[index] = button;
     });
-    document.querySelector('#reader-hint').textContent = 'Select any passage to move the audio to its beginning.';
+    document.querySelector('#reader-hint').textContent = messages.hint;
     follow.disabled = false;
   }
   function unavailable(message) {
-    document.querySelector('#demo-status').textContent = 'In preparation';
+    document.querySelector('#demo-status').textContent = messages.preparing;
     document.querySelector('#audio-unavailable').textContent = message;
     document.querySelector('#audio-unavailable').hidden = false;
     document.querySelector('#player-region').hidden = true;
@@ -127,38 +151,38 @@
       const catalog = await json(new URL('demos/catalog.json', base));
       if (!Array.isArray(catalog)) throw new Error('Invalid catalog');
       book = catalog.find(row => row.id === 'en' && row.status === 'ready');
-      if (!book) { unavailable('The English recording is being prepared. Please check back shortly.'); return; }
+      if (!book) { unavailable(messages.preparingAudio); return; }
       const audioURL = localAsset(book.audio);
       document.querySelector('#demo-title').textContent = book.title;
       document.querySelector('.demo-author').textContent = book.author;
-      if (Number.isFinite(book.duration) && book.duration > 0) document.querySelector('#demo-duration').textContent = `${time(book.duration)} · Complete story`;
-      document.querySelector('#demo-status').textContent = 'Ready to listen';
+      if (Number.isFinite(book.duration) && book.duration > 0) document.querySelector('#demo-duration').textContent = `${time(book.duration)} · ${messages.complete}`;
+      document.querySelector('#demo-status').textContent = messages.ready;
       document.querySelector('#audio-unavailable').hidden = true;
       document.querySelector('#player-region').hidden = false;
       document.querySelector('#download-audio').href = audioURL;
       const source = new URL(book.source);
       if (source.protocol === 'https:') document.querySelector('#story-source').href = source.href;
       if ('mediaSession' in navigator && typeof MediaMetadata !== 'undefined') {
-        navigator.mediaSession.metadata = new MediaMetadata({ title: book.title, artist: book.author, album: 'Narrated with Dogma' });
+        navigator.mediaSession.metadata = new MediaMetadata({ title: book.title, artist: book.author, album: messages.album });
       }
       try {
         const data = await json(localAsset(book.captions));
         mountCaptions(Array.isArray(data) ? data : data.captions);
       } catch {
-        document.querySelector('#reader-hint').textContent = 'Read-along text is unavailable. The audio is still ready to listen.';
+        document.querySelector('#reader-hint').textContent = messages.missingText;
       }
       audio.addEventListener('loadedmetadata', restorePosition, { once: true });
-      audio.addEventListener('durationchange', () => { if (Number.isFinite(audio.duration)) document.querySelector('#demo-duration').textContent = `${time(audio.duration)} · Complete story`; });
+      audio.addEventListener('durationchange', () => { if (Number.isFinite(audio.duration)) document.querySelector('#demo-duration').textContent = `${time(audio.duration)} · ${messages.complete}`; });
       audio.addEventListener('timeupdate', updateReader);
       audio.addEventListener('pause', savePosition);
       audio.addEventListener('seeked', () => { updateReader(); savePosition(); });
-      audio.addEventListener('error', () => unavailable('The recording could not be loaded. Please refresh or try again shortly.'));
-      audio.addEventListener('ended', () => { note.textContent = 'The end. Thank you for listening.'; savePosition(); });
+      audio.addEventListener('error', () => unavailable(messages.failedAudio));
+      audio.addEventListener('ended', () => { note.textContent = messages.ended; savePosition(); });
       document.querySelector('#playback-rate').addEventListener('change', event => { audio.playbackRate = Number(event.target.value); savePosition(); });
       document.addEventListener('visibilitychange', () => { if (document.hidden) savePosition(); });
       window.addEventListener('pagehide', savePosition);
       audio.src = audioURL;
-    } catch { unavailable('The English recording is temporarily unavailable. Please check back shortly.'); }
+    } catch { unavailable(messages.unavailable); }
   }
   initialize();
 })();
