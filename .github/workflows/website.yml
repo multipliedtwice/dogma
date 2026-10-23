@@ -10,6 +10,7 @@ on:
       - 'scripts/github_pages.py'
       - 'scripts/build_website_metadata.py'
       - 'verification/test_github_pages.py'
+      - 'verification/check_website_languages.mjs'
       - '.github/workflows/website.yml'
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - 'scripts/github_pages.py'
       - 'scripts/build_website_metadata.py'
       - 'verification/test_github_pages.py'
+      - 'verification/check_website_languages.mjs'
       - '.github/workflows/website.yml'
   workflow_dispatch:
 
@@ -32,8 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Check publication boundaries
         run: python3 -m unittest verification.test_github_pages
+      - name: Check audiobook language selection
+        run: node --test verification/check_website_languages.mjs
       - name: Validate static site and immutable audio hashes
         run: python3 scripts/github_pages.py check --site website
       - name: Upload website assets

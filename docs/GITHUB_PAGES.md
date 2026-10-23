@@ -18,8 +18,14 @@ a listening site, not a browser-hosted copy of the desktop application.
 
 English is served at the site root; Russian is served at `ru/`. Both documents
 contain translated landing content without JavaScript and header language links.
-The story recording and read-along stay in their original English. Russian
-narration remains in preparation. The header theme switch persists the user's
+Each page selects only its matching catalog language: English features
+O. Henry's *The Gift of the Magi*; Russian features Chekhov's *Хамелеон*.
+Russian narration remains in preparation, with its player and read-along
+controls unavailable until the Russian catalog entry is ready. It never falls
+back to an English recording or fetches English audio/captions. An explicit
+link on the Russian page leads to the available English demo. Ready recordings
+and read-along text remain in their original language, with separate listening
+positions for each book. The header theme switch persists the user's
 choice; without a saved choice it follows the system light/dark preference.
 
 Each page has its own title, description, canonical URL and sharing PNG, plus
@@ -41,6 +47,7 @@ links, sitemap, image dimensions and public-only asset boundary in CI.
 ```sh
 python scripts/github_pages.py check --site website
 python -m unittest verification.test_github_pages
+node --test verification/check_website_languages.mjs
 python -m http.server 8080 --bind 127.0.0.1 --directory website
 ```
 

@@ -8,13 +8,18 @@
   const base = new URL('.', document.currentScript.src);
   const MEDIA_TIME_EPSILON = .001;
   const russian = document.documentElement.lang === 'ru';
+  const selectedLanguage = russian ? 'ru' : 'en';
   const messages = russian ? {
     preparing: 'Готовится', ready: 'Можно слушать', complete: 'Рассказ целиком',
-    preparingAudio: 'Английская запись готовится. Пожалуйста, загляните чуть позже.',
-    unavailable: 'Английская запись временно недоступна. Пожалуйста, попробуйте чуть позже.',
+    preparingAudio: 'Русская запись готовится. Аудио и текст появятся здесь, когда демо будет готово.',
+    unavailable: 'Русская запись пока недоступна. Пожалуйста, попробуйте чуть позже.',
     failedAudio: 'Не удалось загрузить запись. Обновите страницу или попробуйте чуть позже.',
     missingText: 'Текст пока недоступен. Аудио можно слушать.',
     hint: 'Выберите фрагмент текста, чтобы перейти к его началу в аудио.',
+    pendingText: 'Здесь появится текст русского рассказа вместе с готовой записью.',
+    pendingHint: 'Аудио и чтение по тексту пока недоступны.', pendingDuration: 'Запись готовится',
+    listen: title => `Слушать «${title}» на русском`, source: 'Источник текста ↗',
+    readerLabel: 'Текст рассказа. Выберите фрагмент, чтобы перейти к нему в аудио.',
     resume: value => `Продолжаем с ${value}. Позиция сохраняется в этом браузере.`,
     seek: value => `Перейти к ${value}`,
     selected: value => `Выбран фрагмент с ${value}. Нажмите «Воспроизвести», чтобы слушать.`,
@@ -26,6 +31,10 @@
     failedAudio: 'The recording could not be loaded. Please refresh or try again shortly.',
     missingText: 'Read-along text is unavailable. The audio is still ready to listen.',
     hint: 'Select any passage to move the audio to its beginning.',
+    pendingText: 'The story text will appear with the completed recording.',
+    pendingHint: 'Audio and read-along are not available yet.', pendingDuration: 'Recording in preparation',
+    listen: title => `Listen to ${title}`, source: 'Read the source at Project Gutenberg ↗',
+    readerLabel: 'Story text. Select a passage to seek the audio.',
     resume: value => `Resumed at ${value}. Your place is saved in this browser.`,
     seek: value => `Seek to ${value}`,
     selected: value => `Ready at ${value}. Press play to listen.`,
@@ -35,9 +44,9 @@
 
   const time = value => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
   function localAsset(path) {
-    if (typeof path !== 'string' || !path.startsWith('demos/')) throw new Error('Unexpected demo asset path');
+    if (typeof path !== 'string' || !path.startsWith(`demos/${selectedLanguage}/`)) throw new Error('Unexpected demo asset path');
     const url = new URL(path, base);
-    if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}demos/`) || url.search || url.hash) throw new Error('Unexpected demo asset URL');
+    if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}demos/${selectedLanguage}/`) || url.search || url.hash) throw new Error('Unexpected demo asset URL');
     return url.href;
   }
   async function json(url) {
@@ -144,24 +153,45 @@
     document.querySelector('#audio-unavailable').textContent = message;
     document.querySelector('#audio-unavailable').hidden = false;
     document.querySelector('#player-region').hidden = true;
+    follow.disabled = true;
+    document.querySelector('.follow-toggle').hidden = true;
+    reader.removeAttribute('tabindex');
+    const placeholder = document.createElement('p');
+    placeholder.className = 'reader-placeholder'; placeholder.textContent = messages.pendingText;
+    reader.replaceChildren(placeholder);
+    document.querySelector('#reader-hint').textContent = messages.pendingHint;
   }
   async function initialize() {
     follow.disabled = true;
     try {
       const catalog = await json(new URL('demos/catalog.json', base));
       if (!Array.isArray(catalog)) throw new Error('Invalid catalog');
-      book = catalog.find(row => row.id === 'en' && row.status === 'ready');
+      book = catalog.find(row => row.id === selectedLanguage);
       if (!book) { unavailable(messages.preparingAudio); return; }
-      const audioURL = localAsset(book.audio);
       document.querySelector('#demo-title').textContent = book.title;
       document.querySelector('.demo-author').textContent = book.author;
+      document.querySelector('#demo-title').lang = selectedLanguage;
+      document.querySelector('.demo-author').lang = selectedLanguage;
+      reader.lang = selectedLanguage;
+      audio.setAttribute('aria-label', messages.listen(book.title));
+      const source = new URL(book.source);
+      if (source.protocol === 'https:') document.querySelector('#story-source').href = source.href;
+      document.querySelector('#story-source').textContent = messages.source;
+      if (book.status !== 'ready') {
+        document.querySelector('#demo-duration').textContent = messages.pendingDuration;
+        unavailable(messages.preparingAudio); return;
+      }
+      const audioURL = localAsset(book.audio);
+      document.querySelectorAll('[data-ready-text]').forEach(element => { element.textContent = element.dataset.readyText; });
+      document.querySelectorAll('[data-pending-only]').forEach(element => { element.hidden = true; });
       if (Number.isFinite(book.duration) && book.duration > 0) document.querySelector('#demo-duration').textContent = `${time(book.duration)} · ${messages.complete}`;
       document.querySelector('#demo-status').textContent = messages.ready;
       document.querySelector('#audio-unavailable').hidden = true;
       document.querySelector('#player-region').hidden = false;
+      document.querySelector('.follow-toggle').hidden = false;
+      reader.setAttribute('tabindex', '0');
+      reader.setAttribute('aria-label', messages.readerLabel);
       document.querySelector('#download-audio').href = audioURL;
-      const source = new URL(book.source);
-      if (source.protocol === 'https:') document.querySelector('#story-source').href = source.href;
       if ('mediaSession' in navigator && typeof MediaMetadata !== 'undefined') {
         navigator.mediaSession.metadata = new MediaMetadata({ title: book.title, artist: book.author, album: messages.album });
       }
@@ -170,6 +200,7 @@
         mountCaptions(Array.isArray(data) ? data : data.captions);
       } catch {
         document.querySelector('#reader-hint').textContent = messages.missingText;
+        document.querySelector('.follow-toggle').hidden = true;
       }
       audio.addEventListener('loadedmetadata', restorePosition, { once: true });
       audio.addEventListener('durationchange', () => { if (Number.isFinite(audio.duration)) document.querySelector('#demo-duration').textContent = `${time(audio.duration)} · ${messages.complete}`; });
