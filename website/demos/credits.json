@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "music": {
+    "model": "YuE2-3B",
+    "creator": "Multimodal Art Projection (m-a-p)",
+    "model_url": "https://huggingface.co/m-a-p/YuE2-3B",
+    "conversion_url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF",
+    "license": "CC BY-NC 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-nc/4.0/"
+  },
+  "usage": "Opening and background music use YuE2-3B by Multimodal Art Projection, via audio.cpp GGUF. Phrases are mixed with narration, level changes and fades. These demos include CC BY-NC 4.0 music and are for non-commercial use. Retain attribution when sharing.",
+  "verification": "Published demos passed automated source-bound checks. No human listening approval is recorded. Original texts are credited at their sources; public-domain status varies by territory."
+}

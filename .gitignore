@@ -41,6 +41,9 @@ docs/recheck-*
 docs/verification-output.txt
 source-releases/
 *.mp3
+# Deliberately exported, hash-checked public demo recordings only.
+!/website/demos/en/*.mp3
+!/website/demos/ru/*.mp3
 *.epub
 
 test-results/

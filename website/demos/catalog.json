@@ -1,0 +1,22 @@
+[
+  {
+    "language": "English",
+    "title": "The Gift of the Magi",
+    "author": "O. Henry",
+    "source": "https://www.gutenberg.org/ebooks/7256",
+    "id": "en",
+    "status": "ready",
+    "duration": 723.296042,
+    "audio_sha256": "2af6b31605b1c8441c9748ea4a4154682306ba5dddd3c65d100f0334534e7eac",
+    "audio": "demos/en/2af6b31605b1c8441c9748ea4a4154682306ba5dddd3c65d100f0334534e7eac.mp3",
+    "captions": "demos/en/captions-3b95e33da666b884c68d328d247a3c2a7ed99314c39241f46ddf89c260f116bc.json"
+  },
+  {
+    "id": "ru",
+    "language": "Russian",
+    "title": "Хамелеон",
+    "author": "Антон Павлович Чехов",
+    "source": "https://ru.wikisource.org/wiki/Хамелеон_(Чехов)/Версия_2",
+    "status": "preparing"
+  }
+]

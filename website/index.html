@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Dogma is a local book reader and audiobook project. Hear O. Henry’s The Gift of the Magi, narrated with Dogma, with text to read alongside it.">
+  <meta name="theme-color" content="#161b18">
+  <title>Dogma — Books, brought to voice.</title>
+  <link rel="icon" href="assets/column.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="wordmark" href="./" aria-label="Dogma home"><img src="assets/column.svg" alt="" width="36" height="36"><span>dogma<span class="wordmark-period">.</span></span></a>
+    <nav aria-label="Main navigation">
+      <a href="#listen">Listen</a>
+      <a href="#about">The project</a>
+      <a class="source-link" href="#listen">The demo <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="small-line" aria-hidden="true"></span> A book. A voice. A little room to listen.</p>
+        <h1 id="hero-title">Books,<br>brought to <em>voice.</em></h1>
+        <p class="hero-description">A local reader and audiobook project for the stories you want to spend more time with.</p>
+        <div class="hero-actions"><a class="button button-primary" href="#listen"><span class="play-small" aria-hidden="true">▶</span> Hear a story</a><a class="text-link" href="#about">Meet Dogma <span aria-hidden="true">↗</span></a></div>
+        <p class="hero-note">An independent project. Made for listening.</p>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+        <div class="book-spine"></div>
+        <div class="book-cover">
+          <div class="cover-topline"><span>THE DOGMA LIBRARY</span><span>01</span></div>
+          <div class="gift-ornament"><i></i><i></i><b></b><span></span></div>
+          <div class="cover-title">The Gift<br>of the <em>Magi</em></div>
+          <div class="cover-author">O. HENRY</div>
+          <div class="cover-bottom"><span>A SHORT STORY</span><span>1905</span></div>
+        </div>
+        <div class="sound-tag"><span class="sound-bars"><i></i><i></i><i></i><i></i><i></i></span><span>A story, in another form.</span></div>
+      </div>
+    </section>
+
+    <section class="listen-section" id="listen" aria-labelledby="listen-title">
+      <div class="wrap">
+        <div class="section-heading"><div><p class="eyebrow">THE LISTENING ROOM</p><h2 id="listen-title">Take a story with you.</h2></div><p>Original words. A new way to hear them.</p></div>
+        <article class="featured-demo" aria-labelledby="demo-title">
+          <div class="demo-info">
+            <div class="demo-kicker"><span class="status-pill" id="demo-status">Preparing audio</span><span>ENGLISH · SHORT STORY</span></div>
+            <h3 id="demo-title">The Gift of the Magi</h3><p class="demo-author">O. Henry</p>
+            <p class="demo-description">Two gifts, one Christmas, and the things that matter most. A small story with a generous heart.</p>
+            <div class="demo-details"><span id="demo-duration">Complete short story</span><span class="detail-dot" aria-hidden="true">·</span><span>Narrated with Dogma</span></div>
+            <div id="player-region" hidden>
+              <audio id="story-audio" controls preload="metadata" aria-label="Listen to The Gift of the Magi"></audio>
+              <div class="player-extras"><label for="playback-rate">Playback speed <select id="playback-rate"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a id="download-audio" download>Download MP3 <span aria-hidden="true">↓</span></a></div>
+              <p class="playback-note" id="playback-note">Your listening position is saved in this browser.</p>
+            </div>
+            <p id="audio-unavailable" class="unavailable-message" role="status">The English recording is being prepared. Please check back shortly.</p>
+            <div class="demo-source"><a id="story-source" href="https://www.gutenberg.org/ebooks/7256">Read the source at Project Gutenberg <span aria-hidden="true">↗</span></a></div>
+          </div>
+          <div class="reader-panel">
+            <div class="reader-toolbar"><span class="reader-label">READ ALONG</span><label class="follow-toggle"><input type="checkbox" id="follow-audio" checked> Follow audio</label></div>
+            <div id="story-reader" class="story-reader" tabindex="0" aria-label="Story text. Select a passage to seek the audio."><div class="reader-placeholder"><span class="quote-mark" aria-hidden="true">“</span><p>One dollar and eighty-seven cents.<br>That was all.</p><span>O. HENRY</span></div></div>
+            <p class="reader-hint" id="reader-hint">The story text will appear with the recording.</p>
+          </div>
+        </article>
+
+        <article class="coming-demo" aria-labelledby="ru-title">
+          <div class="coming-icon" aria-hidden="true">Х</div><div class="coming-copy"><p class="eyebrow">РУССКИЙ · РАССКАЗ</p><h3 id="ru-title" lang="ru">Хамелеон</h3><p lang="ru">Антон Чехов</p></div><div class="coming-status"><span class="status-pill status-muted">In preparation</span><p>The Russian recording is on its way.</p></div>
+        </article>
+        <p class="demo-context">These are prerecorded audiobook demos. The Dogma desktop application runs separately on your computer.</p>
+        <noscript><p class="noscript-note">Enable JavaScript to load the audiobook player and read-along text.</p></noscript>
+      </div>
+    </section>
+
+    <section class="about-section wrap" id="about" aria-labelledby="about-title">
+      <div class="about-intro"><p class="eyebrow">YOUR BOOKS, AT YOUR PACE</p><h2 id="about-title">A place for the<br>page <em>and</em> the voice.</h2><p>Dogma brings reading and saved narration into a local desktop library. The application is in active development. This listening room offers a first taste of its voice.</p></div>
+      <div class="feature-list">
+        <article><span class="feature-number">01</span><div><h3>Bring your own books</h3><p>Import EPUB and FB2, browse chapters, read, and keep your place with bookmarks.</p></div></article>
+        <article><span class="feature-number">02</span><div><h3>Return to a familiar voice</h3><p>Prepare narration with a reviewed cast, then listen to saved passages and resume where you left off.</p></div></article>
+        <article><span class="feature-number">03</span><div><h3>Keep listening your way</h3><p>Export saved audio as MP3 or M4B, with caption formats available for reading alongside it.</p></div></article>
+      </div>
+    </section>
+
+    <section class="project-callout wrap" aria-labelledby="project-title"><div><p class="eyebrow">A MOMENT FOR A STORY</p><h2 id="project-title">The next chapter can wait.</h2><p>Settle in with a complete short story. The page will keep your place.</p></div><a class="button button-outline" href="#listen">Back to the story <span aria-hidden="true">↑</span></a></section>
+  </main>
+
+  <footer class="site-footer wrap">
+    <div class="footer-top"><a class="wordmark" href="./" aria-label="Dogma home"><img src="assets/column.svg" alt="" width="29" height="29"><span>dogma<span class="wordmark-period">.</span></span></a><p>For the love of a good story.</p><a href="https://github.com/multipliedtwice">An independent project by multipliedtwice <span aria-hidden="true">↗</span></a></div>
+    <div class="footer-bottom"><p>The English demo uses O. Henry’s original story. <a href="https://www.gutenberg.org/ebooks/7256">Text source</a>.</p><details id="credits"><summary>Audio &amp; music credits</summary><p>Narration generated with Dogma. The branded opening and scene music were generated with <a href="https://huggingface.co/m-a-p/YuE2-3B">YuE2-3B by Multimodal Art Projection (m-a-p)</a>, using the <a href="https://huggingface.co/audio-cpp/Yue2-3B-GGUF">audio.cpp GGUF conversion</a>. Music is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> (non-commercial use with attribution).</p><p>The prerecorded demo passed automated source-bound checks. No human listening approval is recorded.</p></details><p class="music-license">Demo music: <a href="#credits">YuE2 · CC BY-NC 4.0</a></p></div>
+  </footer>
+</body>
+</html>
