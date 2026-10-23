@@ -2,6 +2,59 @@
 
 Product decisions confirmed by the user on 2026-10-14.
 
+## One-shot production and development feedback
+
+User decision, 2026-10-23: production targets the best possible first render
+through preparation. Automated post-render recognition, adjudication and retake
+loops are optional and **disabled by default**. A normal request to generate or
+regenerate narration does not enable them. Record an explicit opt-in and its
+bounded recovery policy in the generation configuration; resuming a job preserves
+that choice and must not silently enable additional processing.
+
+With post-processing off, render each prepared unit once. Do not start ASR,
+recognizer reconciliation or automatic retakes that revise pronunciation,
+seeds or references. Pre-render pronunciation and stress preparation remain on.
+Keep basic output integrity checks (model/provenance pin, successful synthesis,
+decodable audio and valid format); a failed output is an error, not permission
+to enter a recovery loop. Show recognition as **not checked**, never as passed
+or zero confirmed errors. Preserve the source and expose generation failures
+honestly. Music and progressive delivery remain independent of this option.
+
+Production mode never changes application code, preprocessing rules, prompts,
+model weights or shared defaults in response to an error. Opt-in post-processing
+can check and recover the current generation using released, fixed behavior;
+it cannot patch the application or teach itself new behavior. Ordinary
+generation and error recovery do not authorize code changes in production mode.
+
+The error-to-improvement feedback loop runs **only in development mode**. Retain
+all post-processing attempts and outcomes locally: original/source and native
+inputs, preparation version, model/reference hashes, sampling configuration,
+audio hashes, raw recognizer results, quality failures, repairs, decisions and
+their provenance. Production records may be imported into a development
+investigation explicitly; no automatic upload, rule promotion or learning runs
+in production. Keep training material and protected labels out of public exports.
+
+In development, distinguish preparation defects, synthesis failures, recognizer
+errors and technical failures before drawing conclusions. Use these cases to
+improve source analysis, spoken-text conversion, pronunciation, stress and
+synthesis-unit preparation before the first render. A recognizer's preferred
+spelling is not a source correction, and a failed repair is not a proven rule.
+Preserve unsuccessful strategies and actual listening evidence without inventing
+approval. Turn supported conclusions into reusable regression cases, then
+measure first-take correctness and rendering cost on both the retained cases and
+unseen material with automatic retakes disabled. Ship validated improvements
+through a normal versioned release; freeze their inputs and policy in synthesis
+and cache keys. Never silently rewrite an existing generation.
+
+This decision supersedes earlier unconditional automatic-verification and
+recovery wording. The strict recognition and retake contracts below apply only
+when post-processing is explicitly enabled, or to an explicitly selected
+development/evaluation run. They are not the production default.
+
+This section specifies required behavior. The documentation change does not
+implement a production toggle or certify that the existing runtime already
+enforces these defaults; implementation must be audited separately in development.
+
 ## Pinned production speech checkpoint
 
 User decision, 2026-10-21: every new production render, chapter preview,
@@ -170,6 +223,9 @@ take. The preview consumes `spoken-take-revisions.json` through
 
 ## Recognizer orthography
 
+This section describes the opt-in post-processing/development audit path.
+It does not run during default one-shot production rendering.
+
 A word flag means a recognizer wrote something other than the source words. It
 is not, by itself, evidence that the audio is wrong: recognizers must choose
 one spelling for sounds that standard Russian merges, and they cannot spell the
@@ -256,7 +312,8 @@ Analyze and render in chapter order, keep a buffer ahead of playback, and
 reprioritize work after seeking. For the current listening preview, publish
 the first 5–10 minutes, then extend it each additional 5–10 minutes.
 
-Publish completed, checked audio prefixes/chunks atomically. Asset URLs include
+Publish completed audio prefixes/chunks atomically, with their actual check
+status under the generation's selected processing mode. Asset URLs include
 their version/hash; an existing version never changes underneath a player.
 Updates preserve the current chapter, absolute playback position and paused or
 playing state. Reaching the current buffer end waits for more audio, rather
@@ -267,13 +324,15 @@ completed chapters. A later chapter finishing must not reset the active player.
 Do not renormalize a published prefix when later audio arrives: freeze gains
 per persistent voice/reference before the first publication.
 
-Production gates apply to each publishable chunk; final chapter/book reports
-aggregate them. Word verification, missing text, unsafe audio edges, identity
-continuity and unresolved assignment must not be hidden by streaming. Evaluation
+The selected mode's gates apply to each publishable chunk; final chapter/book
+reports aggregate them. Disabled recognition checks remain visibly not checked.
+Known missing text, unsafe audio edges, identity continuity and unresolved
+assignment must not be hidden by streaming. Evaluation
 previews explicitly show historical word flags and qualification limits; unavailable
 measurements are not reported as passed. Protected labels are never changed.
 
-Every word-audit flag is a generation-pipeline responsibility. Substitutions,
+When post-processing is enabled, every word-audit flag is a generation-pipeline
+responsibility. Substitutions,
 extra words and missing words all require automatic independent verification
 or source-preserving repair. Newly accepted chunks and completed requested
 chapters must have zero unresolved recognition flags; displaying a warning is
@@ -286,14 +345,17 @@ warning: run bounded word recovery and hold the affected section if it remains
 unresolved. An acoustically safe waveform can still omit words. Preserve both
 the source text and the failed takes; bind a recovered take to its synthesis key,
 word check and reported disagreement without calling it a human listening approval.
-The app worker performs this recovery automatically: failed audio is retained
+The required opt-in implementation must perform this recovery only in the
+enabled mode: failed audio is retained
 as unpublished evidence, repeated failures go to isolated Claude Opus 5.5 for
 same-word punctuation/stress proposals, and every resulting take repeats the
 audio quality gate. The successful native text, provider provenance and actual
 sampling take survive resume through their real synthesis/cache keys. The
 printed book, character/voice/mood assignment and human labels stay unchanged.
 
-An unsafe generated edge triggers bounded automatic recovery before publication.
+In the enabled mode, an unsafe generated edge triggers bounded automatic
+recovery before publication. With the option off, report the failed output
+without automatically rendering another take.
 Try independent, pinned seeds and alternate reviewed references only within the
 same frozen source-character, presentation route, voice family and assigned
 mood. Do not add effect tags, fade over speech, pad a clipped waveform to hide

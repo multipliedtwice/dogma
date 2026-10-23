@@ -49,9 +49,34 @@
   6. complete descriptor-based casting, provider-login preflight and clear
      disclosure when book text is sent to an online analysis provider.
 
+## Production one-shot policy (user decision, 2026-10-23)
+
+- Production automatic post-processing (recognition, adjudication and retake
+  loops) is optional and disabled by default. Generating or regenerating a book
+  does not opt in. Preserve an explicitly selected mode through resume and show
+  disabled checks as not checked, never passed or zero confirmed errors.
+- Production mode must never change application code, preprocessing rules,
+  prompts, model weights or shared defaults in response to errors. Opt-in
+  recovery uses released behavior for the current generation only; it does not
+  authorize application patches or self-improvement in production mode.
+- The feedback loop from post-processing errors to preprocessing improvements
+  runs only in development mode. Preserve all attempts, raw evidence and
+  conclusions locally; explicitly import production evidence for development
+  review when needed. Do not automatically transfer data or promote rules.
+  Validate reusable improvements against first-take results and unseen cases
+  with retakes off, then deliver them in a normal versioned release.
+- Prefer the best possible first render through preparation. Failed repairs
+  are evidence, not approved preprocessing rules. Keep source text and human
+  labels protected. See `docs/CORE_NARRATION_SPEC.md` for the full contract.
+- This decision supersedes older unconditional automatic audit/recovery
+  instructions below. Their strict recognition gates apply only to explicitly
+  enabled post-processing or development/evaluation runs. Basic model pinning,
+  output integrity and honest failure reporting remain required in every mode.
+
 ## Autonomous generation ownership
 
-- A request to generate or regenerate narration authorizes the necessary
+- Within the selected processing mode, a request to generate or regenerate
+  narration authorizes the necessary
   diagnosis, repairs, validation, restart/resume and progressive publication
   within the requested scope. Own that work through completion; the user must
   not have to ask repeatedly whether the job stopped or tell you to resume it.
@@ -60,12 +85,14 @@
   cause, then resume from verified checkpoints automatically. Before reporting
   "running", verify a live worker and recent progress; report a stopped job as
   stopped. Provide progress updates without requiring the user to poll.
-- Recognition disagreements and quality flags are work to resolve, not merely
+- In an enabled post-processing or development/evaluation run, recognition
+  disagreements and quality flags are work to resolve, not merely
   counts to hand back to the listener. Inspect the affected source, context,
   audio evidence and take history; distinguish recognizer errors from synthesis
   errors. Use bounded retakes, source-preserving spoken-text repairs and
   independent verification. Do not repeat the same failed strategy indefinitely.
-- User requirement, 2026-10-14: requested chapter regeneration is not complete
+- For enabled post-processing and development/evaluation runs, the user
+  requirement of 2026-10-14 applies: requested chapter regeneration is not complete
   while any recognition disagreement remains. Independently verify or repair
   every flagged take, including substitutions and extra words, not just omissions.
   Keep unresolved sections held and preserve their evidence. Never hide the

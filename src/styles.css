@@ -180,6 +180,7 @@
 
 .stress-variants button[aria-pressed="true"]{border-color:hsl(var(--primary));background:hsl(var(--primary)/.12);box-shadow:inset 0 0 0 1px hsl(var(--primary))}
 .stress-menu-error{color:hsl(var(--destructive));font-size:13px;white-space:pre-wrap}
+.listener-home{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:12px;font-weight:600;padding:7px 9px;border:1px solid hsl(var(--border));border-radius:7px;text-decoration:none}.listener-home:hover{background:hsl(var(--accent))}
 @media(max-width:380px){
   .reading-column{padding-left:15px;padding-right:15px}
   .chapter-navigation button{font-size:11px}

@@ -9,6 +9,7 @@ function fixture(pathname, fetchImpl=async()=>({ok:true,type:'basic'}), saveImpl
   const selector={value:'',disabled:true,options:[],replaceChildren(...options){this.options=options;}};
   const status={textContent:''};
   const surfaces=[{inert:false},{inert:false}];
+  const toolbar={home:null,prepend(node){this.home=node;}};
   const storage=new Map();
   const location={pathname,search:'?bucket=test',hostname:'127.0.0.1',origin:'http://127.0.0.1:9000',assigned:null,
     assign(target){this.assigned=String(target);}};
@@ -17,13 +18,13 @@ function fixture(pathname, fetchImpl=async()=>({ok:true,type:'basic'}), saveImpl
     Option:class Option{constructor(label,value){this.label=label;this.value=value;}},
     URL, Object, Error, location, fetch:fetchImpl,
     sessionStorage:{setItem:(key,value)=>storage.set(key,value),getItem:key=>storage.get(key)||null},
-    document:{querySelector:selectorText=>selectorText==='#book'?selector:selectorText==='#save-status'?status:null,
-      querySelectorAll:()=>surfaces},
+    document:{querySelector:selectorText=>selectorText==='#book'?selector:selectorText==='#save-status'?status:selectorText==='.toolbar'?toolbar:selectorText==='#dogma-home'?toolbar.home:null,
+      querySelectorAll:()=>surfaces,createElement:()=>({style:{}})},
     reviewConflictControls:()=>{},
   };
   vm.createContext(context);vm.runInContext(source,context);
   context.initialiseBookNavigation(store,()=>{});
-  return {selector,status,surfaces,location,storage};
+  return {selector,status,surfaces,location,storage,home:toolbar.home};
 }
 
 {
@@ -62,3 +63,14 @@ function fixture(pathname, fetchImpl=async()=>({ok:true,type:'basic'}), saveImpl
 }
 
 console.log('PASS: three-book options, Book 3 route and local fallback, saved position, and failed-save retention.');
+
+{
+  let saved=0,prevented=false;
+  const state=fixture('/character-rb3-full/fine-tune-all/',undefined,async()=>{saved++;});
+  assert.equal(state.home.href,'/');
+  await state.home.onclick({button:0,preventDefault(){prevented=true;}});
+  assert.ok(prevented);assert.equal(saved,1);assert.equal(state.location.assigned,'/');
+  const failed=fixture('/character-rb2-full/fine-tune-all/',undefined,async()=>{throw Error('unsaved fixture');});
+  await failed.home.onclick({button:0,preventDefault(){}});
+  assert.equal(failed.location.assigned,null);assert.match(failed.status.textContent,/Could not open Home/);
+}

@@ -149,7 +149,7 @@ IMMUTABLE_ASSETS=frozenset({'audio','music','playback','playback_hls','playback_
 
 
 class Application:
-    def __init__(self,data_dir,binaries):
+    def __init__(self,data_dir,binaries,*,auto_resume=True):
         resource=Path(os.environ.get('RIMSKY_RESOURCE_DIR',str(Path(__file__).parents[1]/'resources')))
         self.store=Store(data_dir, recover_interrupted=True, resources=resource)
         self.binaries=binaries
@@ -176,8 +176,10 @@ class Application:
         else:
             self.relocation=threading.Thread(target=self.relocate,args=(resource/'packs',selected,pinned_packs(self.store)),daemon=True,name='rimsky-pack-relocation')
             self.relocation.start()
-        self.auto_resume=threading.Thread(target=self.resume_interrupted,daemon=True,name='rimsky-preparation-resume')
-        self.auto_resume.start()
+        self.auto_resume=None
+        if auto_resume:
+            self.auto_resume=threading.Thread(target=self.resume_interrupted,daemon=True,name='rimsky-preparation-resume')
+            self.auto_resume.start()
 
     def resume_interrupted(self):
         if self.relocation:
@@ -484,7 +486,7 @@ class Application:
         self.jobs.shutdown()
         self.illustrations.shutdown()
         self.music.shutdown()
-        if self.auto_resume is not threading.current_thread():
+        if self.auto_resume is not None and self.auto_resume is not threading.current_thread():
             self.auto_resume.join(timeout=8)
         with self.mutations:
             self.store.close()
@@ -675,6 +677,7 @@ def main():
     parser.add_argument('--parent-pipe',action='store_true')
     parser.add_argument('--static')
     parser.add_argument('--persistent-dev-session',action='store_true')
+    parser.add_argument('--no-auto-resume',action='store_true',help='Serve saved work without resuming interrupted generation.')
     parser.add_argument('--version',action='store_true')
     args=parser.parse_args()
     if args.version:
@@ -688,7 +691,7 @@ def main():
         try:
             resources.enter_context(library_lease(Path(args.data_dir)))
             binaries=Path(os.environ['RIMSKY_RESOURCE_DIR'])/'runtime' if os.environ.get('RIMSKY_RESOURCE_DIR') else Path(sys.executable).parent.parent if getattr(sys,'frozen',False) else Path(__file__).parents[1]/'resources'/'runtime'
-            app=resources.enter_context(contextlib.closing(Application(Path(args.data_dir),binaries)))
+            app=resources.enter_context(contextlib.closing(Application(Path(args.data_dir),binaries,auto_resume=not args.no_auto_resume)))
             token=dev_session_token(Path(args.data_dir)) if args.persistent_dev_session else secrets.token_urlsafe(32)
             aliases=dev_session_aliases(Path(args.data_dir),token) if args.persistent_dev_session else ()
             static=Path(args.static).resolve() if args.static else None

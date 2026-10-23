@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><title>Dogma</title>
+<style>
+:root{font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#243c33;background:#f4f4ee;font-synthesis:none}*{box-sizing:border-box}body{margin:0}a{color:inherit;text-decoration:none}button{font:inherit}main{max-width:1020px;margin:auto;padding:44px 28px 60px}.brand{font-size:25px;font-weight:750;letter-spacing:-1px;display:inline-flex;align-items:center;gap:10px}.mark{width:28px;height:28px;border:2px solid currentColor;border-radius:50%;display:grid;place-items:center}.mark:before{content:"";width:7px;height:15px;border-left:2px solid;border-right:2px solid}header{display:flex;justify-content:space-between;align-items:center}.local-tag{font-size:12px;padding:7px 11px;border:1px solid #d5ded4;border-radius:30px;color:#617367}h1{font-size:clamp(31px,5vw,47px);letter-spacing:-1.8px;font-weight:620;line-height:1.15;margin:53px 0 12px}.intro{color:#6c786e;font-size:16px;margin:0 0 36px;line-height:1.6}.layout{display:grid;grid-template-columns:1.15fr 1fr;gap:23px;align-items:start}section{border:1px solid #d9dfd5;border-radius:20px;background:#fffefa;overflow:hidden}.section-heading{padding:25px 25px 18px;display:flex;align-items:center;gap:12px}.icon{width:38px;height:38px;background:#edf2e9;border-radius:11px;display:grid;place-items:center;flex-shrink:0}.icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}h2{font-size:19px;letter-spacing:-.4px;margin:0}.section-heading p{font-size:13px;color:#6c786e;margin:5px 0 0}.content{padding:0 25px 25px}.book{padding:20px;border-radius:13px;background:#edf1e8;margin:0 0 12px}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#65745f;margin:0 0 10px}.book h3{font-size:23px;line-height:1.3;letter-spacing:-.6px;margin:0 0 7px;overflow-wrap:anywhere}.muted{font-size:13px;color:#6c786e;line-height:1.6;margin:0}.button{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:45px;padding:11px 17px;margin-top:18px;background:#284f3e;color:white;border-radius:9px;font-size:14px;font-weight:600}.button:hover{background:#1c3f2f}.button span{font-size:18px}.label-link{display:flex;align-items:center;gap:14px;border-top:1px solid #e4e7de;padding:18px 0}.label-link:first-child{border-top:0;padding-top:2px}.book-number{height:36px;width:32px;display:grid;place-items:center;background:#f0f1eb;border-radius:6px;font-size:13px;color:#768273}.label-link strong{font-size:15px;display:block}.label-link small{font-size:12px;color:#7a857a;display:block;margin-top:4px}.arrow{margin-left:auto;color:#748271;font-size:20px;transition:transform .15s}.label-link:hover .arrow{transform:translateX(4px)}.label-link:hover strong{text-decoration:underline;text-underline-offset:3px}details{font-size:13px;color:#61715f;margin-top:13px}summary{cursor:pointer;padding:7px 0}details a{display:block;margin-top:8px;padding:10px;border:1px solid #d9dfd5;border-radius:7px;line-height:1.5}details a:hover{background:#f4f6ef}.notice{line-height:1.6;color:#65735f;font-size:14px;margin:0}footer{color:#839080;font-size:12px;line-height:1.7;padding:24px 3px}a:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid #628768;outline-offset:4px}#retry{border:1px solid #c7d4c4;color:#284f3e;background:#fffefa;border-radius:7px;padding:8px 13px;margin-top:12px;cursor:pointer}@media(max-width:680px){main{padding:26px 18px 35px}.layout{grid-template-columns:1fr;gap:18px}h1{margin-top:38px;font-size:35px}.intro{margin-bottom:25px;font-size:14px}.section-heading{padding:22px 22px 18px}.content{padding:0 22px 22px}.book h3{font-size:22px}.local-tag{font-size:11px}}
+</style>
+</head>
+<body>
+<main>
+<header><a class="brand" href="/" aria-label="Dogma home"><span class="mark" aria-hidden="true"></span>Dogma</a><span class="local-tag" id="connection-tag">Your library</span></header>
+<h1>Pick up where you left off.</h1>
+<p class="intro">Listen to your rendered books or continue labeling voices.</p>
+<div class="layout">
+<section id="listen" aria-labelledby="listen-title">
+<div class="section-heading"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 14v-3a8 8 0 0 1 16 0v3M4 12h3v8H4zM17 12h3v8h-3z"/></svg></span><div><h2 id="listen-title">Listen</h2><p>Rendered audiobooks</p></div></div>
+<div class="content" id="books" aria-live="polite"><p class="notice">Loading your books…</p></div>
+</section>
+<section id="labeling" aria-labelledby="label-title" hidden>
+<div class="section-heading"><span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h11a2 2 0 0 1 2 2v14H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1zM4 16h14M8 8h6M8 11h4"/></svg></span><div><h2 id="label-title">Label</h2><p>Voice, mood and character review</p></div></div>
+<nav class="content" id="label-links" aria-label="Labeling books"></nav>
+</section>
+</div>
+<footer id="footer">Your listening position is saved in the player.</footer>
+</main>
+<script id="dogma-home-config" type="application/json">__DOGMA_HOME_CONFIG__</script>
+<script>
+(()=>{
+  const config=JSON.parse(document.getElementById('dogma-home-config').textContent);
+  const books=document.getElementById('books');
+  const element=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
+  const link=(title,url,className)=>{const node=element('a',className,title);node.href=url;return node;};
+  const playerUrl=(book,generation)=>{
+    const url=new URL(config.apiPrefix,config.listeningOrigin);
+    url.search=new URLSearchParams({listener:'1',book:book.id,generation:generation.id}).toString();return url.href;
+  };
+  const duration=seconds=>{const minutes=Math.max(1,Math.round(Number(seconds||0)/60));return minutes>=60?`${Math.floor(minutes/60)} hr ${minutes%60} min`:`${minutes} min`;};
+  document.getElementById('connection-tag').textContent=config.local?'Local workspace':'Your library';
+  if(config.local&&config.labeling?.length){
+    document.getElementById('labeling').hidden=false;
+    for(const [index,book] of config.labeling.entries()){
+      const row=link('',book.url,'label-link');
+      row.append(element('span','book-number',String(index+1)));
+      const text=element('span');text.append(element('strong','',book.title),element('small','','Continue labeling'));
+      row.append(text,element('span','arrow','→'));document.getElementById('label-links').append(row);
+    }
+    document.getElementById('footer').textContent='Use Home in the player or labeling pages to return here. The player opens Home in another tab so your audio can keep playing.';
+  }else document.querySelector('.layout').style.gridTemplateColumns='1fr';
+  async function load(){
+    books.replaceChildren(element('p','notice','Loading your books…'));
+    if(!config.listeningOrigin){books.replaceChildren(element('p','notice','Open this workspace on your local network to continue.'));return;}
+    if(config.role!=='gateway'){
+      books.replaceChildren(element('p','notice','Open your listening library to choose a rendered book and continue from your saved position.'));
+      books.append(link('Open listening library →',new URL('/#listen',config.listeningOrigin).href,'button'));return;
+    }
+    try{
+      const response=await fetch(new URL(config.apiPrefix+'api',config.listeningOrigin),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'library',data:{}}),cache:'no-store'});
+      if(!response.ok)throw Error('Your listening library is temporarily unavailable.');
+      const library=await response.json();if(!Array.isArray(library))throw Error('Your listening library could not be loaded.');
+      const available=library.map(book=>({...book,playable:(book.generations||[]).filter(g=>Number(g.progress?.ready)>0)})).filter(book=>book.playable.length);
+      books.replaceChildren();
+      if(!available.length){books.append(element('p','notice','No rendered audio is available yet. Your books will appear here when audio is ready.'));return;}
+      for(const book of available){
+        const generation=book.playable.find(g=>g.id===book.position?.generation_id)||book.playable[0];
+        const card=element('article','book');card.append(element('p','eyebrow',book.position?.generation_id===generation.id?'Continue listening':'Ready to listen'),element('h3','',book.title||'Audiobook'));
+        if(book.author)card.append(element('p','muted',book.author));
+        const chapterCount=Number(generation.progress.total)>0&&Number(generation.progress.ready)>=Number(generation.progress.total)?generation.config?.chapters?.length:0;
+        card.append(element('p','muted',(chapterCount?`${chapterCount} chapter${chapterCount===1?'':'s'} · `:'')+duration(generation.progress.duration)+' rendered'));
+        const held=Number(generation.progress.held||0);
+        if(held||generation.status==='held')card.append(element('p','muted',held?`${held} passage${held===1?'':'s'} held for review`:'Quality review remains open'));
+        card.append(link(book.position?.generation_id===generation.id?'Continue listening →':'Open player →',playerUrl(book,generation),'button'));
+        if(book.playable.length>1){
+          const versions=element('details');versions.append(element('summary','',`Other versions (${book.playable.length-1})`));
+          for(const other of book.playable.filter(g=>g.id!==generation.id))versions.append(link(other.name||'Rendered version',playerUrl(book,other)));
+          card.append(versions);
+        }
+        books.append(card);
+      }
+    }catch(error){
+      books.replaceChildren(element('p','notice',error.message||'Could not load your books.'));
+      const retry=element('button','','Try again');retry.id='retry';retry.onclick=load;books.append(retry);
+    }
+  }
+  load();
+})();
+</script>
+</body>
+</html>

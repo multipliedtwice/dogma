@@ -76,12 +76,53 @@ def tier2(corpus, sample, seed):
     return stats, per_word, wrong_auto, rows, unknown_rows, len(pool)
 
 
+def listener_case(case):
+    """The layer's automatic output for one listener-corrected word: the printed sentence, ё folded to е, goes through
+    yo.eligible and, for ambiguous/unknown words, the tier-2 path (silero + RUAccent witnesses, yo.analyze)."""
+    from rimsky.auto_pronunciation import yo_witnesses
+    text = case['sentence'].replace('ё', 'е').replace('Ё', 'Е'); at = case['sentence_offset']; target = case['target_form']
+    hit = next((e for e in yo.eligible(text, []) if e['start'] <= at < e['end']), None)
+    row = {'id': case['id'], 'word': case['selected_text'], 'target': target, 'direction': case['direction'], 'label_source': case['label_source']}
+    if hit is None:return {**row, 'class': 'not_eligible', 'path': 'untouched', 'output': text[at:at + len(target)], 'passed': text[at:at + len(target)] == target}
+    word = hit['word']; out = word; path = 'untouched'; cls = hit['cls']; witnesses = None
+    if cls == 'unique_yo':out, path = hit['yo'], 'unique_yo'
+    elif cls in ('ambiguous', 'unknown'):
+        spans, sil, dense = yo_witnesses(text, {}, (), True)
+        result = yo.analyze(text, spans, sil, dense, yo.ruaccent_yo(text))
+        for d in result['decisions']:
+            if (d['word'], d['index']) == (hit['key'], hit['occ']):
+                out, path, witnesses = (d['yo'] if d['choice'] == 'yo' else word), 'auto-' + d['basis'], d['witnesses']
+        for r in result['rows']:
+            if (r['word'], r['index']) == (hit['key'], hit['occ']):path, witnesses = 'adjudication', r['witnesses']
+    # the word sits at `at` inside the unit (a hyphenated unit may start earlier)
+    lead = at - hit['start']; got = out[lead:lead + len(target)]
+    return {**row, 'class': cls, 'path': path, 'output': got, 'passed': got == target, 'witnesses': witnesses}
+
+
+def listener_tier(path):
+    cases = [json.loads(line) for line in Path(path).read_text('utf8').splitlines() if line.strip()]
+    results = [listener_case(c) for c in cases]
+    by = lambda key: {k: {'cases': sum(1 for r in results if r[key] == k), 'passed': sum(1 for r in results if r[key] == k and r['passed'])}
+                      for k in sorted({r[key] for r in results})}
+    return {'corpus': str(path), 'basis': 'listener corrections; pass = the automatic layer outputs the target form exactly (case-sensitive); '
+                                           'a word sent to adjudication is not decided automatically and keeps its printed form here',
+            'totals': {'cases': len(results), 'passed': sum(r['passed'] for r in results), 'failed': sum(not r['passed'] for r in results)},
+            'by_direction': by('direction'), 'by_class': by('class'), 'by_label_source': by('label_source'), 'cases': results}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--books', nargs='+', default=BOOKS); p.add_argument('--sample', type=int, default=1500)
     p.add_argument('--seed', type=int, default=20261021)
     p.add_argument('--output', type=Path, default=ROOT/'training-work/yo-restoration-eval-v1')
+    p.add_argument('--listener-corpus', type=Path, help='cases.jsonl from scripts/build_listener_yo_corpus.py: adds the listener tier')
+    p.add_argument('--listener-only', action='store_true', help='with --listener-corpus: skip the EPUB tiers')
     a = p.parse_args(); corpus = []
+    if a.listener_only and not a.listener_corpus:p.error('--listener-only needs --listener-corpus')
+    if a.listener_corpus:
+        a.output.mkdir(parents=True, exist_ok=True); tier = listener_tier(a.listener_corpus); write_json(a.output/'listener-corpus.json', tier)
+        print(json.dumps({k: v for k, v in tier.items() if k != 'cases'}, ensure_ascii=False), flush=True)
+        if a.listener_only:return
     for b in a.books:corpus += sentences(ROOT/'content'/f'{b}.epub')
     print('sentences', len(corpus), flush=True)
     c, fp, fn_classes, fn = tier1(corpus)

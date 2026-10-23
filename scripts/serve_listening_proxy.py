@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, unquote, urlsplit
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from local_home import serve_home
 
 
 PAGE = '/character-rb2-full/fine-tune-all/elirm-iv-mvp/'
@@ -190,9 +191,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def legacy_get(self, head=False):
         path = clean_path(self.path)
-        if path == '/':
-            self.redirect(PRODUCTION_PAGE)
-            return
         allowed = path.startswith((PAGE, MEDIA)) or path == PAGE.rstrip('/')
         # The production route above owns ch123. Remaining preview paths stay
         # available temporarily while old review links are retired.
@@ -211,6 +209,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def forward_get(self, head=False):
         if not self.authorize():
+            return
+        if serve_home(self,role='gateway',head_only=head):
             return
         if not self.production_get(head):
             self.legacy_get(head)

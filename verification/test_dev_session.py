@@ -2,14 +2,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 
 from rimsky.util import AppError
-from server import dev_session_token, dev_session_aliases
+from server import Application, dev_session_token, dev_session_aliases
 
 
 class DevSession(unittest.TestCase):
+    def test_supervised_listener_can_disable_resume_and_close_cleanly(self):
+        with TemporaryDirectory() as temporary, patch('server.Jobs.resume_interrupted') as resume:
+            app=Application(Path(temporary),Path(__file__).resolve().parents[1]/'resources/runtime',auto_resume=False)
+            try:
+                self.assertIsNone(app.auto_resume)
+                resume.assert_not_called()
+            finally:
+                app.close()
+
     def test_local_dev_token_survives_restart(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

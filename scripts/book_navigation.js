@@ -1,5 +1,20 @@
 // Book navigation shares the current origin, including the remote labeling URL.
 function initialiseBookNavigation(reviewStore, pausePlayback) {
+  const toolbar=document.querySelector('.toolbar');
+  if(toolbar&&!document.querySelector('#dogma-home')){
+    const home=document.createElement('a');home.id='dogma-home';home.href='/';home.textContent='← Home';
+    home.className='dogma-home';home.style.cssText='align-self:center;padding:8px 4px;white-space:nowrap';
+    home.onclick=async event=>{
+      if(event.button>0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+      event.preventDefault();const status=document.querySelector('#save-status');
+      try{
+        pausePlayback();if(status)status.textContent='Saving before opening Home…';
+        do{await reviewStore.save();}while(Object.keys(reviewStore.changes()).length||reviewStore.reviewer!==reviewStore.baseReviewer);
+        location.assign('/');
+      }catch(error){if(status){status.textContent='Could not open Home. '+error.message;reviewConflictControls(reviewStore,status,()=>reviewStore.save());}}
+    };
+    toolbar.prepend(home);
+  }
   const selector = document.querySelector('#book');
   if (!selector) return;
   const books = [

@@ -6,6 +6,7 @@ from urllib.parse import parse_qs,unquote,urlsplit
 from serve_book1_voice_evidence_atlas import ReviewHandler,ROOT
 from book1_review_persistence import save_review,ReviewConflict
 from label_clip_hls import handle as handle_clip_hls
+from local_home import serve_home
 from voice_family_registry import (RegistryConflict, TaxonomyConflict, create_family,
                                    read_review,
                                    save_decision as save_voice_family_decision,
@@ -247,6 +248,7 @@ class Handler(ReviewHandler):
                 while block:=stream.read(1024*1024):self.wfile.write(block)
         return True
     def do_GET(self):
+        if serve_home(self,role='labels'):return
         if handle_clip_hls(self):return
         parsed=urlsplit(self.path);path=parsed.path
         if path==VOICE_REGISTRY_PAGE+'data':
@@ -276,6 +278,7 @@ class Handler(ReviewHandler):
         if self.allowed() and not urlsplit(self.path).path.lower().endswith('.wav') and self.send_precompressed(False):return
         super().do_GET()
     def do_HEAD(self):
+        if serve_home(self,role='labels',head_only=True):return
         if handle_clip_hls(self,True):return
         if self.allowed() and not urlsplit(self.path).path.lower().endswith('.wav') and self.send_precompressed(True):return
         super().do_HEAD()

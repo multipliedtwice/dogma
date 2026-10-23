@@ -56,7 +56,7 @@ def proper_nouns(text: str) -> set[str]:
 # is the same small pronunciation difference; inside ordinary sentences nothing
 # changes. Мда heard as да stays flagged (a sound is missing, not varied).
 INTERJECTION_RULE = 'interjection-kind-v1'
-_KINDS = {'hum': frozenset('угу ага м мм ммм хм хмм эм э'.split()), 'laugh': frozenset('ха хо хе хи'.split()),
+_KINDS = {'hum': frozenset('угу ага м мм ммм хм хмм гм эм э'.split()), 'laugh': frozenset('ха хо хе хи'.split()),
           'sustained-u': frozenset('у оу о уу ооо'.split()),
           # Drum/beat chants (Пум-пум-пурум heard Пом-пом, iteration 6).
           'beat': frozenset('пум пом бум бом бам пам тум том там пурум пуром парам тарам'.split())}
