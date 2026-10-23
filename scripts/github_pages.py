@@ -1,7 +1,7 @@
 """Export reviewed demo assets locally; validate the standalone GitHub Pages site.
 
-GitHub Actions runs check only. Export needs the ignored local completed-book
-workspace and never uploads or copies its private inputs.
+GitHub Actions validates and deploys only the static website directory. Export
+needs the ignored local completed-book workspace and never copies private inputs.
 """
 from __future__ import annotations
 import argparse
@@ -24,7 +24,7 @@ CAPTION_FIELDS = ('id','source_id','text','start','end')
 CAPTION_KEYS = set(CAPTION_FIELDS)
 STATIC = {'index.html','ru/index.html','styles.css','script.js','theme.js','.nojekyll','favicon.svg',
           'assets/column.svg','assets/social-en.png','assets/social-ru.png','sitemap.xml'}
-SITE_URL='https://multipliedtwice.github.io/dogma-demo/'
+SITE_URL='https://multipliedtwice.github.io/dogma/'
 
 
 class LandingPage(HTMLParser):

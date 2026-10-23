@@ -11,7 +11,7 @@ import re
 import xml.etree.ElementTree as ET
 
 ROOT=Path(__file__).resolve().parents[1]
-BASE='https://multipliedtwice.github.io/dogma-demo/'
+BASE='https://multipliedtwice.github.io/dogma/'
 PAGES={
     'en':{'path':'index.html','url':BASE,'locale':'en_US',
           'title':'Dogma — Local EPUB reader & AI audiobook narration',

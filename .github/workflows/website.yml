@@ -1,9 +1,10 @@
-name: Public website checks
+name: Website
 
-# GitHub Pages is served from a separate dogma-demo repository containing only
-# validated site files. Training and labeling data are never site inputs.
+# Publish only validated website assets from this repository.
+# Training, labeling, model and application files are never site inputs.
 on:
   push:
+    branches: [main]
     paths:
       - 'website/**'
       - 'scripts/github_pages.py'
@@ -22,6 +23,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -31,3 +36,26 @@ jobs:
         run: python3 -m unittest verification.test_github_pages
       - name: Validate static site and immutable audio hashes
         run: python3 scripts/github_pages.py check --site website
+      - name: Upload website assets
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: website
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4

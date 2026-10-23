@@ -24,7 +24,7 @@ def build():
         draw.text((83,196),lines[0],font=font('georgia.ttf',68),fill='#f0ede3')
         draw.text((83,283),lines[1],font=font('georgia.ttf',78),fill='#b8c8ab')
         draw.text((86,420),subtitle,font=font('segoeui.ttf',25),fill='#b7c0ac')
-        draw.text((86,522),'EN / РУ  ·  multipliedtwice.github.io/dogma-demo',font=font('segoeui.ttf',20),fill='#d3ae78')
+        draw.text((86,522),'EN / РУ  ·  multipliedtwice.github.io/dogma/',font=font('segoeui.ttf',20),fill='#d3ae78')
         for index,height in enumerate([40,65,95,135,165,135,95,65,40]):
             x=955+index*15;draw.rounded_rectangle((x,285-height//2,x+5,285+height//2),radius=3,fill='#d3ae78')
         image.save(ROOT/f'website/assets/social-{language}.png',optimize=True)

@@ -1,17 +1,14 @@
 # Public demo website
 
-The public site is
-<https://multipliedtwice.github.io/dogma-demo/>; its separate repository,
-`multipliedtwice/dogma-demo`, contains only static website assets.
-The separate site repository keeps the existing public URL stable and its
-publication boundary limited to website assets.
+The site is <https://multipliedtwice.github.io/dogma/>. It is deployed from
+`website/` in the `multipliedtwice/dogma` repository through GitHub Actions.
 
 `website/` is the publication boundary. It contains the landing page, player,
 existing column mark, a minimal demo catalog, public-domain story captions,
 music credits, and deliberately exported MP3s. It contains no application
 runtime, model weights, narrator references, training data, labeling records,
-private library files or credentials. There is no automatic sync of the product
-repository into the public repository.
+private library files or credentials. The deployment artifact contains only
+this static directory, rather than the full repository checkout.
 
 The English demo is available. The Russian entry remains in preparation and
 exposes no recording or captions until its completed export is ready. This is
@@ -50,7 +47,7 @@ python -m http.server 8080 --bind 127.0.0.1 --directory website
 Open `http://127.0.0.1:8080/`. Python's basic static server is enough for layout
 preview but does not support audio byte ranges; test seeking on GitHub Pages or
 a byte-range-capable development server. All site URLs are relative, including
-the catalog, MP3s and captions, so the project path `/dogma-demo/` works.
+the catalog, MP3s and captions, so the project path `/dogma/` works.
 
 ## Export a completed local recording
 
@@ -67,8 +64,8 @@ and projecting caption fields. It never copies the workspace or its public
 directory wholesale. Duration is measured from the actual MP3. Audio and caption
 filenames include their byte hashes. Unready catalog entries cannot reference
 audio. The checker rejects unselected files, altered asset hashes, linked paths,
-private local paths. The site links only to publicly accessible repositories;
-product repository visibility is managed separately from site publication.
+private local paths. Footer source links point to
+`https://github.com/multipliedtwice/dogma`.
 
 Keep the previous public snapshot available when preparing a new one. The checker
 rejects obsolete unreferenced assets; only the selected snapshot belongs in the
@@ -76,16 +73,18 @@ publication directory.
 
 ## Publish
 
-The product repository's `Public website checks` workflow validates the static
-site; it does not copy the product checkout or store deployment credentials.
-After validation, copy only `website/` contents into a clean checkout of the
-public `dogma-demo` repository, inspect the complete file list, and commit/push
-that static snapshot to its `main` branch. Never copy the product checkout.
+The GitHub Actions website workflow in `multipliedtwice/dogma` validates the
+static site, uploads only `website/` as its Pages artifact, and deploys that
+artifact. GitHub Pages uses **GitHub Actions** as its publishing source.
+No separate website repository or copy of the application checkout is needed.
 
-The public repository uses GitHub Pages **Deploy from a branch**, `main`, `/`
-(root), with `.nojekyll`. No production backend, model server, external font,
-analytics service or secret is required. Model weights, training corpora,
-protected labels and local library data remain excluded in both repositories.
+Update the selected static assets and generated metadata, run the checks above,
+then include the website changes in the repository's normal commit and review
+process. The workflow handles publication from its configured branch.
+
+No production backend, model server, external font or analytics service is
+required. Model weights, training corpora, protected labels and local library
+data remain outside the website publication boundary.
 
 Opening and background music use YuE2-3B, CC BY-NC 4.0. Preserve the visible
 attribution and non-commercial-use notice when distributing these recordings.
