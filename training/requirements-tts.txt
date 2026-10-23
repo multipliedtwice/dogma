@@ -1,0 +1,5 @@
+-r ../runtime/requirements.txt
+qwen-tts==0.1.1
+accelerate==1.12.0
+transformers==4.57.3
+safetensors==0.7.0

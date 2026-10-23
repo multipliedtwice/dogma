@@ -1,0 +1,261 @@
+{
+  "schema": 1,
+  "series": [
+    {
+      "id": "672dff97acfc8b530e1007c0439bab13",
+      "name": "Элирм",
+      "author": "Владимир Посмыгаев",
+      "characters": [
+        {
+          "character_key": "аполло",
+          "canonical_name": "Аполло",
+          "aliases": [],
+          "state": {
+            "character_id": "apollo",
+            "voice_id": "masculine_2",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "ар хакон",
+          "canonical_name": "Ар-Хакон",
+          "aliases": [],
+          "state": {
+            "character_id": "ar_hakon",
+            "voice_id": "masculine_2",
+            "voice_source": "generation_suggestion",
+            "pronunciations": {
+              "хакон": "Хако́н"
+            },
+            "pronunciation_source": "listener",
+            "pronunciation_evidence": [
+              {
+                "report_id": "9a33894cecbc783f249f8a5f",
+                "book_id": "96c636410090662b89c2b38a53a795f4",
+                "generation_id": "b2efda4f0f932445bd60adab",
+                "selected_text": "Хакон",
+                "intended_stress": "Хако́н",
+                "created": "2026-10-21T00:58:04Z",
+                "source": "listener"
+              },
+              {
+                "report_id": "69f7ebf21080b6495ba05dd1",
+                "book_id": "96c636410090662b89c2b38a53a795f4",
+                "generation_id": "b2efda4f0f932445bd60adab",
+                "selected_text": "Хакону",
+                "intended_stress": "Хако́ну",
+                "created": "2026-10-21T00:57:25Z",
+                "source": "listener"
+              }
+            ]
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "вел",
+          "canonical_name": "Вел",
+          "aliases": [
+            "Велнарин",
+            "Атлас"
+          ],
+          "state": {
+            "character_id": "vel",
+            "voice_id": "masculine_6_mechanical",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "влад",
+          "canonical_name": "Влад",
+          "aliases": [
+            "Эо"
+          ],
+          "state": {
+            "character_id": "vlad",
+            "voice_id": "masculine_5",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "герман",
+          "canonical_name": "Герман",
+          "aliases": [],
+          "state": {
+            "character_id": "german",
+            "voice_id": "masculine_2",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "глас эстир",
+          "canonical_name": "Глас Эстир",
+          "aliases": [],
+          "state": {
+            "character_id": "estir",
+            "voice_id": "nasal",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "готэн либен",
+          "canonical_name": "Готэн Либен",
+          "aliases": [],
+          "state": {
+            "character_id": "goten_liben",
+            "voice_id": "masculine_4",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "гундахар",
+          "canonical_name": "Гундахар",
+          "aliases": [],
+          "state": {
+            "character_id": "gundahar",
+            "voice_id": "masculine_6",
+            "voice_source": "generation_suggestion",
+            "pronunciations": {
+              "гундахар": "Гундаха́р"
+            },
+            "pronunciation_source": "listener",
+            "pronunciation_evidence": [
+              {
+                "report_id": "b799aebe68bc98d72070d1ea",
+                "book_id": "96c636410090662b89c2b38a53a795f4",
+                "generation_id": "b2efda4f0f932445bd60adab",
+                "selected_text": "Гундахар",
+                "intended_stress": "Гундаха́р",
+                "created": "2026-10-21T00:59:03Z",
+                "source": "listener"
+              },
+              {
+                "report_id": "a2d0e66a7f9f9f11f5b36a93",
+                "book_id": "96c636410090662b89c2b38a53a795f4",
+                "generation_id": "b2efda4f0f932445bd60adab",
+                "selected_text": "Гундахар",
+                "intended_stress": "Гундаха́р",
+                "created": "2026-10-21T00:30:25Z",
+                "source": "listener"
+              }
+            ]
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "локо",
+          "canonical_name": "Локо",
+          "aliases": [],
+          "state": {
+            "character_id": "loko",
+            "voice_id": "masculine_4",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "мистер о",
+          "canonical_name": "Мистер О",
+          "aliases": [],
+          "state": {
+            "character_id": "mister_o",
+            "voice_id": "masculine_2",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "мозес",
+          "canonical_name": "Мозес",
+          "aliases": [],
+          "state": {
+            "character_id": "mozes",
+            "voice_id": "masculine_4",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "окрус",
+          "canonical_name": "Окрус",
+          "aliases": [],
+          "state": {
+            "character_id": "okrus",
+            "voice_id": "masculine_2",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "орк из кустов",
+          "canonical_name": "Орк из кустов",
+          "aliases": [],
+          "state": {
+            "character_id": "orc_lookout",
+            "voice_id": "masculine_3",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "певец из динамика",
+          "canonical_name": "Певец из динамика",
+          "aliases": [],
+          "state": {
+            "character_id": "elvis_recording",
+            "voice_id": "masculine_3",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "старый пес",
+          "canonical_name": "Старый пёс",
+          "aliases": [
+            "Диглофус"
+          ],
+          "state": {
+            "character_id": "old_dog",
+            "voice_id": "nonverbal:dog_growl",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        },
+        {
+          "character_key": "терек",
+          "canonical_name": "Терек",
+          "aliases": [
+            "Кальт"
+          ],
+          "state": {
+            "character_id": "terek",
+            "voice_id": "masculine_6",
+            "voice_source": "generation_suggestion"
+          },
+          "created": "2026-10-21T00:47:29Z",
+          "updated": "2026-10-21T01:45:30Z"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "schema": 1,
+  "series_id": "reality-benders",
+  "reviewed_from": "Reality Benders 1 curated cast v2",
+  "review_basis": "Names, role links, and every alias checked against the EPUB passages; partial model labels were used only to find candidates. Removes unsupported Улина aliases from v1.",
+  "characters": [
+    {
+      "voice_id": "rb1_kirill",
+      "name": "Кирилл Комаров",
+      "aliases": [
+        "Кирилл",
+        "Комаров",
+        "Комар"
+      ],
+      "evidence": [
+        "c0009-p00022",
+        "c0009-p00024"
+      ]
+    },
+    {
+      "voice_id": "rb1_ivan",
+      "name": "Иван Лозовский",
+      "aliases": [
+        "Лозовский"
+      ],
+      "evidence": [
+        "c0008-p00018",
+        "c0009-p00002"
+      ]
+    },
+    {
+      "voice_id": "rb1_tyulenev",
+      "name": "Тюленев",
+      "aliases": [],
+      "evidence": [
+        "c0013-p00008",
+        "c0013-p00011",
+        "c0013-p00012"
+      ]
+    },
+    {
+      "voice_id": "rb1_kosta",
+      "name": "Коста Дыхш",
+      "aliases": [
+        "Коста Дахш"
+      ],
+      "evidence": [
+        "c0010-p00043",
+        "c0011-p00010"
+      ]
+    },
+    {
+      "voice_id": "rb1_vasiliadi",
+      "name": "Василиади",
+      "aliases": [],
+      "evidence": [
+        "c0015-p00045"
+      ]
+    },
+    {
+      "voice_id": "rb1_svetlana",
+      "name": "Светлана Верещагина",
+      "aliases": [
+        "Светлана"
+      ],
+      "evidence": [
+        "c0019-p00035",
+        "c0019-p00057"
+      ]
+    },
+    {
+      "voice_id": "rb1_dmitry",
+      "name": "Дмитрий Желтов",
+      "aliases": [
+        "Желтов"
+      ],
+      "evidence": [
+        "c0015-p00022",
+        "c0020-p00060"
+      ]
+    },
+    {
+      "voice_id": "rb1_uline",
+      "name": "Улине Тар",
+      "aliases": [
+        "Улине"
+      ],
+      "evidence": [
+        "c0028-p00046",
+        "c0029-p00032"
+      ]
+    },
+    {
+      "voice_id": "rb1_basha",
+      "name": "Баша Тушихх",
+      "aliases": [
+        "Баша"
+      ],
+      "evidence": [
+        "c0028-p00044",
+        "c0028-p00060",
+        "c0030-p00021"
+      ]
+    },
+    {
+      "voice_id": "rb1_vasha",
+      "name": "Ваша Тушихх",
+      "aliases": [
+        "Ваша"
+      ],
+      "evidence": [
+        "c0028-p00042",
+        "c0030-p00030"
+      ]
+    },
+    {
+      "voice_id": "rb1_filira",
+      "name": "Филира",
+      "aliases": [],
+      "evidence": [
+        "c0018-p00048",
+        "c0018-p00050"
+      ]
+    },
+    {
+      "voice_id": "rb1_imran",
+      "name": "Имран",
+      "aliases": [],
+      "evidence": [
+        "c0007-p00024"
+      ]
+    },
+    {
+      "voice_id": "rb1_kisly",
+      "name": "Кислый",
+      "aliases": [],
+      "evidence": [
+        "c0015-p00055",
+        "c0016-p00010"
+      ]
+    },
+    {
+      "voice_id": "rb1_tamara",
+      "name": "герд Тамара",
+      "aliases": [
+        "Тамара"
+      ],
+      "evidence": [
+        "c0012-p00065",
+        "c0019-p00011"
+      ]
+    },
+    {
+      "voice_id": "rb1_minno",
+      "name": "Минн-О Ла-Фин",
+      "aliases": [],
+      "evidence": [
+        "c0021-p00007",
+        "c0021-p00016"
+      ]
+    },
+    {
+      "voice_id": "rb1_uraz",
+      "name": "Ураз Тухш",
+      "aliases": [],
+      "evidence": [
+        "c0027-p00055",
+        "c0028-p00012"
+      ]
+    },
+    {
+      "voice_id": "rb1_radugin",
+      "name": "лэнг Радугин",
+      "aliases": [
+        "Радугин"
+      ],
+      "evidence": [
+        "c0037-p00004",
+        "c0040-p00128"
+      ]
+    },
+    {
+      "voice_id": "rb1_ustinov",
+      "name": "Валентин Устинов",
+      "aliases": [
+        "герд Устинов",
+        "Устинов"
+      ],
+      "evidence": [
+        "c0013-p00051",
+        "c0037-p00016",
+        "c0037-p00017"
+      ]
+    }
+  ]
+}

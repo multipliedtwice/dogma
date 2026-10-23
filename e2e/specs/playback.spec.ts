@@ -1,0 +1,174 @@
+import {test, expect} from '../fixtures';
+import {captions, closeDialog, EPUB_TITLE, FB2_TITLE, generateChapter, importBook, listenToPassage, openSavedBook, pausePlayback, player, readyGeneration, selectChapter, setRange, startGeneration, timeline, timelineSeconds} from '../helpers';
+
+test('phase 2: saved narration plays, pauses, seeks, skips, changes speed/volume and shows subtitles', async ({app, runtime, bookFiles}) => {
+  const book = await importBook(app, runtime, bookFiles.epub, EPUB_TITLE);
+  const generation = await generateChapter(app, runtime, book);
+  const dock = player(app);
+  const total = generation.segments.reduce((seconds, segment) => seconds + segment.duration, 0);
+  await expect(timeline(app)).toHaveAttribute('max', String(total));
+  await dock.getByRole('button', {name: 'Play', exact: true}).click();
+  await expect.poll(() => timelineSeconds(app)).toBeGreaterThan(.2);
+  await pausePlayback(app);
+  await expect.poll(async () => (await runtime.api('book', {id: book.id})).position?.offset ?? 0).toBeGreaterThan(.1);
+
+  const bounds = await timeline(app).boundingBox();
+  if (!bounds) throw new Error('Chapter timeline has no visible bounds.');
+  await app.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await expect.poll(async () => Math.abs(await timelineSeconds(app) - total / 2)).toBeLessThan(.2);
+  const sought = await timelineSeconds(app);
+  await dock.getByRole('button', {name: 'Forward 15 seconds', exact: true}).click();
+  await expect.poll(async () => Math.abs(await timelineSeconds(app) - sought - 15)).toBeLessThan(.2);
+  await dock.getByRole('button', {name: 'Back 15 seconds', exact: true}).click();
+  await expect.poll(async () => Math.abs(await timelineSeconds(app) - sought)).toBeLessThan(.2);
+  await expect(dock.getByRole('button', {name: 'Play', exact: true})).toBeVisible();
+  await dock.getByRole('combobox', {name: 'Playback speed', exact: true}).selectOption('1.5');
+  await dock.getByRole('button', {name: 'Playback settings', exact: true}).click();
+  const settings = app.getByRole('dialog', {name: 'Playback settings', exact: true});
+  await expect(settings.getByRole('combobox', {name: 'Playback speed', exact: true})).toHaveValue('1.5');
+  await setRange(settings.getByRole('slider', {name: /^Volume/}), .35);
+  await settings.getByRole('switch', {name: 'Subtitles', exact: true}).check();
+  await closeDialog(app);
+  await expect.poll(async () => {
+    const value = await runtime.api('settings', {});
+    return [value.playback_rate, value.volume, value.subtitles];
+  }).toEqual([1.5, .35, true]);
+  const spoken = generation.segments.find(segment => segment.spoken.includes('R&D'));
+  if (!spoken) throw new Error('Fixture subtitle passage missing.');
+  await listenToPassage(app, spoken.source_id);
+  await expect(captions(app)).toContainText(spoken.spoken);
+  await pausePlayback(app);
+  await dock.getByRole('button', {name: 'Subtitles', exact: true}).click();
+  await expect(captions(app)).toHaveCount(0);
+  await expect(dock.getByRole('button', {name: 'Subtitles', exact: true})).toHaveAttribute('aria-pressed', 'false');
+  await dock.getByRole('button', {name: 'Subtitles', exact: true}).click();
+  await expect(captions(app)).toContainText(spoken.spoken);
+  await app.reload();
+  await openSavedBook(app, EPUB_TITLE);
+  await expect(dock.getByRole('combobox', {name: 'Playback speed', exact: true})).toHaveValue('1.5');
+  await dock.getByRole('button', {name: 'Playback settings', exact: true}).click();
+  await expect(settings.getByRole('slider', {name: /^Volume/})).toHaveValue('0.35');
+  expect((await runtime.api('generation', {id: generation.id})).segments).toEqual(generation.segments);
+});
+
+test('phase 2: player previous/next chapter keeps paused intent', async ({app, runtime, bookFiles}) => {
+  const book = await importBook(app, runtime, bookFiles.fb2, FB2_TITLE);
+  const started = await startGeneration(app, runtime, book, 'all');
+  await readyGeneration(app, runtime, started.id);
+  const dock = player(app);
+  await expect(dock.getByRole('button', {name: 'Previous chapter', exact: true})).toBeDisabled();
+  await dock.getByRole('button', {name: 'Next chapter', exact: true}).click();
+  await expect(dock.getByText('River crossing', {exact: true}).first()).toBeVisible();
+  await expect(dock.getByRole('button', {name: 'Next chapter', exact: true})).toBeDisabled();
+  await expect(dock.getByRole('button', {name: 'Play', exact: true})).toBeVisible();
+  await dock.getByRole('button', {name: 'Previous chapter', exact: true}).click();
+  await expect(dock.getByText('Pine trail', {exact: true}).first()).toBeVisible();
+  await expect(timeline(app)).toHaveValue('0');
+});
+
+test('phase 2: listening position survives reload and a full runtime restart', async ({app, runtime, bookFiles}) => {
+  const book = await importBook(app, runtime, bookFiles.epub, EPUB_TITLE);
+  const generation = await generateChapter(app, runtime, book);
+  const segment = generation.segments.find(item => item.spoken.includes('R&D'));
+  if (!segment) throw new Error('Fixture listening passage missing.');
+  await listenToPassage(app, segment.source_id);
+  const before = generation.segments.slice(0, generation.segments.indexOf(segment)).reduce((sum, item) => sum + item.duration, 0);
+  await expect.poll(() => timelineSeconds(app)).toBeGreaterThan(before + .4);
+  await pausePlayback(app);
+  await expect.poll(async () => {
+    const position = (await runtime.api('book', {id: book.id})).position;
+    return position?.segment_id === segment.id && position.offset > .3;
+  }).toBe(true);
+  const saved = (await runtime.api('book', {id: book.id})).position;
+  if (!saved) throw new Error('Listening position was not saved.');
+  const assertRestored = async () => {
+    await expect(player(app).getByRole('button', {name: 'Play', exact: true})).toBeVisible();
+    await expect.poll(async () => Math.abs(await timelineSeconds(app) - before - saved.offset)).toBeLessThan(.2);
+    const current = (await runtime.api('book', {id: book.id})).position;
+    expect(current).toMatchObject({generation_id: generation.id, segment_id: segment.id, chapter_id: segment.chapter_id, source_id: segment.source_id});
+    expect(Math.abs((current?.offset ?? -1) - saved.offset)).toBeLessThan(.2);
+  };
+  await app.reload();
+  await openSavedBook(app, EPUB_TITLE);
+  await assertRestored();
+  const oldPid = runtime.pid;
+  await app.goto('about:blank');
+  await runtime.restart();
+  expect(runtime.pid).not.toBe(oldPid);
+  await app.goto(runtime.url);
+  await openSavedBook(app, EPUB_TITLE);
+  await assertRestored();
+  expect((await runtime.api('generation', {id: generation.id})).segments).toEqual(generation.segments);
+});
+
+test('phase 2: pause a held renderer and resume without losing completed audio', async ({app, runtime, bookFiles}) => {
+  const book = await importBook(app, runtime, bookFiles.epub, EPUB_TITLE);
+  await selectChapter(app, book.chapters[1]);
+  await runtime.control({op: 'hold-render', after: 1});
+  const generation = await startGeneration(app, runtime, book);
+  await runtime.control({op: 'wait-render-held'});
+  await expect(player(app).getByRole('button', {name: 'Pause preparation', exact: true})).toBeVisible();
+  const held = await runtime.api('generation', {id: generation.id});
+  expect(held.segments.filter(segment => segment.status === 'ready')).toHaveLength(1);
+  await player(app).getByRole('button', {name: 'Pause preparation', exact: true}).click();
+  await expect.poll(async () => (await runtime.api('generation', {id: generation.id})).status).toBe('paused');
+  await expect.poll(async () => (await runtime.api('health', {})).active).toBeNull();
+  await expect(player(app).getByRole('button', {name: 'Resume preparation', exact: true})).toBeEnabled();
+  const paused = await runtime.api('generation', {id: generation.id});
+  expect(paused.segments.filter(segment => segment.status === 'rendering')).toHaveLength(0);
+  await runtime.control({op: 'release-render'});
+  await player(app).getByRole('button', {name: 'Resume preparation', exact: true}).click();
+  const ready = await readyGeneration(app, runtime, generation.id);
+  expect(ready.cast).toEqual(paused.cast);
+  expect(ready.segments[0]).toEqual(paused.segments[0]);
+});
+
+test('phase 2: missing WAV is visible and Repair restores playback', async ({app, runtime, bookFiles}) => {
+  const book = await importBook(app, runtime, bookFiles.epub, EPUB_TITLE);
+  const generation = await generateChapter(app, runtime, book);
+  const damaged = generation.segments.find(segment => segment.spoken.includes('The final evening paragraph'));
+  if (!damaged) throw new Error('Fixture damage passage missing.');
+  await runtime.control({op: 'delete-audio', generation_id: generation.id, segment_id: damaged.id});
+  expect((await runtime.api('generation', {id: generation.id})).segments.find(segment => segment.id === damaged.id)?.status).toBe('ready');
+  await listenToPassage(app, damaged.source_id);
+  await expect(player(app)).toContainText('A saved audio segment is missing or cannot be opened.');
+  await runtime.control({op: 'hold-render'});
+  await player(app).getByRole('button', {name: 'Check and repair audio', exact: true}).click();
+  await runtime.control({op: 'wait-render-held'});
+  await expect(app.getByRole('status')).toContainText('Repair started with the frozen cast and model. Healthy audio will be reused.');
+  await runtime.control({op: 'release-render'});
+  await expect.poll(async () => (await runtime.api('generation', {id: generation.id})).status, {timeout: 30_000}).toBe('ready');
+  const repaired = await runtime.api('generation', {id: generation.id});
+  expect(repaired.cast).toEqual(generation.cast);
+  expect(repaired.segments.filter(segment => segment.id !== damaged.id)).toEqual(generation.segments.filter(segment => segment.id !== damaged.id));
+  await listenToPassage(app, damaged.source_id);
+  const prior = repaired.segments.slice(0, repaired.segments.findIndex(segment => segment.id === damaged.id)).reduce((sum, segment) => sum + segment.duration, 0);
+  await expect.poll(() => timelineSeconds(app)).toBeGreaterThan(prior + .2);
+  await expect(player(app).getByRole('button', {name: 'Check and repair audio', exact: true})).toHaveCount(0);
+  await pausePlayback(app);
+  await expect(player(app).getByText('Saved locally', {exact: true})).toBeVisible();
+});
+
+test('phase 2: sleep timer can be cancelled and pauses at its deadline', async ({page, runtime, bookFiles}) => {
+  await page.clock.install();
+  await page.goto(runtime.url);
+  const book = await importBook(page, runtime, bookFiles.fb2, FB2_TITLE);
+  await generateChapter(page, runtime, book);
+  const settingsButton = player(page).getByRole('button', {name: 'Playback settings', exact: true});
+  await settingsButton.click();
+  const sleep = page.getByRole('dialog').getByRole('combobox', {name: 'Sleep timer', exact: true});
+  await sleep.selectOption('15');
+  await expect(sleep).toHaveValue('active');
+  await sleep.selectOption('off');
+  await expect(sleep).toHaveValue('off');
+  await sleep.selectOption('15');
+  await closeDialog(page);
+  await expect(settingsButton).toHaveAttribute('title', 'Sleep timer is active');
+  await player(page).getByRole('button', {name: 'Play', exact: true}).click();
+  await expect.poll(() => timelineSeconds(page)).toBeGreaterThan(.2);
+  await page.clock.fastForward(15 * 60 * 1000 + 1000);
+  await expect(player(page).getByRole('button', {name: 'Play', exact: true})).toBeVisible();
+  await expect(settingsButton).toHaveAttribute('title', 'Playback settings');
+  await settingsButton.click();
+  await expect(sleep).toHaveValue('off');
+});

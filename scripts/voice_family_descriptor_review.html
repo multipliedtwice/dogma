@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vlad Rimsky · Voice family review</title>
+  <style>
+    :root{--ink:#15322a;--muted:#587067;--green:#245f48;--line:#c9d7cf;--paper:#fbfaf6;--card:#fff;--soft:#edf3ef;--warn:#fff6df;--warn-line:#d7982f}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:18px;line-height:1.45}
+    .top{position:sticky;top:0;z-index:5;background:rgba(251,250,246,.97);border-bottom:1px solid var(--line);padding:12px 20px;backdrop-filter:blur(8px)}
+    .top-inner{max-width:1450px;margin:auto;display:flex;gap:16px;align-items:center}.top strong{white-space:nowrap}.top select{min-width:280px;flex:1}.save{margin-left:auto;color:var(--muted);white-space:nowrap}
+    main{max-width:1450px;margin:0 auto;padding:28px 20px 80px}h1{font-size:2rem;margin:.1em 0}.lede{color:var(--muted);max-width:980px}.priority{background:var(--warn);border-left:5px solid var(--warn-line);padding:12px 16px;margin:22px 0;border-radius:4px}
+    .summary{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:12px;margin:24px 0}.metric{background:var(--soft);border-radius:12px;padding:14px}.metric b{display:block;font-size:1.35rem}.metric span{color:var(--muted);font-size:.9rem}
+    .limited{color:#855000;font-weight:650}.examples{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin:18px 0 30px}.example{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px}.example h3{margin:0;font-size:1.1rem}.example blockquote{margin:0;font-family:Georgia,serif;font-size:1.15rem;flex:1}.example audio{width:100%}
+    table{width:100%;border-collapse:collapse;background:#fff;margin:12px 0 28px}th,td{text-align:left;padding:11px;border-bottom:1px solid var(--line)}th{font-size:.86rem;color:var(--muted)}
+    .decision{background:#fff;border:2px solid var(--green);border-radius:16px;padding:22px}.choice-row{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 24px}.choice{border:1px solid #94aa9f;background:#f7faf8;color:var(--ink);padding:12px 16px;border-radius:10px;font:inherit;cursor:pointer}.choice.selected{background:var(--green);color:#fff;border-color:var(--green)}
+    .fields{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px}.field label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:5px}select,textarea{width:100%;font:inherit;color:var(--ink);background:#fff;border:1px solid #9fb3a8;border-radius:9px;padding:10px}textarea{min-height:90px;margin-top:16px;resize:vertical}
+    .help{color:var(--muted);font-size:.9rem}.empty{color:var(--muted);font-style:italic}.next{display:flex;justify-content:flex-end;margin-top:22px}.next button{font:inherit;padding:12px 20px;border:0;border-radius:10px;background:var(--green);color:#fff;cursor:pointer}
+    @media(max-width:800px){body{font-size:16px}.top-inner{flex-wrap:wrap}.top select{order:3;min-width:0;width:100%;flex:1 0 100%}.save{margin-left:auto}.summary{grid-template-columns:1fr 1fr}.fields{grid-template-columns:1fr 1fr}.examples{grid-template-columns:1fr}main{padding:20px 12px 120px}.decision{padding:15px}}
+  </style>
+</head>
+<body>
+  <header class="top"><div class="top-inner"><strong>Voice family review</strong><select id="familyNav" aria-label="Voice family"></select><span class="save" id="saveState">Loading…</span></div></header>
+  <main id="app"></main>
+  <script src="review.js"></script>
+</body>
+</html>

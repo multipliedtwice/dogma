@@ -1,0 +1,1 @@
+{"$schema":"../gen/schemas/desktop-schema.json","identifier":"main-window","description":"Native dialogs for the main application window only","windows":["main"],"permissions":["core:default","dialog:allow-open","dialog:allow-save"]}

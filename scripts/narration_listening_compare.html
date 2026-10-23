@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calm Versus Normal</title>
+<style>
+  :root { --bg: #f7f5f0; --fg: #1f2a24; --muted: #5d6b63; --card: #ffffff; --line: #d9d4c7; --calm: #2f6b4f; --normal: #8a5a14; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151a17; --fg: #e8ece9; --muted: #a3b0a8; --card: #1f2622; --line: #34403a; --calm: #7cc4a0; --normal: #e0b062; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 4px 0; }
+  .note { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+  .pair { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .where { color: var(--muted); font-size: 13px; }
+  .take { margin-top: 10px; }
+  .tag { font-weight: 700; font-size: 14px; }
+  .calm .tag { color: var(--calm); } .neutral .tag { color: var(--normal); }
+  .text { font: 18px/1.5 Georgia, serif; margin: 2px 0 6px; }
+  audio { width: 100%; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Calm versus Normal, same paragraph</h1>
+  <p class="note">Your saved labels, shown openly. Each pair comes from one paragraph of one recording, so session and room are the same. Playback is at original speed and volume.</p>
+  <div id="pairs">Loading…</div>
+</main>
+<script>
+const label = {calm: 'Calm', neutral: 'Normal'};
+fetch('manifest.json', {cache: 'no-store'}).then(response => response.json()).then(manifest => {
+  const root = document.getElementById('pairs'); root.textContent = '';
+  manifest.pairs.forEach((pair, n) => {
+    const box = document.createElement('section'); box.className = 'pair';
+    const where = document.createElement('div'); where.className = 'where';
+    where.textContent = `Pair ${n + 1} of ${manifest.pairs.length} · ${pair.chapter_id}`; box.append(where);
+    for (const take of pair.takes) {
+      const row = document.createElement('div'); row.className = `take ${take.label}`;
+      const tag = document.createElement('div'); tag.className = 'tag'; tag.textContent = label[take.label];
+      const text = document.createElement('div'); text.className = 'text'; text.textContent = take.text;
+      const audio = document.createElement('audio'); audio.controls = true; audio.preload = 'none'; audio.src = take.audio;
+      audio.setAttribute('controlsList', 'nodownload noplaybackrate');
+      audio.onratechange = () => { if (audio.playbackRate !== 1) audio.playbackRate = 1; };
+      row.append(tag, text, audio); box.append(row);
+    }
+    root.append(box);
+  });
+}).catch(error => { document.getElementById('pairs').textContent = `Could not load: ${error.message}`; });
+</script>
+</body>
+</html>

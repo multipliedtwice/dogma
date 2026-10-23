@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Narration Listening Check</title>
+<style>
+  :root { --bg: #f7f5f0; --fg: #1f2a24; --muted: #5d6b63; --card: #ffffff; --line: #d9d4c7; --accent: #2f6b4f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151a17; --fg: #e8ece9; --muted: #a3b0a8; --card: #1f2622; --line: #34403a; --accent: #7cc4a0; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.5 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 4px 0 4px; }
+  .note { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .count { color: var(--muted); font-size: 14px; }
+  .text { font: 20px/1.55 Georgia, serif; margin: 10px 0 14px; }
+  audio { width: 100%; }
+  .answers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+  button { font: inherit; padding: 14px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button.main { border-color: var(--accent); font-weight: 600; }
+  button.chosen { background: var(--accent); color: var(--card); }
+  .nav { display: flex; justify-content: space-between; margin-top: 14px; }
+  .nav button { padding: 8px 14px; font-size: 15px; }
+  .error { color: #b3261e; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Narration listening check</h1>
+  <p class="note">Listen at normal speed and choose how this narration is delivered. Saved labels and suggestions are hidden. Your answers are stored separately and never change the review.</p>
+  <div class="card" id="card">Loading…</div>
+</main>
+<script>
+const card = document.getElementById('card');
+let manifest, answered = new Set(), chosen = {}, index = 0, saving = false;
+const label = {calm: 'Calm', neutral: 'Normal', uncertain: 'Uncertain', neither: 'Neither'};
+const complete = () => manifest.items.every(item => answered.has(item.item));
+
+// The first unanswered clip after `from`, wrapping around; -1 when every clip
+// has a saved answer. Completion depends on saved answers, never the cursor.
+function nextUnanswered(from) {
+  const count = manifest.items.length;
+  for (let step = 1; step <= count; step++) {
+    const at = (from + step + count) % count;
+    if (!answered.has(manifest.items[at].item)) return at;
+  }
+  return -1;
+}
+
+async function load() {
+  manifest = await (await fetch('manifest.json', {cache: 'no-store'})).json();
+  const progress = await (await fetch('progress', {cache: 'no-store'})).json();
+  if (progress.experiment_id !== manifest.experiment_id) throw new Error('This check changed; reload the page.');
+  answered = new Set(progress.answered);
+  index = complete() ? -1 : nextUnanswered(-1);
+  show();
+}
+
+function go(target) {
+  if (saving) return;
+  index = target;
+  show();
+}
+
+function show(error = '') {
+  if (index < 0 || index >= manifest.items.length) index = complete() ? -1 : nextUnanswered(-1);
+  if (index < 0) {
+    card.innerHTML = `<p><strong>All ${manifest.items.length} clips answered.</strong> Thank you.</p>
+      <p class="note">You can go back to change an answer; the latest one counts.</p>
+      <div class="nav"><button id="back">Back</button><span></span></div>`;
+    document.getElementById('back').onclick = () => go(manifest.items.length - 1);
+    return;
+  }
+  const item = manifest.items[index];
+  const remaining = manifest.items.length - answered.size;
+  card.innerHTML = `<div class="count">Clip ${index + 1} of ${manifest.items.length} · ${remaining} left to answer</div>
+    <div class="text"></div>
+    <audio controls preload="auto" controlsList="nodownload noplaybackrate"></audio>
+    <div class="answers">${manifest.answers.map(code =>
+      `<button data-answer="${code}" class="${['calm', 'neutral'].includes(code) ? 'main' : ''} ${chosen[item.item] === code ? 'chosen' : ''}">${label[code]}</button>`).join('')}</div>
+    <div class="nav"><button id="back">Back</button><button id="next">Next unanswered</button></div>
+    ${error ? `<div class="error">${error}</div>` : ''}`;
+  card.querySelector('.text').textContent = item.text;
+  const audio = card.querySelector('audio');
+  audio.src = item.audio;
+  audio.defaultPlaybackRate = 1; audio.playbackRate = 1; audio.volume = 1;
+  audio.onratechange = () => { if (audio.playbackRate !== 1) audio.playbackRate = 1; };
+  card.querySelectorAll('[data-answer]').forEach(button => button.onclick = () => save(item, button.dataset.answer));
+  document.getElementById('back').onclick = () => go((index - 1 + manifest.items.length) % manifest.items.length);
+  const next = nextUnanswered(index);
+  const nextButton = document.getElementById('next');
+  nextButton.disabled = next < 0 || next === index;
+  nextButton.onclick = () => go(next);
+}
+
+async function save(item, answer) {
+  if (saving) return;
+  saving = true;
+  card.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  try {
+    const response = await fetch('answer', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({experiment_id: manifest.experiment_id, item: item.item, clip_id: item.clip_id, answer})});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Save failed');
+    answered = new Set(result.answered); chosen[item.item] = answer;
+    saving = false;
+    // Advance from the clip that was answered, which is still the current one
+    // because navigation is locked while saving.
+    go(complete() ? -1 : nextUnanswered(manifest.items.findIndex(other => other.item === item.item)));
+  } catch (error) {
+    saving = false;
+    show(`Not saved: ${error.message}. Try again.`);
+  }
+}
+
+load().catch(error => { card.textContent = `Could not load the check: ${error.message}`; });
+</script>
+</body>
+</html>

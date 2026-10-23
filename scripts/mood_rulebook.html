@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mood Rulebook</title>
+<style>
+  :root { --bg: #f7f5f0; --fg: #1f2a24; --muted: #5d6b63; --card: #ffffff; --line: #d9d4c7; --accent: #2f6b4f; --warn: #8a5a14; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151a17; --fg: #e8ece9; --muted: #a3b0a8; --card: #1f2622; --line: #34403a; --accent: #7cc4a0; --warn: #e0b062; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 21px; margin: 4px 0; } h2 { font-size: 15px; margin: 22px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  h3 { font-size: 15px; margin: 16px 0 4px; }
+  .note { color: var(--muted); font-size: 14px; }
+  .row { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 11px 12px; margin: 6px 0;
+         background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: var(--fg); font: inherit; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .chip.approve { border-color: var(--accent); color: var(--accent); } .chip.revise { border-color: var(--warn); color: var(--warn); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin: 10px 0; }
+  .example { border-top: 1px solid var(--line); padding: 10px 0; } .example:first-of-type { border-top: 0; }
+  .text { font: 17px/1.5 Georgia, serif; margin: 4px 0; }
+  .meta { font-size: 13px; color: var(--muted); }
+  button { font: inherit; padding: 9px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button.play { padding: 6px 12px; } button.primary { border-color: var(--accent); font-weight: 600; }
+  button.playing { background: var(--accent); color: var(--card); }
+  label { display: block; margin: 8px 0 4px; } textarea { width: 100%; min-height: 64px; font: inherit; padding: 8px; border-radius: 10px;
+         border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  .verdicts { display: flex; gap: 8px; flex-wrap: wrap; } .verdicts label { display: flex; gap: 6px; align-items: center; margin: 0; }
+  .nav { display: flex; justify-content: space-between; gap: 8px; margin: 14px 0; }
+  ul { margin: 4px 0; padding-left: 20px; } .error { color: #b3261e; } .ok { color: var(--accent); }
+</style>
+</head>
+<body>
+<main id="app">Loading…</main>
+<script>
+const app = document.getElementById('app');
+const player = new Audio();
+let book, feedback = {}, current = null, saving = false, stopAt = null, playingButton = null;
+
+player.addEventListener('timeupdate', () => { if (stopAt !== null && player.currentTime >= stopAt) stop(); });
+player.addEventListener('ended', stop);
+player.addEventListener('ratechange', () => { if (player.playbackRate !== 1) player.playbackRate = 1; });
+function stop() { player.pause(); stopAt = null; if (playingButton) playingButton.classList.remove('playing'); playingButton = null; }
+function play(example, button) {
+  const same = playingButton === button; stop(); if (same) return;
+  player.src = example.audio; player.playbackRate = 1; player.volume = 1;
+  const start = example.start ?? 0; stopAt = example.end ?? null;
+  const begin = () => { player.currentTime = start; player.play(); };
+  if (player.readyState >= 1) begin(); else player.addEventListener('loadedmetadata', begin, {once: true});
+  playingButton = button; button.classList.add('playing');
+}
+const el = (tag, attrs = {}, ...children) => { const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) { if (key === 'class') node.className = value; else if (key.startsWith('on')) node[key] = value; else node.setAttribute(key, value); }
+  for (const child of children.flat()) node.append(child instanceof Node ? child : document.createTextNode(String(child))); return node; };
+const entry = mood => book.entries.find(item => item.mood === mood);
+
+function exampleList(examples, flaggable) {
+  if (!examples.length) return [el('p', {class: 'note'}, 'No playable examples among your explicit choices yet.')];
+  const saved = new Set(feedback[current?.mood]?.flagged_examples ?? []);
+  return examples.map(example => el('div', {class: 'example'},
+    el('div', {class: 'meta'}, `${example.book} · ${example.voice} · ${example.kind}`),
+    el('div', {class: 'text'}, example.text),
+    el('button', {class: 'play', onclick: event => play(example, event.target)}, '▶ Play'),
+    flaggable ? el('label', {class: 'meta'}, el('input', {type: 'checkbox', 'data-flag': example.id, ...(saved.has(example.id) ? {checked: ''} : {})}), ' Not a good example') : ''));
+}
+
+function comparison(part, title) {
+  if (!part) return [];
+  const name = book.entries.find(other => other.mood === part.mood)?.name ?? part.mood;
+  return [el('div', {class: 'meta', style: 'margin-top:10px'}, `${title}: ${name}`),
+    ...(part.example ? exampleList([part.example], false) : [el('p', {class: 'note'}, `No ${name} take by this performer yet.`)])];
+}
+
+function list() {
+  stop(); current = null;
+  const reviewed = Object.keys(feedback).length;
+  app.replaceChildren(el('h1', {}, 'Mood rulebook'),
+    el('p', {class: 'note'}, `Draft definitions written from your own choices. Listen, then approve or revise each one. Feedback is saved separately and never changes clip labels. Reviewed ${reviewed} of ${book.entries.length}.`));
+  let group = '';
+  for (const item of book.entries) {
+    if (item.group !== group) { group = item.group; app.append(el('h2', {}, group)); }
+    const verdict = feedback[item.mood]?.verdict;
+    app.append(el('button', {class: 'row', onclick: () => show(item.mood)},
+      el('span', {}, `${item.name} `, el('span', {class: 'meta'}, `${item.count} · ${item.confidence}`)),
+      el('span', {class: `chip ${verdict ?? ''}`}, verdict ?? 'not reviewed')));
+  }
+}
+
+function show(mood, message = '') {
+  stop(); current = entry(mood); const item = current; const mine = feedback[mood] ?? {};
+  const index = book.entries.indexOf(item);
+  const books = Object.entries(item.books).map(([name, n]) => `${name.replace('reality-benders-1', 'Book 1').replace('reality-benders-2-full', 'Book 2')}: ${n}`).join(', ');
+  const measured = item.measured.clips
+    ? (item.measured.tendencies.length ? el('ul', {}, item.measured.tendencies.map(t => el('li', {}, `${t.measure}: ${t.direction} (${t.sd > 0 ? '+' : ''}${t.sd.toFixed(2)} SD)`)))
+       : el('p', {}, 'No measurement differs by 0.3 SD or more from the same voice\'s Calm/Normal clips.'))
+    : el('p', {}, 'Too few Book 2 whole clips to measure.');
+  app.replaceChildren(
+    el('div', {class: 'nav'}, el('button', {onclick: list}, '← All moods'), el('span', {class: 'meta'}, `${index + 1} of ${book.entries.length}`)),
+    el('h1', {}, item.name), el('div', {class: 'meta'}, `${item.group} · stored as “${item.mood}”`),
+    el('div', {class: 'card'}, el('h3', {}, 'Meaning (draft)'), el('p', {}, item.meaning)),
+    el('div', {class: 'card'}, el('h3', {}, `Boundary: ${item.name} versus ${item.rival_name}`), el('p', {}, item.boundary)),
+    el('p', {class: 'note'}, `Your examples, one performer at a time (${item.sections.length} of ${item.speakers} performers shown). Each performer is compared only with their own takes, never with another character or voice.`),
+    ...(item.sections.length ? item.sections.map(section => el('div', {class: 'card'},
+      el('h3', {}, section.speaker),
+      ...exampleList(section.examples, true),
+      ...comparison(section.baseline, 'Same performer, baseline'),
+      ...comparison(section.rival, 'Same performer, nearest competing mood'))) : [el('div', {class: 'card'}, ...exampleList([], false))]),
+    el('div', {class: 'card'}, el('h3', {}, 'Measured tendencies'),
+      el('p', {class: 'meta'}, `${item.measured.clips} Book 2 whole clips, compared with the same voice's Calm/Normal clips. Exploratory averages, not listening judgements.`), measured),
+    el('div', {class: 'card'}, el('h3', {}, 'Confidence'), el('p', {}, `${item.confidence}: ${item.count} explicit choices (${books || 'none'}), including ${item.split_parts} split part(s).`)),
+    el('div', {class: 'card', id: 'form'}, el('h3', {}, 'Your feedback'),
+      el('div', {class: 'verdicts'}, ['approve', 'revise', 'unsure'].map(code =>
+        el('label', {}, el('input', {type: 'radio', name: 'verdict', value: code, ...(mine.verdict === code ? {checked: ''} : {})}),
+           {approve: 'Approve', revise: 'Revise', unsure: 'Not sure'}[code]))),
+      el('label', {for: 'meaning'}, 'Better wording of the meaning (optional)'), el('textarea', {id: 'meaning'}, mine.meaning_revision ?? ''),
+      el('label', {for: 'distinction'}, `What actually distinguishes it from ${item.rival_name}?`), el('textarea', {id: 'distinction'}, mine.distinction ?? ''),
+      el('label', {for: 'note'}, 'Other notes'), el('textarea', {id: 'note'}, mine.note ?? ''),
+      el('div', {class: 'nav'}, el('button', {class: 'primary', id: 'save', onclick: save}, 'Save'),
+        el('span', {class: message.startsWith('Saved') ? 'ok' : 'error'}, message))),
+    el('div', {class: 'nav'},
+      el('button', {id: 'previous', onclick: () => !saving && show(book.entries[(index - 1 + book.entries.length) % book.entries.length].mood)}, '← Previous'),
+      el('button', {id: 'next', onclick: () => !saving && show(book.entries[(index + 1) % book.entries.length].mood)}, 'Next →')));
+}
+
+async function save() {
+  if (saving || !current) return;
+  const verdict = app.querySelector('input[name=verdict]:checked')?.value;
+  if (!verdict) return show(current.mood, 'Choose Approve, Revise or Not sure first.');
+  const mood = current.mood;
+  const value = {version: book.version, mood, verdict, meaning_revision: app.querySelector('#meaning').value,
+    distinction: app.querySelector('#distinction').value, note: app.querySelector('#note').value,
+    flagged_examples: [...app.querySelectorAll('[data-flag]:checked')].map(box => box.dataset.flag)};
+  saving = true; app.querySelectorAll('button, input, textarea').forEach(node => { node.disabled = true; });
+  try {
+    const response = await fetch('feedback', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(value)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Save failed');
+    feedback = result.feedback; saving = false; show(mood, 'Saved.');
+  } catch (error) {
+    saving = false; show(mood, `Not saved: ${error.message}. Your text is still in the form only until you leave this entry.`);
+    Object.entries({meaning: value.meaning_revision, distinction: value.distinction, note: value.note}).forEach(([id, text]) => { app.querySelector('#' + id).value = text; });
+    app.querySelector(`input[name=verdict][value=${verdict}]`).checked = true;
+  }
+}
+
+(async () => {
+  book = await (await fetch('rulebook.json', {cache: 'no-store'})).json();
+  const progress = await (await fetch('progress', {cache: 'no-store'})).json();
+  if (progress.version !== book.version) throw new Error('The rulebook changed; reload the page.');
+  feedback = progress.feedback; list();
+})().catch(error => { app.textContent = `Could not load the rulebook: ${error.message}`; });
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Book 1 · Bucket labeling</title>
+<style>
+body{margin:0;background:#f6f5ef;color:#203126;font:16px/1.5 system-ui,sans-serif}
+:root{--player-height:58px;scroll-padding-top:calc(var(--player-height) + 12px)}
+main{max-width:1100px;margin:auto;padding:calc(var(--player-height) + 24px) 24px 24px}h1,h2{margin:0 0 8px}h2{font-size:1.2rem}
+section,article{background:white;border:1px solid #d7ded7;border-radius:12px;padding:18px;margin:16px 0}
+.intro{background:#e9f0e8}p{margin:8px 0}a{color:#245b3b}button,select,textarea{font:inherit;border:1px solid #aab9af;border-radius:7px;padding:9px;box-sizing:border-box}
+button{cursor:pointer;background:#eaf0eb;color:#203b2b}button:hover{background:#d7e8da}button:disabled{opacity:.5;cursor:default}.primary{background:#245b3b;color:white}
+.toolbar,.actions,.pagination{display:flex;flex-wrap:wrap;align-items:end;gap:12px}.pagination{justify-content:center;margin:24px 0}
+label{display:flex;flex-direction:column;gap:5px;min-width:0}.grow{flex:1;min-width:220px}select{max-width:100%;width:100%}
+.labels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}.text{font:1.2rem/1.6 Georgia,serif;white-space:pre-wrap;background:#f8f8f4;padding:12px;border-radius:7px}
+audio,textarea{width:100%;margin:8px 0}textarea{min-height:60px}.small,.muted{color:#586b60;font-size:.9rem}.status{font-weight:600}.error{color:#9a3c2b}.good{color:#21673e}.playing{border:2px solid #245b3b}.moved{border:2px solid #b66d24}.tag{display:inline-block;background:#eaf0eb;border-radius:20px;padding:3px 8px;margin:3px;font-size:.85rem}
+details{margin:10px 0}.check{flex-direction:row;align-items:center}#sequence-title{font-weight:600}#save-status{overflow-wrap:anywhere}
+.player-bar{position:fixed;inset:0 0 auto;z-index:20;background:#f6f5ef;border-bottom:1px solid #aab9af;box-shadow:0 2px 8px #20312612;padding:7px 16px}
+.player-inner{max-width:1100px;margin:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.player-bar button{font-size:14px;padding:6px 9px;white-space:nowrap}.player-bar .check{font-size:13px;white-space:nowrap}
+.player-bar audio{width:300px;flex:1 1 250px;height:32px;margin:0;min-width:0}
+.gap-control{display:flex;flex-direction:row;align-items:center;gap:5px;font-size:13px;white-space:nowrap}.gap-control input{width:105px}.gap-control output{min-width:34px;text-align:right}
+#sequence-title{flex:1 1 180px;min-width:0;margin:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+article{scroll-margin-top:calc(var(--player-height) + 12px)}
+.clip-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}.clip-heading h2{margin:0}
+.acoustic-warning{display:inline-block;background:#fff2d7;color:#784600;border:1px solid #d9aa62;border-radius:6px;padding:4px 8px;font-size:.85rem;font-weight:600}
+.acoustic-details{background:#fff9ed;border-left:3px solid #d9aa62;padding:6px 12px;font-size:.9rem}.acoustic-details p{margin:5px 0}
+.pitch-plot{max-width:440px}.pitch-plot svg{display:block;width:100%;max-height:125px}.pitch-plot text{font:10px system-ui;fill:#586b60}.pitch-details{font-size:.9rem;color:#586b60}
+.acoustic-averages{display:flex;flex-wrap:wrap;gap:8px 24px;margin:10px 0;font-size:.9rem}.acoustic-averages>div{flex:1 1 230px}.acoustic-averages span{display:block}.acoustic-averages>p{flex-basis:100%;margin:0;font-size:.8rem}
+.acoustic-hints{background:#eef4ee;border-left:3px solid #8cac94;padding:6px 12px;font-size:.9rem}.hint-choice{border-top:1px solid #cedccd;margin:10px 0;padding:10px 0}.hint-choice p{margin:4px 0}.hint-choice button{font-size:.9rem;padding:6px 9px}.hint-example .text{font-size:1rem}.hint-example audio{height:40px}
+@media(max-width:650px){:root{scroll-padding-top:12px;scroll-padding-bottom:calc(var(--player-height) + 12px)}main{padding:12px 12px calc(var(--player-height) + 12px)}article{scroll-margin-top:12px;scroll-margin-bottom:calc(var(--player-height) + 12px)}.labels{grid-template-columns:1fr}.player-bar{inset:auto 0 0;padding:6px 10px;border-top:1px solid #aab9af;border-bottom:0;box-shadow:0 -2px 8px #20312612}.player-bar button{font-size:13px;padding:5px 7px}.player-bar #play-bucket,.player-bar #stop,.player-bar #next-clip{font-size:15px;padding:8px 10px;min-height:44px}.player-bar .check{font-size:12px}.player-bar audio{flex-basis:200px;order:1}#sequence-title{flex-basis:100px;order:1}}
+
+.mood-suggestions{margin:8px 0 14px}.mood-chips{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto}.mood-chips button{flex:0 0 auto;white-space:nowrap;border-radius:20px;padding:7px 12px;min-height:40px;font-size:14px}.mood-chips button[aria-pressed="true"]{background:#245b3b;color:white}
+</style>
+<header class="player-bar" aria-label="Bucket player"><div class="player-inner">
+<button id="play-bucket" class="primary">Play all</button><button id="stop" disabled>Pause all</button><button id="next-clip" disabled>Next clip</button>
+<audio id="sequence" controls preload="none" aria-label="Current clip"></audio>
+<p id="sequence-title" role="status">Choose a bucket, then start listening.</p>
+<label class="gap-control">Gap <input type="range" id="clip-gap" min="0" max="10" step="0.5" value="2" aria-label="Seconds between clips"><output id="clip-gap-value" for="clip-gap">2.0s</output></label>
+<label class="check"><input type="checkbox" id="follow" checked> Follow clip</label>
+</div></header>
+<main>
+<section class="intro"><h1>Book 1 · Bucket labeling</h1>
+<p>Listen to clips with the same <b>voice family and mood</b>. They should sound like the same voice in the same mood. Change the voice or mood to move a clip immediately. Choosing a mood from the dropdown or suggestions saves it and plays the next clip.</p>
+<p>These are the exact sentence WAVs used for training. Playing a clip does not approve it automatically. Use <b>Fits this bucket</b> after checking it.</p>
+<p class="small">Clips with audio warnings appear first in each bucket. Clips keep their original order within each group.</p>
+<p id="summary" class="small">Loading your saved labels…</p></section>
+<section><div class="toolbar">
+<label>Book <select id="book" aria-label="Book" disabled><option value="book1">Book 1</option><option value="book2">Book 2</option><option value="book3">Book 3</option></select></label>
+<label class="grow">Bucket <select id="bucket" aria-label="Bucket"></select></label>
+<label>Show <select id="filter"><option value="all">All clips</option><option value="pending">Needs verification</option><option value="verified">Verified</option></select></label>
+<button id="refresh">Refresh saved labels</button><button id="save">Save now</button><button id="export">Export review JSON</button>
+</div><p id="bucket-summary"></p><p id="acoustic-summary" class="small"></p><div id="voice-family-editor"></div><p id="save-status" class="status" role="status"></p></section>
+<section><h2>Check this bucket</h2>
+<div class="actions"><button id="confirm-listened" disabled>Confirm listened clips fit</button><button id="undo" disabled>Undo last move</button></div>
+<p class="small">Play all continues from your saved position. Pause all remembers the clip and time, including after refresh. If you move the paused clip, Resume all continues with the next clip. Use the Gap slider in the player bar to choose the pause between clips.</p></section>
+<nav class="pagination"><button id="prev">Previous</button><span id="page-label"></span><button id="next">Next</button></nav>
+<div id="cards"></div>
+<nav class="pagination"><button id="prev-bottom">Previous</button><span id="page-label-bottom"></span><button id="next-bottom">Next</button></nav>
+</main>
+<script src="review-shared.js"></script><script src="bucket-acoustics.js"></script><script src="book-navigation.js"></script><script src="voice-family-editor.js"></script><script src="bucket-review.js"></script><script src="bucket-character-mode.js?v=1"></script>
+</html>

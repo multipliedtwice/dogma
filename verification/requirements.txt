@@ -1,0 +1,2 @@
+-r ../runtime/requirements.txt
+safetensors==0.7.0

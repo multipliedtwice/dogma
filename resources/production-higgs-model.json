@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "checkpoint": "custom-voice-plus-stress-scale-v1",
+  "decision_date": "2026-10-21",
+  "model": {
+    "path": "training-work/higgs-production/models/custom-voice-plus-stress-scale-v1-q8_0.gguf",
+    "sha256": "78f09d20145ab79b8a6d425bc68fe104e3c624a7aea687bb0ff31c3a186374d1",
+    "precision": "q8_0"
+  },
+  "provenance": {
+    "path": "training-work/higgs-production/models/custom-voice-plus-stress-scale-v1-q8_0.provenance.json",
+    "sha256": "6d70be54441a964434b1d895af7306ed5c77e68e9d3cf151eefe5fbaa43ed9d3",
+    "fine_tuning_adapter_sha256": "a5e454feecbb350e190e6b3c6b559b6a9cffaf606914d3589f7cc030da75aa90",
+    "dataset_sha256": "63fed0605946903d7d1cfb7c9800a683d026624685fa2de854f02bbf65d94859"
+  }
+}

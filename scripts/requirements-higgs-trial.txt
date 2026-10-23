@@ -1,0 +1,2 @@
+# Used by the standalone listening-trial spoken-text preparation.
+num2words==0.5.14

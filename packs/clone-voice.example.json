@@ -1,0 +1,12 @@
+{
+  "id": "character-a",
+  "name": "Authorized character performance A",
+  "role": "character",
+  "family": "performer_a",
+  "group": "Character voices",
+  "tags": [],
+  "references": {
+    "neutral": { "audio": "voices/character-a/neutral.wav", "text": "REPLACE WITH THE EXACT TRANSCRIPT OF THE AUTHORIZED RECORDING" },
+    "soft": { "audio": "voices/character-a/soft.wav", "text": "REPLACE WITH THE EXACT TRANSCRIPT OF THIS PERFORMANCE" }
+  }
+}

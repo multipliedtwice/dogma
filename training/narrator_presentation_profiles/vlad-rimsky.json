@@ -1,0 +1,298 @@
+{
+  "schema": 1,
+  "narrator_id": "vlad-rimsky",
+  "description": "Presentation-channel voice behavior derived from the protected Reality Benders Book 1 and Book 2 listener labels.",
+  "channels": {
+    "direct": {
+      "mode": "speaker",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 0,
+        "limitation": "identity-preserving baseline; this rule does not remap the voice"
+      }
+    },
+    "radio": {
+      "mode": "speaker",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 47,
+        "supporting_clips": 47,
+        "books": 2
+      }
+    },
+    "intercom": {
+      "mode": "speaker",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 58,
+        "supporting_clips": 56,
+        "books": 2,
+        "limitation": "supported by the combined radio and public-address sample"
+      }
+    },
+    "public_address": {
+      "mode": "speaker",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 11,
+        "supporting_clips": 9,
+        "books": 1
+      }
+    },
+    "game_ui": {
+      "mode": "fixed",
+      "voice": "mechanical_stats",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 95,
+        "supporting_clips": 93,
+        "books": 2
+      }
+    },
+    "recorded": {
+      "mode": "fixed",
+      "voice": "mechanical_envoy",
+      "status": "provisional",
+      "evidence": {
+        "reviewed_clips": 2,
+        "supporting_clips": 2,
+        "books": 1,
+        "characters": 1,
+        "limitation": "both clips are the same envoy in one chapter"
+      }
+    },
+    "telepathic": {
+      "mode": "mapped",
+      "by_assigned_prefix": {
+        "feminine_": "feminine_4_mechanical",
+        "masculine_": "masculine_6_mechanical"
+      },
+      "by_assigned_tag": {
+        "feminine": "feminine_4_mechanical",
+        "masculine": "masculine_6_mechanical"
+      },
+      "fallback": "review",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 23,
+        "supporting_clips": 20,
+        "books": 1
+      },
+      "target_evidence": {
+        "feminine_4_mechanical": {
+          "status": "reviewed",
+          "reviewed_clips": 23,
+          "supporting_clips": 20,
+          "books": 1
+        },
+        "masculine_6_mechanical": {
+          "status": "provisional",
+          "reviewed_clips": 0,
+          "supporting_clips": 0,
+          "books": 0,
+          "characters": 0,
+          "limitation": "no reviewed male telepathy"
+        }
+      }
+    },
+    "written_text": {
+      "mode": "mapped",
+      "by_assigned_prefix": {
+        "feminine_": "feminine_4_mechanical",
+        "masculine_": "masculine_6_mechanical"
+      },
+      "by_assigned_tag": {
+        "feminine": "feminine_4_mechanical",
+        "masculine": "masculine_6_mechanical"
+      },
+      "fallback": "review",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 12,
+        "supporting_clips": 11,
+        "books": 1
+      },
+      "target_evidence": {
+        "feminine_4_mechanical": {
+          "status": "reviewed",
+          "reviewed_clips": 7,
+          "supporting_clips": 7,
+          "books": 1
+        },
+        "masculine_6_mechanical": {
+          "status": "provisional",
+          "reviewed_clips": 1,
+          "supporting_clips": 1,
+          "books": 1,
+          "characters": 1,
+          "limitation": "one reviewed male written-text example"
+        }
+      }
+    }
+  },
+  "registers": {
+    "game_system": {
+      "mode": "fixed",
+      "voice": "mechanical_stats",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 95,
+        "supporting_clips": 93,
+        "books": 2
+      }
+    },
+    "item_or_stat_card": {
+      "mode": "fixed",
+      "voice": "mechanical_stats",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 95,
+        "supporting_clips": 93,
+        "books": 2,
+        "limitation": "uses the reviewed game/stat readout family"
+      }
+    },
+    "recorded_message": {
+      "mode": "fixed",
+      "voice": "mechanical_envoy",
+      "status": "provisional",
+      "evidence": {
+        "reviewed_clips": 2,
+        "supporting_clips": 2,
+        "books": 1,
+        "characters": 1,
+        "limitation": "both clips are the same envoy in one chapter"
+      }
+    },
+    "transmitted_speech": {
+      "mode": "speaker",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 58,
+        "supporting_clips": 56,
+        "books": 2
+      }
+    },
+    "telepathy": {
+      "mode": "mapped",
+      "by_assigned_prefix": {
+        "feminine_": "feminine_4_mechanical",
+        "masculine_": "masculine_6_mechanical"
+      },
+      "by_assigned_tag": {
+        "feminine": "feminine_4_mechanical",
+        "masculine": "masculine_6_mechanical"
+      },
+      "fallback": "review",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 23,
+        "supporting_clips": 20,
+        "books": 1
+      },
+      "target_evidence": {
+        "feminine_4_mechanical": {
+          "status": "reviewed",
+          "reviewed_clips": 23,
+          "supporting_clips": 20,
+          "books": 1
+        },
+        "masculine_6_mechanical": {
+          "status": "provisional",
+          "reviewed_clips": 0,
+          "supporting_clips": 0,
+          "books": 0,
+          "characters": 0,
+          "limitation": "no reviewed male telepathy"
+        }
+      }
+    },
+    "written_document": {
+      "mode": "mapped",
+      "by_assigned_prefix": {
+        "feminine_": "feminine_4_mechanical",
+        "masculine_": "masculine_6_mechanical"
+      },
+      "by_assigned_tag": {
+        "feminine": "feminine_4_mechanical",
+        "masculine": "masculine_6_mechanical"
+      },
+      "fallback": "review",
+      "status": "reviewed",
+      "evidence": {
+        "reviewed_clips": 12,
+        "supporting_clips": 11,
+        "books": 1
+      },
+      "target_evidence": {
+        "feminine_4_mechanical": {
+          "status": "reviewed",
+          "reviewed_clips": 7,
+          "supporting_clips": 7,
+          "books": 1
+        },
+        "masculine_6_mechanical": {
+          "status": "provisional",
+          "reviewed_clips": 1,
+          "supporting_clips": 1,
+          "books": 1,
+          "characters": 1,
+          "limitation": "one reviewed male written-text example"
+        }
+      }
+    },
+    "quoted_document": {
+      "mode": "mapped",
+      "by_assigned_prefix": {
+        "feminine_": "feminine_4_mechanical",
+        "masculine_": "masculine_6_mechanical"
+      },
+      "by_assigned_tag": {
+        "feminine": "feminine_4_mechanical",
+        "masculine": "masculine_6_mechanical"
+      },
+      "fallback": "review",
+      "status": "provisional",
+      "evidence": {
+        "reviewed_clips": 0,
+        "supporting_clips": 0,
+        "books": 0,
+        "characters": 0,
+        "limitation": "no independently reviewed quoted-document examples"
+      },
+      "target_evidence": {
+        "feminine_4_mechanical": {
+          "status": "provisional",
+          "reviewed_clips": 0,
+          "supporting_clips": 0,
+          "books": 0,
+          "characters": 0,
+          "limitation": "borrowed from written text"
+        },
+        "masculine_6_mechanical": {
+          "status": "provisional",
+          "reviewed_clips": 0,
+          "supporting_clips": 0,
+          "books": 0,
+          "characters": 0,
+          "limitation": "borrowed from written text"
+        }
+      }
+    }
+  },
+  "evidence_summary": {
+    "game_ui": "Book 1 mechanical_stats 30/31; Book 2 mechanical_stats 63/64, with one masculine_6_mechanical.",
+    "telepathic": "Book 2 feminine_4_mechanical 20/23.",
+    "written_text": "Book 2 used a distinct mechanical family in 11/12 reviewed cases.",
+    "recorded": "Book 1 mechanical_envoy 2/2.",
+    "radio_and_public_address": "Reviewed labels preserve the speaking character family."
+  },
+  "evidence_policy": {
+    "statuses": [
+      "reviewed",
+      "provisional"
+    ],
+    "behavior": "Provisional rules keep their suggested voice but always raise a review warning.",
+    "counts": "reviewed_clips is the denominator; supporting_clips used the configured behavior."
+  }
+}

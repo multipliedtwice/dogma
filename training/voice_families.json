@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "description": "Reusable Vlad Rimsky voice families. Character IDs and momentary moods are separate labels.",
+  "families": [
+    {
+      "id": "narrator_baseline",
+      "group": "Narrator",
+      "label": "Narrator baseline"
+    },
+    {
+      "id": "narrator_opening",
+      "group": "Narrator",
+      "label": "Opening"
+    },
+    {
+      "id": "narrator_historical_prose",
+      "group": "Narrator",
+      "label": "Narrator: softer historical prose"
+    },
+    {
+      "id": "masculine_1",
+      "group": "Masculine voices",
+      "label": "Masculine voice 1 (like Imran)"
+    },
+    {
+      "id": "masculine_2",
+      "group": "Masculine voices",
+      "label": "Masculine voice 2 (middle-aged, like Kisly)"
+    },
+    {
+      "id": "masculine_3",
+      "group": "Masculine voices",
+      "label": "Masculine voice 3 (like the pier intercom speaker)"
+    },
+    {
+      "id": "masculine_4",
+      "group": "Masculine voices",
+      "label": "Masculine voice 4 (like Kirill)"
+    },
+    {
+      "id": "masculine_5",
+      "group": "Masculine voices",
+      "label": "Masculine voice 5 (higher pitched, like runner 343)"
+    },
+    {
+      "id": "masculine_6",
+      "group": "Masculine voices",
+      "label": "Masculine voice 6 (mature, like San Sanych)"
+    },
+    {
+      "id": "masculine_6_mechanical",
+      "group": "Masculine voices",
+      "label": "Masculine voice 6 (mechanical)"
+    },
+    {
+      "id": "masculine_7",
+      "group": "Masculine voices",
+      "label": "Masculine voice 7 (young kid)"
+    },
+    {
+      "id": "masculine_8",
+      "group": "Masculine voices",
+      "label": "Masculine voice 8 (lowered)"
+    },
+    {
+      "id": "feminine_1",
+      "group": "Feminine voices",
+      "label": "Feminine voice 1 (like Minno)"
+    },
+    {
+      "id": "feminine_2",
+      "group": "Feminine voices",
+      "label": "Feminine voice 2 (like Tamara)"
+    },
+    {
+      "id": "feminine_3",
+      "group": "Feminine voices",
+      "label": "Feminine voice 3 (like Uline)"
+    },
+    {
+      "id": "feminine_4_mechanical",
+      "group": "Feminine voices",
+      "label": "Feminine voice 4 (mechanical)"
+    },
+    {
+      "id": "feminine_5",
+      "group": "Feminine voices",
+      "label": "Feminine voice 5 (lowered)"
+    },
+    {
+      "id": "nasal",
+      "group": "Special voices",
+      "label": "Nasal"
+    },
+    {
+      "id": "mechanical_stats",
+      "group": "Mechanical voices",
+      "label": "Mechanical stats"
+    },
+    {
+      "id": "mechanical_envoy",
+      "group": "Mechanical voices",
+      "label": "Mechanical envoy"
+    }
+  ],
+  "legacy_aliases": {
+    "protagonist_kirill": "masculine_4"
+  }
+}

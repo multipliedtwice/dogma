@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "note": "Listener-authoritative spoken respellings of non-character terms, per series. Hand-curated release data; the printed text never changes. A respelling may only replace е with э or ё (rimsky.respelling).",
+  "series": [
+    {
+      "id": "f0271ef4b2fe52888ca95c55eb0fa7ac",
+      "name": "Искажающие реальность",
+      "author": "Михаил Атаманов",
+      "series_keys": ["искажающие реальность"],
+      "terms": [
+        {
+          "id": "tek-prefix",
+          "printed": "тек-",
+          "spoken": "тэк-",
+          "match": "hyphen-prefix",
+          "version": 1,
+          "source": "listener request 2026-10-21",
+          "note": "tek read as English tech in every compound that starts with it (тек-купол, тек-щит, тек-барьер, any future тек-X) and in every inflection of it"
+        }
+      ]
+    }
+  ]
+}

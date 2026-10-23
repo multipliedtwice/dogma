@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "narrator": {"id": "narrator-id", "name": "Replace with the actual narrator name"},
+  "rights": {"training_authorized": false, "basis": "Record the actual authorization before importing", "redistribution_authorized": false},
+  "books": [
+    {"id": "book-one", "path": "/absolute/path/to/book-one.epub", "recordings": [
+      {"id": "book-one-chapter-one", "path": "/absolute/path/to/book-one-chapter-one.mp3"}
+    ]},
+    {"id": "book-two", "path": "/absolute/path/to/book-two.epub", "recordings": [
+      {"id": "book-two-chapter-one", "path": "/absolute/path/to/book-two-chapter-one.mp3"}
+    ]}
+  ]
+}

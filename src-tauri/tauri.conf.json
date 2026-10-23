@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Dogma",
+  "version": "0.1.19",
+  "identifier": "app.rimskifikator.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run release:resources && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Dogma",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 620,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src ipc: http://ipc.localhost http://127.0.0.1:*; frame-src 'none'; object-src 'none'; base-uri 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../resources/runtime/": "runtime/",
+      "../resources/packs/": "packs/",
+      "../resources/branding/": "branding/",
+      "../resources/series-characters.json": "series-characters.json",
+      "../resources/series-terms.json": "series-terms.json"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      }
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "epub",
+          "fb2"
+        ],
+        "name": "Ebook",
+        "description": "Electronic book",
+        "role": "Viewer"
+      }
+    ]
+  }
+}

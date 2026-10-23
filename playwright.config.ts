@@ -1,0 +1,32 @@
+import {defineConfig} from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e/specs',
+  testMatch: '**/*.spec.ts',
+  globalSetup: './e2e/global-setup.ts',
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  forbidOnly: true,
+  timeout: 90_000,
+  expect: {timeout: 15_000},
+  outputDir: './test-results',
+  reporter: 'line',
+  use: {
+    browserName: 'chromium',
+    headless: true,
+    viewport: {width: 1280, height: 900},
+    locale: 'en-US',
+    timezoneId: 'UTC',
+    contextOptions: {reducedMotion: 'reduce'},
+    acceptDownloads: true,
+    serviceWorkers: 'block',
+    actionTimeout: 15_000,
+    navigationTimeout: 20_000,
+    screenshot: 'off',
+    video: 'off',
+    trace: {mode: 'retain-on-failure', screenshots: false},
+    launchOptions: {args: ['--autoplay-policy=no-user-gesture-required']},
+  },
+  projects: [{name: 'chromium'}],
+});
