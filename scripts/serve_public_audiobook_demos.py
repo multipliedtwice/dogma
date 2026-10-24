@@ -17,6 +17,20 @@ BOOKS = {'en': ('en-gift-of-magi', 'The Gift of the Magi', 'English'),
 HASH_FILE = re.compile(r'(?:[a-f0-9]{64}\.(?:mp3|wav|json)|player-[a-f0-9]{64}\.js|recognition-[a-f0-9]{64}\.json)\Z')
 TYPES = {'.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json; charset=utf-8',
          '.js': 'text/javascript; charset=utf-8', '.html': 'text/html; charset=utf-8'}
+LIGHT_CSS = (':root{color-scheme:light}body{background:#fbfaf7;color:#252c28}'
+             'a{color:#22634f}a:hover{color:#154a73}'
+             'article{background:#fff;border-color:#d6ded7}'
+             '.language{color:#58675e}audio{color-scheme:light}'
+             'p.active,[data-start].active{background:#e3efe6;color:#183b29}')
+
+
+def light_page(payload):
+    """Override presentation in the HTTP response, leaving frozen pages intact."""
+    override = ('<style data-dogma-listening-theme="light">' + LIGHT_CSS + '</style>').encode('utf-8')
+    styles = list(re.finditer(br'</style\s*>', payload, re.I))
+    head = re.search(br'</head\s*>', payload, re.I)
+    position = styles[-1].end() if styles else head.start() if head else len(payload)
+    return payload[:position] + override + payload[position:]
 
 
 def no_links(path):
@@ -107,8 +121,8 @@ def hub(root):
         cards.append('<article><p class="language">'+locale+'</p><h2>'+html.escape(title)+'</h2><p>'+html.escape(text)+'</p>'+link+'</article>')
     return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
             '<title>Dogma audiobook demos</title><style>body{max-width:850px;margin:3rem auto;padding:1rem;'
-            'font:18px/1.6 system-ui;background:#151719;color:#eee}article{border:1px solid #46505a;'
-            'border-radius:12px;margin:1rem 0;padding:1.5rem}a{color:#aee}.language{color:#aeb7c2}</style>'
+            'font:18px/1.6 system-ui}article{border:1px solid;'
+            'border-radius:12px;margin:1rem 0;padding:1.5rem}' + LIGHT_CSS + '</style>'
             '<h1>Dogma audiobook demos</h1><p>Original public-domain stories. Machine-verified narration; '
             'human listening approval is not recorded. Refresh for the latest preview.</p>'+''.join(cards)+'</html>').encode('utf-8')
 
@@ -194,6 +208,15 @@ class ListeningHandler(BaseHTTPRequestHandler):
             return
         with stream:
             kind = TYPES[Path(filename).suffix]
+            if filename == 'index.html':
+                payload = light_page(stream.read())
+                self.send_headers(200, len(payload), kind, cache='no-store')
+                if not head:
+                    try:
+                        self.wfile.write(payload)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                return
             size, start, end, status = info.st_size, 0, info.st_size-1, 200
             range_header = self.headers.get('Range')
             content_range = None
