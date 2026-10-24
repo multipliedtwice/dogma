@@ -14,6 +14,7 @@ import freeze_public_audiobook_demo as freeze
 import debug_higgs_one_shot as debug
 from rimsky import russian_pronunciation as rules
 from rimsky import contextual_stress
+from verification.luna_test_support import responder
 
 
 TEXT='Никого не видел: коготь и коготки.'
@@ -96,7 +97,7 @@ class PhoneticIntegration(unittest.TestCase):
         answer={'decisions':[{'id':'c0000','word':'стоит','stressed':'стои́т','basis':'A person is standing.'}]}
         with patch.object(public,'analyse',return_value={'unit':'u','auto':[],'context':[],'regular':[],'stats':{}}),\
              patch.object(public,'auto_pronunciation',return_value=(selected,copy.deepcopy(AUTO))),\
-             patch.object(public.context_builder,'call',return_value=(answer,metadata)):
+             patch.object(public.context_builder,'call',side_effect=responder(answer,metadata)):
             result,details=public.prepare_rows([unit],{},[],{'overrides':[]},self.out/'stoit')
         row=result[0];self.assertEqual(row['text'],source);self.assertEqual(row['spoken'],source)
         self.assertIn('стои́т вышеписанный',row['synthesis_text'])

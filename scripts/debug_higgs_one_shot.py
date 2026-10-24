@@ -124,6 +124,8 @@ def freeze(source,output,chapters):
     from rimsky.yo_restoration import yo_block
     hp=output/'preparation/homograph/homograph.answer.json';yp=output/'preparation/yo/yo.answer.json'
     hs=read(hp);validate_adjudication(hs);validate_adjudication(read(yp),'yo')
+    import build_yo_restoration as yo_builder
+    yo_builder.validate_frozen_answer(yp)
     cp=output/'preparation/context/answer.json';context_block=context_builder.block(cp)
     yo=yo_block(yp);records=[];units=[]
     for cid in chapters:
@@ -175,6 +177,8 @@ def planned(output,ready):
     basic.checked(output/'prepared-inputs.json',ready['preparation_sha256'])
     basic.checked(output/'preparation/homograph/homograph.answer.json',ready['homograph_answer_sha256'])
     basic.checked(output/'preparation/yo/yo.answer.json',ready['yo_answer_sha256'])
+    import build_yo_restoration as yo_builder
+    yo_builder.validate_frozen_answer(output/'preparation/yo/yo.answer.json')
     import build_contextual_stress as context_builder
     basic.checked(Path(context_builder.__file__),ready['context_builder_sha256'])
     basic.checked(output/'preparation/context/answer.json',ready['context_answer_sha256'])

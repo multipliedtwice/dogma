@@ -9,6 +9,7 @@ from unittest.mock import Mock,patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'runtime')]
 import prepare_public_demo_pronunciation_v4 as m
+from verification.luna_test_support import responder
 
 FUTURE='Как оштрафуют его, мерзавца, так он узнает у меня, что значит собака и прочий бродячий скот!'
 PRESENT='Каждый день он узнает что-нибудь новое.'
@@ -47,14 +48,14 @@ class ContextV4(unittest.TestCase):
             'executable':sys.executable,'executable_sha256':m.file_digest(Path(sys.executable)),
             'structured_call_sha256':m.file_digest(Path(m.builder.codex_analysis.__file__))}
         def luna(system,request,*args):
-            return {'decisions':[{'id':i['id'],'choice':'yo' if 'Каждый день' in i['sentence'] else 'e',
-                'word':i['candidate_yo'] if 'Каждый день' in i['sentence'] else i['candidate_e'],'basis':'Sentence meaning.'} for i in request['items']]},metadata
+            return {'decisions':{i['id']:{'choice':next(c for c in i['candidates'] if ('ё' in c)==('Каждый день' in i['sentence'])),
+                'basis':'Sentence meaning.'} for i in request['items']}}
         def context_luna(system,request,*args):
-            return {'decisions':[{'id':i['id'],'word':i['word'],'stressed':i['word'].replace('узнает','узна́ет'),'basis':'Future meaning.'}
-                for i in request['items']]},{**metadata,'policy':m.contextual_stress.RULE}
+            return {'decisions':{i['id']:{'choice':i['word'].replace('узнает','узна́ет'),'basis':'Future meaning.'} for i in request['items']}}
         with patch('rimsky.auto_pronunciation.yo_witnesses',side_effect=self.witnesses),patch.object(m,'analyse',side_effect=analyse),\
-             patch.object(m.builder,'call',side_effect=luna),patch.object(m.context_builder,'call',side_effect=context_luna),\
-             patch.object(m,'context_adjudicate',side_effect=adjudicate),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
+             patch.object(m.builder,'call',side_effect=responder(luna,metadata)),\
+             patch.object(m.context_builder,'call',side_effect=responder(context_luna,{**metadata,'policy':m.contextual_stress.RULE})),\
+             patch.object(m,'context_adjudicate',side_effect=AssertionError('No third Opus contextual vote')),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
             prepared,details=m.prepare_rows(units,{},[],HOMOGRAPH,self.out)
         self.assertIn('узна́ет',prepared[0]['synthesis_text']);self.assertNotIn('узнаёт',prepared[0]['synthesis_text'])
         self.assertIn('узнаёт',prepared[1]['synthesis_text']);self.assertEqual(units,before);self.assertEqual(details['context_conflicts'],0)
@@ -104,7 +105,8 @@ class ContextV4(unittest.TestCase):
         details={'policy':'stress-rare-v4','context_policy':m.RULE,'context_conflicts':0}
         m.immutable(self.out/'pronunciation/result.json',{'assignment':{'pronunciation':details,'units':[{'synthesis_text':'Он узна́ет.'}]}})
         m.immutable(self.out/'pronunciation/binding.json',{'implementation_sha256':m.file_digest(m.SELF),'dependencies':m.dependencies()})
-        with patch.object(m.legacy,'freeze') as freeze:m.freeze(self.out);freeze.assert_called_once_with(self.out,None)
+        with patch.object(m.builder,'validate_frozen_answer'),patch.object(m.context_builder,'block'),patch.object(m.legacy,'freeze') as freeze:
+            m.freeze(self.out);freeze.assert_called_once_with(self.out,None)
         result=m.read(self.out/'pronunciation/result.json');result['assignment']['pronunciation']['context_conflicts']=1
         (self.out/'pronunciation/result.json').write_text(__import__('json').dumps(result),encoding='utf8')
         with patch.object(m.legacy,'freeze') as freeze:

@@ -143,6 +143,21 @@
 
 ## Preparation layers (user findings, 2026-10-17)
 
+- User decision, 2026-10-24: YO ambiguity and dictionary-context stress preprocessing
+  first request one `gpt-6-luna` low opinion with self-rated integer confidence 0–100.
+  Keep an unchanged bound preparation proposal after that single valid opinion.
+  EVERY proposed change requires a second independent opinion, even at confidence
+  100; missing/unmarked/unknown proposals also require it. Confidence never decides
+  routing. Stress uses the accurately labeled Silero+HS/YO/guard selected snapshot;
+  YO uses the categorical Silero е/ё witness. Pass 2 sees only the changed subset,
+  the same baseline/witnesses and source, never pass 1's choice/reason/score.
+  Counterbalance item/candidate order and check the actual inflected form. The
+  SECOND valid opinion is authoritative when requested; preserve/report both and
+  any disagreement without an Opus/third vote. Malformed/missing required evidence
+  holds preparation. Exact candidate enums, isolated audited single-execution CLI
+  calls and bounded transport retries remain required. Old policy artifacts stay
+  immutable; use new cache/output namespaces.
+
 - User decision, 2026-10-24: dictionary homographs receive contextual stress
   decisions from GPT-6 Luna (`gpt-6-luna`, Codex CLI, low effort), including
   words left unmarked by taggers and cases where taggers agree. Bind the exact

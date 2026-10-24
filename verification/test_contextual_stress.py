@@ -5,6 +5,7 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'runtime')]
 from rimsky import contextual_stress as m
 import build_contextual_stress as builder
+from verification.luna_test_support import responder,metadata_evidence
 
 
 class ContextStress(unittest.TestCase):
@@ -14,6 +15,7 @@ class ContextStress(unittest.TestCase):
         self.metadata=dict(zip(('provider','model','effort'),builder.PIN))|{'policy':m.RULE,'requested_model':'gpt-6-luna',
             'model_provenance':'explicit-cli-model-selection','cli_version':'fixture','executable':str(self.exe),
             'executable_sha256':m.file_digest(self.exe),'structured_call_sha256':m.file_digest(Path(builder.codex_analysis.__file__))}
+        self.metadata=metadata_evidence(self.metadata,self.out/'metadata-evidence')
     def answer(self,rows,mark):
         req=m.request(rows);answer={'decisions':[{'id':i['id'],'word':i['word'],'stressed':mark,'basis':'Sentence meaning.'} for i in req['items']]}
         m.validate(answer,req)
@@ -76,21 +78,21 @@ class ContextStress(unittest.TestCase):
     def test_cache_actual_evidence_and_policy_bindings_are_rechecked(self):
         inputs=[{'source':'Билет стоит дорого.','selected':'Билет стоит дорого.'}]
         answer={'decisions':[{'id':'c0000','word':'стоит','stressed':'сто́ит','basis':'Price context.'}]}
-        with patch.object(builder,'call',return_value=(answer,self.metadata)) as call:
+        with patch.object(builder,'call',side_effect=responder(answer,self.metadata)) as call:
             first=builder.prepare(inputs,self.out/'prepared');second=builder.prepare(inputs,self.out/'prepared')
-            self.assertEqual(first,second);call.assert_called_once()
+            self.assertEqual(first,second);self.assertEqual(call.call_count,2)
         self.assertEqual(first,builder.block(self.out/'prepared/answer.json'))
-        rp=next((self.out/'prepared/batches').glob('*.request.json'));bound=builder.read(rp)
+        rp=next((self.out/'prepared/batches').glob('*/pass-1/request.json'));bound=builder.read(rp)
         self.assertEqual([bound[k] for k in ('policy','provider','model','effort')],[m.RULE,*builder.PIN])
-        ap=next(p for p in (self.out/'prepared/batches').glob('*.answer.json') if '.attempt-' not in p.name)
-        saved=builder.read(ap);saved['metadata']['model']='claude-opus-5-5';ap.write_text(json.dumps(saved),encoding='utf8')
+        ap=next((self.out/'prepared/batches').glob('*/pass-1/answer.json'))
+        saved=builder.read(ap);saved['raw']['metadata']['model']='claude-opus-5-5';ap.write_text(json.dumps(saved),encoding='utf8')
         with self.assertRaises(ValueError):builder.block(self.out/'prepared/answer.json')
     def test_substantive_invalid_answer_holds_without_persuasion_retry(self):
         inputs=[{'source':'Здесь стоит человек.','selected':'Здесь стоит человек.'}]
         bad={'decisions':[{'id':'c0000','word':'стоит','stressed':'стоит','basis':'Unmarked is not an answer.'}]}
-        with patch.object(builder,'call',return_value=(bad,self.metadata)) as call:
+        with patch.object(builder,'call',side_effect=responder(bad,self.metadata)) as call:
             with self.assertRaises(ValueError):builder.prepare(inputs,self.out/'prepared')
-            call.assert_called_once()
+            self.assertEqual(call.call_count,1)
         with patch.object(builder,'call') as call,self.assertRaises(ValueError):builder.prepare(inputs,self.out/'prepared')
         call.assert_not_called()
 

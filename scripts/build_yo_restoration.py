@@ -18,10 +18,13 @@ from rimsky import yo_restoration as yo
 from build_homograph_stress import FOLDER, read, native_texts, lexicon
 from rimsky import codex_analysis
 from rimsky.cli_process import run_cli
+import independent_luna_passes as independent
 
 BATCH = 25
-POLICY = 'yo-all-ambiguous-luna-low-v1'
+POLICY = 'yo-all-ambiguous-luna-change-check-v3'
 PIN = ('codex_cli', 'gpt-6-luna', 'low')
+DUAL_SYSTEM=yo.SYSTEM+(' For this transport, select the FULL candidate spelling in choice and return only the exact '
+    'per-item decision object required by the schema, with basis. Do not emit legacy e/yo labels or extra word fields.')
 
 
 def immutable(path,value):
@@ -40,9 +43,18 @@ def validate_provider(metadata):
         raise ValueError('Missing or changed isolated Luna CLI provenance')
     if file_digest(Path(metadata['executable']))!=metadata['executable_sha256']:
         raise ValueError('YO CLI executable changed')
+    if not metadata.get('cli_evidence'):raise ValueError('Missing audited single-execution YO CLI evidence')
+    if metadata.get('cli_evidence'):
+        path=Path(metadata['cli_evidence'])
+        if file_digest(path/'manifest.json')!=metadata.get('cli_evidence_sha256'):raise ValueError('YO raw CLI evidence changed')
+        proof=read(path/'manifest.json')
+        if proof.get('max_attempts')!=1:raise ValueError('YO CLI execution was not single-attempt')
+        for relative,checksum in proof['files'].items():
+            if not (path/relative).resolve().is_relative_to(path.resolve()) or file_digest(path/relative)!=checksum:raise ValueError('YO raw CLI artifact changed')
 
 
-def call(system,body,contract,out,tag):
+def call(system,body,contract,out,tag,*,evidence_dir=None):
+    if evidence_dir is None:evidence_dir=out/'direct-calls'/tag
     executable=Path(codex_analysis.codex_executable())
     version=run_cli([str(executable),'--version'],timeout=20)
     if version.returncode or not version.stdout.strip():raise ValueError('Cannot pin Codex CLI version')
@@ -50,7 +62,8 @@ def call(system,body,contract,out,tag):
         'model_provenance':'explicit-cli-model-selection','cli_version':version.stdout.strip(),
         'executable':str(executable),'executable_sha256':file_digest(executable),
         'structured_call_sha256':file_digest(Path(codex_analysis.__file__))}
-    answer=codex_analysis.structured_call(system,body,contract,model=PIN[1],reasoning_effort=PIN[2])
+    answer=codex_analysis.structured_call(system,body,contract,model=PIN[1],reasoning_effort=PIN[2],max_attempts=1,evidence_dir=evidence_dir)
+    if evidence_dir is not None:metadata.update(cli_evidence=str(evidence_dir),cli_evidence_sha256=file_digest(evidence_dir/'manifest.json'))
     if Path(codex_analysis.codex_executable()).resolve()!=executable.resolve():raise ValueError('Codex executable selection changed during YO call')
     validate_provider(metadata)
     return answer,metadata
@@ -86,60 +99,81 @@ def analyse_texts(texts, names, common, ruaccent=yo.ruaccent_yo, *, force_all=Tr
     return decisions, rows, stats
 
 
-def adjudicate(out, req):
-    items = req['items']; batches = []
-    for start in range(0, len(items), BATCH):
-        part = {'task': req['task'], 'items': items[start:start+BATCH]}
-        ids = [i['id'] for i in part['items']]; contract = yo.schema(ids)
-        bound = {'policy':POLICY,'provider':PIN[0],'model':PIN[1],'effort':PIN[2],
-                 'system': yo.SYSTEM, 'request': part, 'schema': contract}
-        sha = digest(bound); done = out/'batches'/f'batch-{sha[:16]}.answer.json'
-        if done.exists():
-            saved = read(done)
-            if saved.get('request_sha256')!=sha or saved.get('ids')!=ids:raise ValueError('Cached YO request binding changed')
-            ap=out/'batches'/f"batch-{sha[:16]}.attempt-{saved['attempts']-1}.answer.json"
-            if file_digest(ap)!=saved.get('attempt_answer_sha256') or any(read(ap).get(k)!=saved[k] for k in ('answer','metadata')):
-                raise ValueError('Cached YO answer differs from immutable attempt evidence')
-            validate_provider(saved['metadata']);validate_answer(saved['answer'],part);batches.append(saved);continue
-        body = part
-        for attempt in range(3):
-            path = out/'batches'/f'batch-{sha[:16]}.attempt-{attempt}.request.json'
-            existed=path.exists()
-            immutable(path, {**bound, 'request': body})
-            print('YO BATCH', sha[:8], len(ids), 'items attempt', attempt, flush=True)
-            ap=path.with_name(path.name.replace('.request', '.answer'));fp=path.with_name(path.name.replace('.request','.failure'))
-            if ap.exists():
-                result=read(ap)
-                if result['request_sha256']!=file_digest(path):raise ValueError('YO attempt request changed')
-                answer,metadata=result['answer'],result['metadata']
-            elif fp.exists():
-                if read(fp).get('request_sha256')!=file_digest(path):raise ValueError('YO failure request binding changed')
-                continue
-            else:
-                if existed:raise ValueError('Unfinished immutable YO attempt; inspect prior worker before a new output')
-                try:answer,metadata=call(yo.SYSTEM,body,contract,out,sha[:8])
-                except Exception as error:
-                    immutable(fp,{'request_sha256':file_digest(path),'error':type(error).__name__+': '+str(error)})
-                    if attempt==2:raise
-                    continue
-                immutable(ap,{'answer':answer,'metadata':metadata,'request_sha256':file_digest(path)})
-            validate_provider(metadata)
-            try:validate_answer(answer, part)
-            except (ValueError, KeyError, TypeError) as exc:
-                if attempt == 2:raise
-                body = {**part, 'validation_errors': str(exc)[:1500]}; continue
-            saved = {'request_sha256': sha, 'ids': ids, 'answer': answer, 'metadata': metadata, 'attempts': attempt + 1,
-                     'attempt_answer_sha256':file_digest(ap)}
-            immutable(done, saved); batches.append(saved); break
-        else:raise ValueError('YO bounded attempts exhausted; preserved failures require review')
+def dual_items(part):
+    result=[]
+    for i in part['items']:
+        witnesses=i.get('upstream_witnesses',i.get('witnesses',{}));choice=witnesses.get('silero')
+        existing=i['candidate_'+choice] if choice in ('e','yo') else None
+        result.append({'id':i['id'],'sentence':i['sentence'],'word':i['word'],'candidates':[i['candidate_e'],i['candidate_yo']],
+            'baseline':existing,'baseline_stage':'Silero YO witness; missing or noncategorical witness is unknown',
+            **{k:i[k] for k in ('witnesses','upstream_witnesses','dictionary_forms') if k in i}})
+    return result
+
+
+def decoded_answer(part,selections):
+    lookup={r['id']:r for r in selections};answer={'decisions':[]}
+    for item in part['items']:
+        vote=lookup[item['id']];word=vote['choice']
+        answer['decisions'].append({'id':item['id'],'choice':'e' if word==item['candidate_e'] else 'yo',
+                                   'word':word,'basis':vote['basis'][:200]})
+    validate_answer(answer,part);return answer
+
+
+def validate_batch(saved):
+    part=saved['request'];folder=Path(saved['consensus_path']).parent
+    key=digest({'policy':POLICY,'pin':PIN,'system':DUAL_SYSTEM,'request':part,'selection':independent.SELECTION,
+            'helper_sha256':file_digest(Path(independent.__file__))})
+    if (saved.get('policy')!=POLICY or saved.get('request_sha256')!=key or folder.name!=key
+            or file_digest(folder/'consensus.json')!=saved['consensus_sha256']):
+        raise ValueError('YO independent consensus changed')
+    manifest=read(folder/'consensus.json')
+    selections=independent.verify(manifest,folder,dual_items(part),part,policy=POLICY,system=DUAL_SYSTEM,pin=PIN,validate_provider=validate_provider)
+    if saved['answer']!=decoded_answer(part,selections) or saved['selections']!=selections or saved['metadata']!=manifest['passes'][-1]['metadata']:
+        raise ValueError('YO selected output differs from conditional independent opinions')
+    return saved
+
+
+def adjudicate(out,req):
+    batches=[]
+    for start in range(0,len(req['items']),BATCH):
+        part={'task':req['task'],'items':req['items'][start:start+BATCH]}
+        key=digest({'policy':POLICY,'pin':PIN,'system':DUAL_SYSTEM,'request':part,'selection':independent.SELECTION,
+            'helper_sha256':file_digest(Path(independent.__file__))})
+        folder=out/'batches'/key;done=folder/'batch.json'
+        if done.exists():saved=validate_batch(read(done))
+        else:
+            try:manifest=independent.run(dual_items(part),part,folder,policy=POLICY,system=DUAL_SYSTEM,pin=PIN,
+                call=lambda system,request,schema,**kwargs:call(system,request,schema,out,key[:8],**kwargs),validate_provider=validate_provider)
+            except ValueError:
+                immutable(out/'unresolved.json',{'policy':POLICY,'status':'invalid_or_missing_independent_vote','batch':str(folder),
+                    'request':part,'human_approval':False});raise
+            saved={'policy':POLICY,'request':part,'request_sha256':key,'answer':decoded_answer(part,manifest['selected']),
+                'metadata':manifest['passes'][-1]['metadata'],'selections':manifest['selected'],
+                'consensus_path':str(folder/'consensus.json'),'consensus_sha256':file_digest(folder/'consensus.json')}
+            immutable(done,saved);validate_batch(saved)
+        batches.append(saved)
     return batches
+
+
+def validate_frozen_answer(path):
+    saved=read(path);request=read(path.parent/'yo.request.json')
+    if saved.get('policy')!=POLICY or saved['request_sha256']!=file_digest(path.parent/'yo.request.json'):
+        raise ValueError('YO frozen answer is not the conditional independent-check policy')
+    batches=[validate_batch(batch) for batch in saved['independent_batches']]
+    merged={'decisions':[d for batch in batches for d in batch['answer']['decisions']]}
+    validate_answer(merged,request['request'])
+    if merged!=saved['answer']:raise ValueError('YO frozen decisions changed')
+    expected=yo.decisions_from(request['bindings'],merged);selections={s['id']:s for batch in batches for s in batch['selections']}
+    expected=[{**d,'two_luna':selections[f'y{n:04d}']} for n,d in enumerate(expected)]
+    if saved['decisions']!=expected:raise ValueError('YO frozen occurrence/two-pass records changed')
+    return saved
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--chapters', nargs='+', default=['c0001', 'c0002', 'c0003'])
     p.add_argument('--generations', nargs='+', default=['audio-palette-v3-full12', 'audio-palette-v3-descriptors'])
-    p.add_argument('--output', type=Path, default=FOLDER/'yo-restoration-all-luna-v1')
+    p.add_argument('--output', type=Path, default=FOLDER/'yo-restoration-luna-change-check-v3')
     p.add_argument('--book-fixes', type=Path, help='Apply the same verified spoken-text fix list as the target render')
     p.add_argument('--dry-run', action='store_true', help='Count classes and print the adjudication rows without calling the provider')
     a = p.parse_args(); out = a.output
@@ -152,6 +186,9 @@ def main():
         return
     out.mkdir(parents=True, exist_ok=True)
     req = yo.request(rows)
+    for item,row in zip(req['items'],rows,strict=True):
+        item['upstream_witnesses']=row['witnesses']
+        if row.get('dictionary_forms'):item['dictionary_forms']=row['dictionary_forms']
     bound = {'rule': yo.RULE,'policy':POLICY,'provider':PIN[0],'model':PIN[1],'effort':PIN[2], 'system': yo.SYSTEM, 'request': req, 'bindings': [{k: r[k] for k in ('sha256', 'word', 'index', 'surface', 'yo', 'kind', 'chapter', 'witnesses')} for r in rows],
              'auto_decisions_sha256': digest(decisions), 'chapters': a.chapters, 'generations': a.generations,
              'book_fixes_sha256': file_digest(a.book_fixes) if a.book_fixes else None,
@@ -162,9 +199,13 @@ def main():
     batches = adjudicate(out, req) if rows else []
     merged = {'decisions': [d for b in batches for d in b['answer']['decisions']]}
     yo.validate(merged, req)
-    saved = {'rule': yo.RULE,'policy':POLICY, 'request_sha256': file_digest(path), 'answer': merged, 'stats': stats,
-             'decisions': decisions + yo.decisions_from(rows, merged),
+    selections={s['id']:s for batch in batches for s in batch['selections']}
+    if decisions:raise ValueError('Automatic ambiguous YO choices are forbidden')
+    frozen_decisions=[{**d,'two_luna':selections[f'y{n:04d}']} for n,d in enumerate(yo.decisions_from(rows,merged))]
+    saved = {'rule': yo.RULE,'policy':POLICY,'selection_policy':independent.SELECTION, 'request_sha256': file_digest(path), 'answer': merged, 'stats': stats,
+             'decisions': frozen_decisions,
              'metadata': {'batches': [{'request_sha256': b['request_sha256'], **b['metadata']} for b in batches]},
+             'independent_batches':batches,
              'human_approval': False, 'scope': 'Text-only YO preparation; no audio, recognition or listening approval'}
     immutable(out/'yo.answer.json', saved)
     import collections

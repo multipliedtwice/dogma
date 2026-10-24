@@ -406,6 +406,10 @@ def freeze(folder, music_path=None):
     verify_assignment_source(folder, assignment)
     if assignment['assigned_sha256'] != file_digest(folder / 'analysis/assigned.json'):
         raise ValueError('Pronunciation no longer binds to analysis')
+    if assignment.get('pronunciation',{}).get('context_policy')=='public-demo-luna-change-check-yo-context-stress-v3':
+        import build_yo_restoration as yo_builder,build_contextual_stress as context_builder
+        yo_builder.validate_frozen_answer(folder/'pronunciation/yo-v4/yo.answer.json')
+        context_builder.block(folder/'pronunciation/yo-v4/dictionary-context/answer.json')
     for original, unit in zip(assigned['units'], assignment['units'], strict=True):
         if original['id'] != unit['id'] or original['text'] != unit['text']:
             raise ValueError('Pronunciation reordered or changed source units')

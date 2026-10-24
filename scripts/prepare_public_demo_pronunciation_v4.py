@@ -18,6 +18,7 @@ import freeze_public_audiobook_demo as legacy
 import build_yo_restoration as builder
 import build_homograph_stress as stress_builder
 import build_contextual_stress as context_builder
+import independent_luna_passes as independent
 from rimsky import yo_restoration as yo,homograph_stress as hs
 from rimsky import russian_pronunciation as phonetics
 from rimsky import contextual_stress
@@ -25,7 +26,7 @@ from rimsky.auto_pronunciation import auto_pronunciation,policy_options
 from rimsky.util import digest,file_digest
 
 SELF=Path(__file__).resolve()
-RULE='public-demo-contextual-yo-verb-stress-v1'
+RULE='public-demo-luna-change-check-yo-context-stress-v3'
 PIN=('claude_cli','claude-opus-5-5','high')
 VOWELS='аеёиоуыэюя'
 read=legacy.read
@@ -38,7 +39,7 @@ SYSTEM=yo.SYSTEM+(' For these ambiguous finite-verb items, jointly decide the co
 
 
 def dependencies():
-    modules=(legacy,builder,stress_builder,context_builder,yo,hs,phonetics,contextual_stress)
+    modules=(legacy,builder,stress_builder,context_builder,independent,yo,hs,phonetics,contextual_stress)
     return {str(Path(m.__file__).resolve().relative_to(ROOT)).replace('\\','/'):file_digest(Path(m.__file__)) for m in modules}|{
         SELF.relative_to(ROOT).as_posix():file_digest(SELF),'runtime/rimsky/auto_pronunciation.py':file_digest(ROOT/'runtime/rimsky/auto_pronunciation.py')}
 
@@ -170,35 +171,37 @@ def prepare_rows(units,names,common,homograph,out):
     analyses=[analyse(u,names,common) for u in units];immutable(out/'analysis.json',{'rule':RULE,'units':analyses,'dependencies':dependencies(),'versions':yo._versions()})
     context_rows=[r for a in analyses for r in a['context']];regular=[r for a in analyses for r in a['regular']]
     all_rows=regular+context_rows
-    req=yo.request(all_rows);immutable(out/'regular.request.json',{'request':req,'rows':all_rows,'policy':builder.POLICY,'provider':builder.PIN})
+    req=yo.request(all_rows)
+    for item,row in zip(req['items'],all_rows,strict=True):
+        item['upstream_witnesses']=row['witnesses']
+        if row.get('dictionary_forms'):item['dictionary_forms']=row['dictionary_forms']
+    immutable(out/'yo.request.json',{'request':req,'bindings':all_rows,'policy':builder.POLICY,'provider':builder.PIN})
     batches=builder.adjudicate(out/'regular',req) if all_rows else []
     for batch in batches:builder.validate_provider(batch['metadata'])
     merged={'decisions':[d for b in batches for d in b['answer']['decisions']]};yo.validate(merged,req)
-    all_decisions=yo.decisions_from(all_rows,merged);regular_decisions=all_decisions[:len(regular)]
-    choices={d['id']:d for d in merged['decisions']}
-    context_rows=[{**r,'yo_decision':choices[f'y{n+len(regular):04d}']} for n,r in enumerate(context_rows)]
-    contextual=context_adjudicate(out/'context',context_rows)
-    context_decisions=[]
-    for item in contextual:
-        row=item['row'];decision=item['decision'];context_decisions.append({**{k:row[k] for k in ('sha256','word','index','surface','yo')},
-            'choice':row['yo_decision']['choice'],'basis':'luna-yo-choice-with-separate-opus-stress'})
-    answer={'rule':yo.RULE,'guard':RULE,'yo_policy':builder.POLICY,'yo_metadata':{'batches':[b['metadata'] for b in batches]},
-        'decisions':[d for a in analyses for d in a['auto']]+regular_decisions+context_decisions,'context':contextual,'human_approval':False}
+    selections={s['id']:s for batch in batches for s in batch['selections']}
+    all_decisions=[{**d,'two_luna':selections[f'y{n:04d}']} for n,d in enumerate(yo.decisions_from(all_rows,merged))]
+    if any(a['auto'] for a in analyses):raise ValueError('Automatic ambiguous YO choices are forbidden')
+    answer={'rule':yo.RULE,'guard':RULE,'policy':builder.POLICY,'selection_policy':independent.SELECTION,
+        'request_sha256':file_digest(out/'yo.request.json'),'answer':merged,'independent_batches':batches,
+        'metadata':{'batches':[b['metadata'] for b in batches]},'decisions':all_decisions,'human_approval':False}
     immutable(out/'yo.answer.json',answer);answer_sha=file_digest(out/'yo.answer.json');result=[];intermediate=[]
+    builder.validate_frozen_answer(out/'yo.answer.json')
     for unit,analysis in zip(units,analyses,strict=True):
-        local=[d for d in analysis['auto']]+[d for r,d in zip(regular,regular_decisions,strict=True) if r['unit']==unit['id']]
-        local += [d for row,d in zip(contextual,context_decisions,strict=True) if row['row']['unit']==unit['id']]
+        local=[d for r,d in zip(all_rows,all_decisions,strict=True) if r['unit']==unit['id']]
         options=policy_options('stress-rare-v4',{'homograph_stress':homograph,'yo_restoration':{'rule':yo.RULE,'answer_sha256':answer_sha,'decisions':local}})
         synthesis,record=auto_pronunciation(unit['spoken'],names,common,**options)
-        synthesis,context_record=overlay_context(unit,synthesis,[r for r in contextual if r['row']['unit']==unit['id']],homograph)
+        context_record={'rule':RULE,'applied':[],'conflicts':[],'audio_approval':False,
+                        'legacy_opus_context_vote':'disabled; Luna changes receive an independent second opinion, which selects final stress'}
         intermediate.append((unit,synthesis,record,context_record))
-    context_block=context_builder.prepare([{'source':unit['spoken'],'selected':synthesis,'names':names,'common':common}
+    context_block=context_builder.prepare([{'source':unit['spoken'],'selected':synthesis,'names':names,'common':common,
+        'unit_id':unit['id'],'chapter_id':unit.get('chapter_id'),'upstream_evidence':{'stage':'after Silero plus frozen HS/YO and guards',
+        'pure_silero_snapshot_available':False,'automatic_pronunciation':record}}
         for unit,synthesis,record,context_record in intermediate],out/'dictionary-context')
     for unit,synthesis,record,context_record in intermediate:
         protected={(r['word'].casefold().replace('ё','е'),r['index']) for r in homograph.get('overrides',[])
                    if r['sha256']==digest(unit['spoken'].encode('utf8'))}
         protected|={(r['word'].casefold().replace('ё','е'),r['index']) for r in record.get('homograph_overrides',{}).get('applied',[])}
-        protected|={(r['row']['word'],r['row']['index']) for r in contextual if r['row']['unit']==unit['id']}
         synthesis,dictionary_context=contextual_stress.apply(unit['spoken'],synthesis,context_block,names,common,protected)
         dictionary_context['module_sha256']=file_digest(Path(contextual_stress.__file__))
         before_phonetic=synthesis;synthesis,phonetic_records=phonetics.apply(before_phonetic)
@@ -262,6 +265,8 @@ def freeze(output,music_path=None):
     if (binding.get('implementation_sha256')!=file_digest(SELF) or binding.get('dependencies')!=dependencies()
             or result['assignment']['pronunciation'].get('policy')!='stress-rare-v4' or result['assignment']['pronunciation'].get('context_policy')!=RULE
             or result['assignment']['pronunciation'].get('context_conflicts')!=0):raise ValueError('Context-v4 preparation is incomplete, changed, or conflicted')
+    builder.validate_frozen_answer(output/'pronunciation/yo-v4/yo.answer.json')
+    context_builder.block(output/'pronunciation/yo-v4/dictionary-context/answer.json')
     legacy.freeze(output,music_path)
 
 

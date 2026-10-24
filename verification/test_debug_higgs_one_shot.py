@@ -6,6 +6,7 @@ from unittest.mock import patch,Mock
 import numpy as np,soundfile as sf
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'runtime')]
 import debug_higgs_one_shot as m
+from verification.luna_test_support import metadata_evidence
 
 
 class DebugOneShot(unittest.TestCase):
@@ -31,6 +32,7 @@ class DebugOneShot(unittest.TestCase):
             'policy':builder.POLICY,'requested_model':'gpt-6-luna','model_provenance':'explicit-cli-model-selection',
             'cli_version':'fixture','executable':sys.executable,'executable_sha256':m.file_digest(Path(sys.executable)),
             'structured_call_sha256':m.file_digest(Path(builder.codex_analysis.__file__))}
+        metadata=metadata_evidence(metadata,self.root/'metadata-evidence')
         answer={'policy':builder.POLICY,'metadata':{'batches':[metadata]},
                 'stats':{'ambiguous':1,'ambiguous_rows':1,'ambiguous_auto':0},'decisions':[{'basis':'adjudicated'}]}
         m.validate_adjudication(answer,'yo')

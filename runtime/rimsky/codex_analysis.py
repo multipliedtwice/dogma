@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import cli_analysis
 from .cli_process import run_cli, trusted_executable
-from .util import AnalysisInvalidError, AppError, ProviderTransportError, ProviderUnavailableError
+from .util import AnalysisInvalidError, AppError, ProviderTransportError, ProviderUnavailableError,atomic_write,file_digest
 
 
 DISABLED_FEATURES = (
@@ -33,13 +33,17 @@ def codex_executable() -> str:
 
 def structured_call(system: str, request: dict, schema: dict, *, timeout=900,
                     reasoning_effort: str = 'low', effort: str | None = None,
-                    model: str | None = None) -> dict:
+                    model: str | None = None, max_attempts: int = 2,
+                    evidence_dir: Path | None = None) -> dict:
+    if type(max_attempts) is not int or not 1<=max_attempts<=2:raise AppError('Unsupported bounded Codex attempt count.')
     reasoning_effort = effort or reasoning_effort
     if reasoning_effort not in ('low', 'medium', 'high'):
         raise AppError('Unsupported Codex reasoning effort for character analysis.')
     if model is not None and not (isinstance(model, str) and model.replace('-', '').replace('.', '').replace('_', '').isalnum()):
         raise AppError('Unsupported Codex model name for character analysis.')
     cli = codex_executable()
+    if evidence_dir is not None:
+        evidence_dir=Path(evidence_dir);evidence_dir.mkdir(parents=True,exist_ok=False)
     with tempfile.TemporaryDirectory(prefix='rimsky-analysis-') as temporary:
         root = Path(temporary)
         schema_path = root / 'schema.json'
@@ -56,22 +60,37 @@ def structured_call(system: str, request: dict, schema: dict, *, timeout=900,
                    '--skip-git-repo-check', '--output-schema', str(schema_path),
                    '--output-last-message', str(output_path), '-']
         last_error = None
-        for attempt in range(2):
+        for attempt in range(max_attempts):
             output_path.unlink(missing_ok=True)
+            proof=evidence_dir/f'attempt-{attempt}' if evidence_dir is not None else None
+            if proof is not None:
+                proof.mkdir();atomic_write(proof/'request.json',json.dumps({'system':system,'request':request,'schema':schema,
+                    'command':command,'model':model,'reasoning_effort':reasoning_effort,'max_attempts':max_attempts},ensure_ascii=False,indent=2).encode('utf8'))
             try:
-                result = run_cli(command, input_text=prompt, stdout=subprocess.DEVNULL,
+                result = run_cli(command, input_text=prompt, stdout=subprocess.PIPE if proof is not None else subprocess.DEVNULL,
                                  cwd=root, timeout=timeout)
             except (OSError, subprocess.TimeoutExpired) as error:
+                if proof is not None:
+                    atomic_write(proof/'transport-error.json',json.dumps({'error':type(error).__name__,'detail':str(error)}).encode('utf8'))
+                    atomic_write(evidence_dir/'manifest.json',json.dumps({'schema':1,'max_attempts':max_attempts,
+                        'files':{p.relative_to(evidence_dir).as_posix():file_digest(p) for p in sorted(evidence_dir.rglob('*')) if p.is_file() and p.name!='manifest.json'}},indent=2).encode('utf8'))
                 last_error = ProviderTransportError(
                     'GPT character analysis could not complete through Codex CLI.')
                 last_error.__cause__ = error
-                if attempt == 0:
+                if attempt+1<max_attempts:
                     continue
                 raise last_error
+            if proof is not None:
+                atomic_write(proof/'stdout.txt',(result.stdout or '').encode('utf8'))
+                atomic_write(proof/'stderr.txt',result.stderr.encode('utf8'))
+                atomic_write(proof/'result.json',json.dumps({'returncode':result.returncode,'output_exists':output_path.is_file()}).encode('utf8'))
+                if output_path.is_file():atomic_write(proof/'raw-answer.json',output_path.read_bytes())
+                atomic_write(evidence_dir/'manifest.json',json.dumps({'schema':1,'max_attempts':max_attempts,
+                    'files':{p.relative_to(evidence_dir).as_posix():file_digest(p) for p in sorted(evidence_dir.rglob('*')) if p.is_file() and p.name!='manifest.json'}},indent=2).encode('utf8'))
             if result.returncode or not output_path.is_file():
                 last_error = ProviderTransportError(
                     'GPT character analysis failed: ' + result.stderr[-1200:])
-                if attempt == 0:
+                if attempt+1<max_attempts:
                     continue
                 raise last_error
             try:
@@ -80,13 +99,13 @@ def structured_call(system: str, request: dict, schema: dict, *, timeout=900,
                 last_error = AnalysisInvalidError(
                     'GPT character analysis returned invalid JSON.')
                 last_error.__cause__ = error
-                if attempt == 0:
+                if attempt+1<max_attempts:
                     continue
                 raise last_error
             if not isinstance(answer, dict):
                 last_error = AnalysisInvalidError(
                     'GPT character analysis returned an invalid object.')
-                if attempt == 0:
+                if attempt+1<max_attempts:
                     continue
                 raise last_error
             return answer

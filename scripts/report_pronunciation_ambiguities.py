@@ -1,7 +1,7 @@
 """Write a private, source-bound ambiguity inventory from completed context preparation.
 
 No provider, speech, recognition or GPU jobs. This reports detected dictionary
-alternatives and the recorded Luna choice, not model confidence or audio approval.
+alternatives, conditional checks and self-rated uncertainty, never audio approval.
 """
 from __future__ import annotations
 import argparse,json,sys
@@ -13,7 +13,7 @@ from rimsky import contextual_stress as rules
 from rimsky.homograph_stress import occurrences,ACUTE
 from rimsky.util import file_digest,digest,atomic_write
 
-POLICY='private-pronunciation-ambiguity-report-v1'
+POLICY='private-pronunciation-ambiguity-report-v2'
 SELF=Path(__file__).resolve()
 
 
@@ -50,7 +50,7 @@ def location(unit,row,source):
 
 def readable(report):
     lines=['PRIVATE PRONUNCIATION AMBIGUITY REPORT',
-        'Text preparation only. No audio/recognition/listening approval; no model confidence reported.',
+        'Text preparation only. No audio/recognition/listening approval; confidence is self-rated, not calibrated.',
         'Scope: detected pinned-dictionary stress alternatives, not every possible natural-language ambiguity.',
         f"Detected prepared occurrences: {report['counts']['prepared_occurrences']}",
         f"Recorded input observations: {report['counts']['input_observations']}",
@@ -62,6 +62,11 @@ def readable(report):
             'Reason: '+row['luna']['basis'],'Sentence: '+row['sentence'],
             f"Prepared source: {row['source_sha256']} [{row['prepared_start']}:{row['prepared_end']}]",
             'Locations: '+json.dumps(row['locations'],ensure_ascii=False)])
+        pair=row['luna'].get('two_luna')
+        if pair:
+            lines.append(f"Route: {pair['route']}; first self-rated confidence={pair['first_confidence']}; "
+                         f"agreement={pair['agreement']}; authority={pair['selected_pass']}")
+            for vote in pair['passes']:lines.append(f"  {vote['pass_id']}: {vote['choice']} — {vote['basis']} ({vote['metadata']['model']}, {vote['metadata']['effort']})")
         for observed in row['input_observations']:
             lines.append(f"Selected input: {observed['before_context']} → {row['luna']['stressed']}; "
                          f"superseded marked input: {observed['superseded_automatic_mark']}")
@@ -105,19 +110,24 @@ def report(answer_path,output,assignment_path=None):
             'word':decision['word'],'word_occurrence_index':decision['index'],'surface':decision['surface'],
             'selected_word':decision['selected_word'],'possible_readings':decision['candidates'],
             'dictionary_forms':decision['dictionary_forms'],'sentence':decision['sentence'],'locations':locations,
-            'luna':{k:decision[k] for k in ('stressed','raw_model_stressed','case_projection','basis')},
+            'luna':{k:decision[k] for k in ('stressed','raw_model_stressed','case_projection','basis','two_luna')},
             'input_observations':observations.pop(key)})
     if observations:raise ValueError('Detected ambiguity is absent from the completed answer')
     result={'schema':1,'policy':POLICY,'private':True,'context_policy':block['rule'],
         'scope':'Every dictionary contextual-stress candidate detected in these bound preparation inputs; not exhaustive natural-language ambiguity.',
-        'model_confidence':'not reported; a reason is not a confidence score','recognition_status':'not_checked',
+        'model_confidence':'first opinion self-rated 0..100, not calibrated; never a routing threshold','recognition_status':'not_checked',
         'human_approval':False,'acoustic_approval':False,'production_approved':False,
         'provenance':{'answer':str(answer_path),'answer_sha256':file_digest(answer_path),
             'inputs_sha256':file_digest(inputs_path),'dictionary_sha256':block['dictionary_sha256'],
             'context_module_sha256':file_digest(Path(rules.__file__)),'builder_sha256':file_digest(Path(builder.__file__)),
             'reporter_sha256':file_digest(SELF),'assignment_sha256':file_digest(assignment_path) if assignment_path else None},
         'counts':{'prepared_occurrences':len(rows),'input_observations':sum(len(r['input_observations']) for r in rows),
-            'located_occurrences':sum(len(r['locations']) for r in rows)},'occurrences':rows}
+            'located_occurrences':sum(len(r['locations']) for r in rows),
+            'baseline_kept':sum(r['luna']['two_luna']['route']=='baseline-kept' for r in rows),
+            'changed':sum(r['luna']['two_luna']['route']=='proposed-change-rechecked' for r in rows),
+            'second_checked':sum(r['luna']['two_luna']['selected_pass']=='pass-2' for r in rows),
+            'luna_agreements':sum(r['luna']['two_luna']['agreement'] is True for r in rows),
+            'luna_disagreements_second_selected':sum(r['luna']['two_luna']['agreement'] is False for r in rows)},'occurrences':rows}
     json_path=output/'report.json';text_path=output/'report.txt'
     immutable(json_path,json_bytes(result));immutable(text_path,readable(result).encode('utf8'))
     manifest={'schema':1,'policy':POLICY,'private':True,'answer_sha256':result['provenance']['answer_sha256'],

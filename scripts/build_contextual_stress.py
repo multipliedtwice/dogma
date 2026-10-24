@@ -12,6 +12,7 @@ from rimsky import contextual_stress as rules,codex_analysis
 from rimsky.cli_process import run_cli
 from rimsky.util import digest,file_digest
 from build_yo_restoration import immutable,read
+import independent_luna_passes as independent
 
 PIN=('codex_cli','gpt-6-luna','low')
 BATCH=20
@@ -26,62 +27,52 @@ def validate_provider(metadata):
             or metadata.get('structured_call_sha256')!=file_digest(Path(codex_analysis.__file__))):
         raise ValueError('Unpinned Luna-low contextual stress CLI provenance')
     if file_digest(Path(metadata['executable']))!=metadata['executable_sha256']:raise ValueError('Context stress CLI changed')
+    if not metadata.get('cli_evidence'):raise ValueError('Missing audited single-execution context CLI evidence')
+    if metadata.get('cli_evidence'):
+        path=Path(metadata['cli_evidence'])
+        if file_digest(path/'manifest.json')!=metadata.get('cli_evidence_sha256'):raise ValueError('Context raw CLI evidence changed')
+        proof=read(path/'manifest.json')
+        if proof.get('max_attempts')!=1:raise ValueError('Context CLI execution was not single-attempt')
+        for relative,checksum in proof['files'].items():
+            if not (path/relative).resolve().is_relative_to(path.resolve()) or file_digest(path/relative)!=checksum:raise ValueError('Context raw CLI artifact changed')
 
 
-def call(system,req,contract):
+def call(system,req,contract,*,evidence_dir=None):
     executable=Path(codex_analysis.codex_executable());version=run_cli([str(executable),'--version'],timeout=20)
     if version.returncode or not version.stdout.strip():raise ValueError('Cannot pin context stress CLI version')
     metadata=dict(zip(('provider','model','effort'),PIN))|{'policy':rules.RULE,'requested_model':PIN[1],
         'model_provenance':'explicit-cli-model-selection','cli_version':version.stdout.strip(),
         'executable':str(executable),'executable_sha256':file_digest(executable),
         'structured_call_sha256':file_digest(Path(codex_analysis.__file__))}
-    answer=codex_analysis.structured_call(system,req,contract,model=PIN[1],reasoning_effort=PIN[2])
+    answer=codex_analysis.structured_call(system,req,contract,model=PIN[1],reasoning_effort=PIN[2],max_attempts=1,evidence_dir=evidence_dir)
+    if evidence_dir is not None:metadata.update(cli_evidence=str(evidence_dir),cli_evidence_sha256=file_digest(evidence_dir/'manifest.json'))
     if Path(codex_analysis.codex_executable()).resolve()!=executable.resolve():raise ValueError('Context stress CLI selection changed')
     validate_provider(metadata);return answer,metadata
+
+
+def selected_decisions(rows,selections):
+    items=rules.request(rows)['items'];lookup={s['id']:s for s in selections}
+    answer={'decisions':[{'id':i['id'],'word':i['word'],'stressed':lookup[i['id']]['choice'],
+        'basis':lookup[i['id']]['basis']} for i in items]}
+    rules.validate(answer,{'items':items})
+    return [{**decision,'two_luna':lookup[item['id']]} for decision,item in zip(rules.decisions_from(rows,answer),items,strict=True)]
 
 
 def adjudicate(rows,out):
     decisions=[];evidence=[]
     for start in range(0,len(rows),BATCH):
-        subset=rows[start:start+BATCH];req=rules.request(subset);contract=rules.schema([r['id'] for r in req['items']])
-        bound={'policy':rules.RULE,'provider':PIN[0],'model':PIN[1],'effort':PIN[2],'system':rules.SYSTEM,
-            'request':req,'schema':contract,'bindings':subset,'dictionary_sha256':rules.DICTIONARY_SHA256,
-            'module_sha256':file_digest(Path(rules.__file__))}
-        key=digest(bound);rp=out/(key+'.request.json');ap=out/(key+'.answer.json');immutable(rp,bound)
-        if ap.exists():
-            saved=read(ap)
-            if saved['request_sha256']!=file_digest(rp):raise ValueError('Context stress cache source binding changed')
-        else:
-            for attempt in range(3):
-                attempt_request=out/(key+f'.attempt-{attempt}.request.json')
-                attempt_answer=out/(key+f'.attempt-{attempt}.answer.json')
-                failure=out/(key+f'.attempt-{attempt}.failure.json')
-                existed=attempt_request.exists();immutable(attempt_request,bound)
-                if attempt_answer.exists():
-                    saved=read(attempt_answer)
-                elif failure.exists():
-                    if read(failure).get('request_sha256')!=file_digest(attempt_request):raise ValueError('Context stress failure evidence changed')
-                    continue
-                else:
-                    if existed:raise ValueError('Unfinished context stress attempt; inspect prior worker')
-                    try:answer,metadata=call(rules.SYSTEM,req,contract)
-                    except Exception as error:
-                        immutable(failure,{'request_sha256':file_digest(attempt_request),'error':type(error).__name__+': '+str(error)})
-                        if attempt==2:raise
-                        continue
-                    saved={'request_sha256':file_digest(rp),'answer':answer,'metadata':metadata,
-                           'attempt_request_sha256':file_digest(attempt_request),'attempt':attempt}
-                    immutable(attempt_answer,saved)
-                # A substantive/schema failure is held, never repeatedly persuaded.
-                validate_provider(saved['metadata']);rules.validate(saved['answer'],req)
-                saved={**saved,'attempt_answer_sha256':file_digest(attempt_answer)};immutable(ap,saved);break
-            else:raise ValueError('Context stress transport attempts exhausted')
-        raw=out/(key+f".attempt-{saved['attempt']}.answer.json")
-        if (file_digest(raw)!=saved['attempt_answer_sha256'] or any(read(raw).get(k)!=saved[k] for k in ('answer','metadata'))):
-            raise ValueError('Context stress cached answer differs from immutable attempt')
-        validate_provider(saved['metadata']);rules.validate(saved['answer'],req)
-        decisions.extend(rules.decisions_from(subset,saved['answer']))
-        evidence.append({'request':str(rp),'request_sha256':file_digest(rp),'answer':str(ap),'answer_sha256':file_digest(ap),'metadata':saved['metadata']})
+        subset=rows[start:start+BATCH];items=rules.request(subset)['items']
+        key=digest({'rule':rules.RULE,'rows':subset,'pin':PIN,'system':rules.SYSTEM,
+            'module_sha256':file_digest(Path(rules.__file__)),'helper_sha256':file_digest(Path(independent.__file__))})
+        folder=out/key
+        try:manifest=independent.run(items,subset,folder,policy=rules.RULE,system=rules.SYSTEM,pin=PIN,call=call,validate_provider=validate_provider)
+        except ValueError:
+            immutable(out.parent/'unresolved.json',{'rule':rules.RULE,'status':'invalid_or_missing_independent_vote',
+                'bindings':rows,'batch':str(folder),'human_approval':False});raise
+        selections=independent.verify(manifest,folder,items,subset,policy=rules.RULE,system=rules.SYSTEM,pin=PIN,validate_provider=validate_provider)
+        decisions.extend(selected_decisions(subset,selections))
+        evidence.append({'bindings':subset,'consensus':str(folder/'consensus.json'),
+                         'consensus_sha256':file_digest(folder/'consensus.json')})
     return decisions,evidence
 
 
@@ -89,6 +80,7 @@ def prepare(inputs,out):
     rows=[];seen={}
     for item in inputs:
         for row in rules.analyze(item['source'],item['selected'],item.get('names'),item.get('common',())):
+            if item.get('upstream_evidence'):row['upstream_evidence']=item['upstream_evidence']
             key=(row['source_sha256'],row['word'],row['index'])
             if key in seen:
                 if seen[key]!=row:raise ValueError('Same source occurrence has conflicting context preparation')
@@ -97,7 +89,7 @@ def prepare(inputs,out):
     immutable(out/'inputs.json',{'policy':rules.RULE,'inputs':inputs,'rows':rows,'dictionary_sha256':rules.DICTIONARY_SHA256,
         'module_sha256':file_digest(Path(rules.__file__)),'builder_sha256':file_digest(Path(__file__))})
     decisions,evidence=adjudicate(rows,out/'batches')
-    answer={'rule':rules.RULE,'dictionary_sha256':rules.DICTIONARY_SHA256,'decisions':decisions,'batches':evidence,
+    answer={'rule':rules.RULE,'selection_policy':independent.SELECTION,'dictionary_sha256':rules.DICTIONARY_SHA256,'decisions':decisions,'batches':evidence,
         'inputs_sha256':file_digest(out/'inputs.json'),'human_approval':False,'acoustic_approval':False}
     immutable(out/'answer.json',answer)
     block={'rule':rules.RULE,'answer_sha256':file_digest(out/'answer.json'),'dictionary_sha256':rules.DICTIONARY_SHA256,'decisions':decisions}
@@ -111,20 +103,23 @@ def block(path):
             or answer.get('inputs_sha256')!=file_digest(inputs_path)
             or inputs.get('module_sha256')!=file_digest(Path(rules.__file__))
             or inputs.get('builder_sha256')!=file_digest(Path(__file__))):raise ValueError('Context stress preparation implementation/input changed')
-    decoded=[]
+    if answer.get('selection_policy')!=independent.SELECTION:raise ValueError('Context stress requires the source-bound conditional second-check policy')
+    expected_rows=[];seen={}
+    for item in inputs['inputs']:
+        for row in rules.analyze(item['source'],item['selected'],item.get('names'),item.get('common',())):
+            if item.get('upstream_evidence'):row['upstream_evidence']=item['upstream_evidence']
+            key=(row['source_sha256'],row['word'],row['index'])
+            if key not in seen:seen[key]=row;expected_rows.append(row)
+            elif seen[key]!=row:raise ValueError('Conflicting contextual input witnesses')
+    if expected_rows!=inputs['rows']:raise ValueError('Context source candidate coverage changed')
+    decoded=[];covered=[]
     for evidence in answer['batches']:
-        rp=Path(evidence['request']);ap=Path(evidence['answer'])
-        if (not rp.resolve().is_relative_to(path.parent.resolve()) or not ap.resolve().is_relative_to(path.parent.resolve())
-                or file_digest(rp)!=evidence['request_sha256'] or file_digest(ap)!=evidence['answer_sha256']):
-            raise ValueError('Context stress batch evidence changed')
-        bound=read(rp);saved=read(ap)
-        if (saved['request_sha256']!=file_digest(rp) or saved['metadata']!=evidence['metadata']
-                or bound['policy']!=rules.RULE or [bound[k] for k in ('provider','model','effort')]!=list(PIN)):
-            raise ValueError('Context stress provider/request changed')
-        raw=ap.with_name(ap.name.replace('.answer.json',f".attempt-{saved['attempt']}.answer.json"))
-        if file_digest(raw)!=saved['attempt_answer_sha256']:raise ValueError('Context stress raw attempt changed')
-        validate_provider(saved['metadata']);rules.validate(saved['answer'],bound['request'])
-        decoded.extend(rules.decisions_from(bound['bindings'],saved['answer']))
+        cp=Path(evidence['consensus']);subset=evidence['bindings'];items=rules.request(subset)['items']
+        if not cp.resolve().is_relative_to(path.parent.resolve()) or file_digest(cp)!=evidence['consensus_sha256']:
+            raise ValueError('Context stress independent consensus evidence changed')
+        selections=independent.verify(read(cp),cp.parent,items,subset,policy=rules.RULE,system=rules.SYSTEM,pin=PIN,validate_provider=validate_provider)
+        decoded.extend(selected_decisions(subset,selections));covered.extend(subset)
+    if covered!=inputs['rows']:raise ValueError('Context stress batch coverage differs from expected source occurrences')
     if decoded!=answer['decisions']:raise ValueError('Context stress decisions differ from actual batch answers')
     return {'rule':rules.RULE,'answer_sha256':file_digest(path),'dictionary_sha256':rules.DICTIONARY_SHA256,'decisions':decoded}
 
@@ -141,7 +136,9 @@ def private_inputs(generation,chapters,homograph_answer,yo_answer):
         names={cid:row['stressed'] for cid,row in spec['names'].items()};names.update(spec.get('proper_nouns',{}))
         selected,automatic=auto_pronunciation(source,names,spec.get('common',[]),**policy_options('stress-rare-v4',spec))
         if automatic['yo_restoration']['unbound'] or automatic.get('homograph_overrides',{}).get('unbound'):raise ValueError('Unbound upstream pronunciation in context preparation')
-        inputs.append({'source':source,'selected':selected,'names':names,'common':spec.get('common',[]),'chapter':metadata['chapter']})
+        inputs.append({'source':source,'selected':selected,'names':names,'common':spec.get('common',[]),'chapter':metadata['chapter'],
+            'upstream_evidence':{'stage':'after Silero plus frozen HS/YO and automatic guards','pure_silero_snapshot_available':False,
+                                 'automatic_pronunciation':automatic}})
     return inputs
 
 

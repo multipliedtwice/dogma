@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'runtime')]
 import report_pronunciation_ambiguities as m
+from verification.luna_test_support import responder
 
 
 class AmbiguityReport(unittest.TestCase):
@@ -19,13 +20,14 @@ class AmbiguityReport(unittest.TestCase):
                      {'source':second,'selected':second,'chapter':'c0002'}]
         answer={'decisions':[{'id':'c0000','word':'стоит','stressed':'стои́т','basis':'Person is standing.'},
                              {'id':'c0001','word':'стоит','stressed':'сто́ит','basis':'Ticket price.'}]}
-        with patch.object(m.builder,'call',return_value=(answer,self.metadata)):
+        with patch.object(m.builder,'call',side_effect=responder(answer,self.metadata)):
             m.builder.prepare(self.inputs,self.root/'context')
         self.answer=self.root/'context/answer.json'
     def test_all_detected_readings_changed_and_unmarked_input_are_reported_without_calls(self):
         with patch.object(m.builder,'call',side_effect=AssertionError('No report provider calls')) as call:
             report=m.report(self.answer,self.root/'report');call.assert_not_called()
-        self.assertEqual(report['counts'],{'prepared_occurrences':2,'input_observations':2,'located_occurrences':2})
+        self.assertEqual(report['counts'],{'prepared_occurrences':2,'input_observations':2,'located_occurrences':2,
+            'baseline_kept':0,'changed':2,'second_checked':2,'luna_agreements':2,'luna_disagreements_second_selected':0})
         first,second=report['occurrences']
         self.assertEqual(set(first['possible_readings']),{'сто́ит','стои́т'})
         self.assertEqual(first['luna']['stressed'],'стои́т');self.assertTrue(first['input_observations'][0]['superseded_automatic_mark'])
@@ -61,6 +63,21 @@ class AmbiguityReport(unittest.TestCase):
         path.write_text(json.dumps(value),encoding='utf8')
         with self.assertRaises(ValueError):m.report(self.answer,self.root/'tampered')
         self.assertFalse((self.root/'tampered').exists())
+    def test_report_discloses_both_valid_opinions_when_second_differs(self):
+        def votes(system,request,schema):
+            result={}
+            for item in request['items']:
+                old=item['baseline'] if item['baseline'] in item['candidates'] else None
+                chosen=next(c for c in item['candidates'] if c!=old) if request['pass_id']=='pass-1' and old else old or item['candidates'][0]
+                result[item['id']]={'choice':chosen,'basis':'Independent interpretation.'}
+            return {'decisions':result}
+        with patch.object(m.builder,'call',side_effect=responder(votes,self.metadata)):
+            m.builder.prepare(self.inputs,self.root/'split-context')
+        report=m.report(self.root/'split-context/answer.json',self.root/'split-report')
+        self.assertEqual(report['counts']['luna_disagreements_second_selected'],2)
+        for row in report['occurrences']:
+            self.assertEqual(row['luna']['two_luna']['selected_pass'],'pass-2');self.assertEqual(len(row['luna']['two_luna']['passes']),2)
+        self.assertIn('agreement=False; authority=pass-2',(self.root/'split-report/report.txt').read_text('utf8'))
 
 
 if __name__=='__main__':unittest.main()
