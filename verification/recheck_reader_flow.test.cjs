@@ -18,7 +18,7 @@ function find(tree,predicate) {
   visit(tree);assert.ok(result,'Source node is present');return result;
 }
 function evaluate(tree,node,environment) {
-  environment={t,settings:null,flushReading:{current:()=>{}},manualReading:{current:false},scrollReaderTo:root=>root?.scrollTo({top:0}),...environment};
+  environment={t,settings:null,flushReading:{current:()=>{}},manualReading:{current:false},chapterStartIntent:{current:''},scrollReaderTo:root=>root?.scrollTo({top:0}),...environment};
   const js=ts.transpileModule('const result = '+node.getText(tree)+';', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
   return new Function(...Object.keys(environment),js+'\nreturn result;')(...Object.values(environment));
 }

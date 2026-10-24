@@ -112,6 +112,7 @@ export default function App(){
   const viewRef=useRef<HTMLDivElement>(null);
   const flushReading=useRef<()=>void>(()=>{});
   const manualReading=useRef(false);
+  const chapterStartIntent=useRef('');
   const restoringPlayback=useRef('');
   const followReturnTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const selectionEpoch=useRef(0);
@@ -150,22 +151,26 @@ export default function App(){
   const music=useMusic(generation,settings,player.clock);
   const cancelFollowingReturn=()=>{if(followReturnTimer.current!==null){clearTimeout(followReturnTimer.current);followReturnTimer.current=null;}};
   const scheduleFollowingReturn=()=>{cancelFollowingReturn();followReturnTimer.current=setTimeout(()=>{followReturnTimer.current=null;manualReading.current=false;setBrowsing(false);setSelectedSource('');},FOLLOW_RETURN_DELAY);};
-  const resumeFollowing=()=>{cancelFollowingReturn();flushReading.current();manualReading.current=false;setBrowsing(false);setSelectedSource('');};
+  const resumeFollowing=()=>{chapterStartIntent.current='';cancelFollowingReturn();flushReading.current();manualReading.current=false;setBrowsing(false);setSelectedSource('');};
   const togglePlayback=()=>{
     if(!player.playing&&!player.waiting){
-      if(browsing&&chapter?.id&&chapter.id!==player.segment?.chapter_id){
+      if(browsing&&chapter?.id&&(chapterStartIntent.current===chapter.id||chapter.id!==player.segment?.chapter_id)){
         const start=chapterSegments.find(playable);
-        if(!start){setNotice(t('generationMissingChapter'));return;}
-        resumeFollowing();player.select(start.id,true);return;
+        const intro=generation?.config?.opening?.variants.music;
+        const firstChapter=generation?.segments[0]?.chapter_id||generation?.config?.chapters?.[0];
+        if(!start&&!(chapter.id===firstChapter&&intro?.audio_hash&&intro.duration>0)){setNotice(t('generationMissingChapter'));return;}
+        resumeFollowing();player.seekChapterTrack(chapter.id,0,true);return;
       }
       resumeFollowing();
     }
     player.toggle();
   };
   const selectForPlayback=(id:string,play:boolean,offset=0)=>{if(play)resumeFollowing();player.select(id,play,offset);};
-  const listenTo=(id:string)=>{flushReading.current();manualReading.current=false;setBrowsing(false);setSelectedSource('');player.select(id,true);};
+  const seekTrackForPlayback=(chapterId:string,seconds:number,play:boolean)=>{if(play)resumeFollowing();player.seekChapterTrack(chapterId,seconds,play);};
+  const listenTo=(id:string)=>{flushReading.current();chapterStartIntent.current='';manualReading.current=false;setBrowsing(false);setSelectedSource('');player.select(id,true);};
   const previewSegment=(id:string)=>{if(player.previewing&&player.playing&&player.segment?.id===id)player.toggle();else player.preview(id);};
   const readerIndex=useMemo(()=>bookIndex(book),[book?.chapters]);
+  useEffect(()=>{chapterStartIntent.current='';},[book?.id,generation?.id]);
   const segments=useMemo(()=>segmentIndex(generation),[generation?.segments]);
   const imageIndex=useMemo(()=>paragraphImages(book?.visuals||[]),[book?.visuals]);
   const chapter=readerIndex.chapters.get(chapterId)||book?.chapters[0];
@@ -343,7 +348,7 @@ export default function App(){
   useLayoutEffect(()=>bindReaderViewport(viewRef.current),[book?.id]);
   useLayoutEffect(()=>{
     const root=viewRef.current;if(!root||!book)return;
-    const binding=bindReadingPosition(root,()=>{manualReading.current=true;setNavigation(null);setBrowsing(true);if(settings?.follow)scheduleFollowingReturn();},(sourceId,offset,sourceFraction)=>{
+    const binding=bindReadingPosition(root,()=>{chapterStartIntent.current='';manualReading.current=true;setNavigation(null);setBrowsing(true);if(settings?.follow)scheduleFollowingReturn();},(sourceId,offset,sourceFraction)=>{
       const destination=readerIndex.sources.get(sourceId);if(!destination)return;
       const position={chapter_id:destination.chapter.id,source_id:sourceId,offset,...(sourceFraction===undefined?{}:{source_fraction:sourceFraction})};
       storeReading(book.id,position);
@@ -369,7 +374,7 @@ export default function App(){
   });};
   const storeReading=(bookId:string,position:Position)=>{setBook(current=>current?.id===bookId?{...current,reading_position:position}:current);void api('save_reading_position',{book_id:bookId,position}).catch(reason=>setError(t('readingSaveFailed')+': '+errorText(reason)));};
   const saveReading=(sourceId:string)=>{if(!book)return;flushReading.current();const destination=readerIndex.sources.get(sourceId);if(!destination)return;const position={chapter_id:destination.chapter.id,source_id:sourceId,...readingOffset(viewRef.current,sourceId)};storeReading(book.id,position);};
-  const selectChapter=(id:string)=>{flushReading.current();manualReading.current=true;setNavigation(null);setBrowsing(true);setChapterId(id);setSelectedSource('');if(typeof window!=='undefined'&&typeof window.matchMedia==='function'&&window.matchMedia('(max-width: 700px)').matches)setSidebar(false);scrollReaderTo(viewRef.current);focusIfLost(()=>viewRef.current?.querySelector<HTMLElement>('.chapter-navigation button:not(:disabled)')??viewRef.current);if(book){const position={chapter_id:id,offset:0};storeReading(book.id,position);}};
+  const selectChapter=(id:string)=>{flushReading.current();chapterStartIntent.current=id;manualReading.current=true;setNavigation(null);setBrowsing(true);setChapterId(id);setSelectedSource('');if(typeof window!=='undefined'&&typeof window.matchMedia==='function'&&window.matchMedia('(max-width: 700px)').matches)setSidebar(false);scrollReaderTo(viewRef.current);focusIfLost(()=>viewRef.current?.querySelector<HTMLElement>('.chapter-navigation button:not(:disabled)')??viewRef.current);if(book){const position={chapter_id:id,offset:0};storeReading(book.id,position);}};
   const verifyPack=async()=>{
     const pending=settingsRequests.current.catch(()=>undefined).then(()=>api<{settings:Settings}>('select_pack',{path:packPath}));
     settingsRequests.current=pending;
@@ -389,7 +394,7 @@ export default function App(){
   const reviseSegment=(label:string,changes:Record<string,unknown>[])=>run(label,async()=>{if(!generation)return;const epoch=selectionEpoch.current;const panel=modalRevision.current;const next=await api<Generation>('revise',{id:generation.id,name:revisionName(generation.name,book?.generations.map(item=>item.name)||[],language),changes});if(epoch===selectionEpoch.current){setGeneration(next);closeModal(panel);}await refreshBook();setNotice(ru?`Создана и выбрана новая исправленная озвучка «${next.name}». Продолжите подготовку, чтобы заново создать изменённый отрывок.`:`New corrected generation “${next.name}” created and selected. Resume preparation to regenerate the changed passage.`);});
   const cancelExport=()=>void api('cancel_export',{}).catch(reason=>setError(operationMessage(reason,language)));
   const startGeneration=()=>run(t('preparingAudiobook'),async()=>{if(!book)return;const epoch=selectionEpoch.current;const panel=modalRevision.current;const chapters=narrationSelection(book,scope,generationChapter,selectedChapters);if(!chapters.length)throw new Error(t('selectNarratable'));if(generationSource&&!chapters.includes(sourceChapter(book,generationSource)?.id||''))throw new Error(t('includePassageChapter'));const next=await api<Generation>('generate',{book_id:book.id,name:generationName.trim()||defaultGenerationName,chapters});if(epoch===selectionEpoch.current){setGeneration(next);setPlayFrom(generationSource?{generationId:next.id,sourceId:generationSource}:null);setGenerationSource('');closeModal(panel);setGenerationName('');}await refreshBook();await refreshLibrary();});
-  const navigateSource=useCallback((id:string)=>{if(!book)return;flushReading.current();const destination=readerIndex.sources.get(id);if(!destination)return;manualReading.current=true;setBrowsing(true);setChapterId(destination.chapter.id);setSelectedSource(id);setNavigation({bookId:book.id,sourceId:id,focus:true});const position={chapter_id:destination.chapter.id,source_id:id,offset:0};storeReading(book.id,position);},[book?.id,readerIndex]);
+  const navigateSource=useCallback((id:string)=>{if(!book)return;flushReading.current();chapterStartIntent.current='';const destination=readerIndex.sources.get(id);if(!destination)return;manualReading.current=true;setBrowsing(true);setChapterId(destination.chapter.id);setSelectedSource(id);setNavigation({bookId:book.id,sourceId:id,focus:true});const position={chapter_id:destination.chapter.id,source_id:id,offset:0};storeReading(book.id,position);},[book?.id,readerIndex]);
   const refreshGeneration=async(id:string)=>{const epoch=selectionEpoch.current;const next=await api<Generation>('generation',{id});if(epoch===selectionEpoch.current)setGeneration(current=>acceptGenerationRefresh(current,next));};
   const castChange=(label:string,op:string,data:Record<string,unknown>={},close=false)=>run(label,async()=>{if(!generation)return;const panel=modalRevision.current;await api(op,{id:generation.id,...data});await refreshGeneration(generation.id);if(close)closeModal(panel);});
   const renameCharacter=(character:Character)=>void request({title:t('renameCharacter'),message:characterName(language,character),confirm:t('save'),input:{label:t('characterLabel'),value:character.name,maxLength:200,required:true}}).then(value=>{const name=value?.trim();if(name&&name!==character.name)void castChange(t('updatingCast'),'cast_rename',{character_id:character.id,name});});
@@ -559,7 +564,7 @@ export default function App(){
             <div className="chapter-meta"><span>{chapterSegments.length?passageProgress(language,chapterSegments.filter(s=>s.status==='ready').length,chapterSegments.length,'prepared'):t('noAudio')}</span>{generation?.status==='review'&&chapterSegments.length?<><span>·</span><button onClick={()=>openModal('narration')}>{t('reviewCast')}</button></>:generation?.status==='held'&&chapterSegments.some(s=>s.status==='review')?<><span>·</span><button onClick={()=>openModal('narration')}>{t('reviewHolds')}</button></>:generation&&resumesChapter(generation,chapterSegments)?<><span>·</span><button disabled={Boolean(busy)||Boolean(pausing)||Boolean(health?.active)} title={elsewhere||undefined} onClick={()=>void resumePreparation(generation.id)}>{t('resume')}</button></>:!(chapterSegments.length&&chapterSegments.every(s=>s.status==='ready'))&&<><span>·</span><button onClick={()=>openGenerate(chapter?.id||'','chapter')}>{t('prepareChapter')}</button></>}</div>
             {book.warnings.length>0&&<details className="import-warnings"><summary>{t('importNotes')} ({book.warnings.length})</summary>{book.warnings.map(w=><p key={w}>{localMessage(language,w)}</p>)}</details>}
             {chapter&&<ReaderChapter chapter={chapter} bookId={book.id} speaking={player.opening ? undefined : player.segment?.source_id} selected={selectedSource}
-              images={imageIndex} bookmarks={bookmarked} failed={failedSources} language={settings?.language||'en'} onSelect={id=>{manualReading.current=true;setBrowsing(true);setSelectedSource(id);saveReading(id);}} onNavigate={navigateSource} onAction={passageAction} onStressSelection={openStressMenu} listener={listenerMode}/>}
+              images={imageIndex} bookmarks={bookmarked} failed={failedSources} language={settings?.language||'en'} onSelect={id=>{chapterStartIntent.current='';manualReading.current=true;setBrowsing(true);setSelectedSource(id);saveReading(id);}} onNavigate={navigateSource} onAction={passageAction} onStressSelection={openStressMenu} listener={listenerMode}/>}
             <div className="chapter-navigation"><Button variant="outline" disabled={book.chapters[0]?.id===chapter?.id} onClick={()=>{const i=book.chapters.findIndex(c=>c.id===chapter?.id);if(i>0)selectChapter(book.chapters[i-1].id);}}><ChevronLeft/>{t('previousChapter')}</Button><Button variant="outline" disabled={book.chapters.at(-1)?.id===chapter?.id} onClick={()=>{const i=book.chapters.findIndex(c=>c.id===chapter?.id);if(i<book.chapters.length-1)selectChapter(book.chapters[i+1].id);}}>{t('nextChapter')}<ChevronRight/></Button></div>
           </article>
           {mode==='illustrated'&&chapter&&<IllustratedPanel chapter={chapter} bookId={book.id} sourceId={!player.opening&&!browsing&&player.segment?.chapter_id===chapter.id?player.segment.source_id:selectedBlock?.id} images={imageIndex} language={settings?.language||'en'} onNavigate={navigateSource} onIllustrate={id=>openModal('illustration',id)}/>}
@@ -569,7 +574,7 @@ export default function App(){
           status={`${preparationStatus(language,generation,completed,total)}${remainingLabel}${generation.status!=='ready'&&!active(generation.status)&&health?.active&&health.active!==generation.id?` · ${t('preparingAudio')}${health.active_book?`: ${health.active_book.title}`:''}`:''}`}
           error={playerMessage(language,player.error||player.saveError||generation.error||'')} warning={playerNote.text} warningDetail={playerNote.detail}
           statusAction={generation.config.engine?.startsWith('higgs_audio_tts_q8_external')&&generation.status==='rendering'?<span><LoaderCircle size={12} className="spin"/>{ru?`Создано ${completed} из ${total}`:`Rendered ${completed} of ${total}`}</span>:<>{generation.status==='review'&&pausing!==generation.id?<button disabled={Boolean(busy)} onClick={()=>openModal('narration')}><Users size={12}/>{t('reviewCast')}</button>:pausing!==generation.id&&!active(generation.status)&&generation.analysis.complete&&player.error&&player.segment?.status==='ready'?<button disabled={Boolean(busy)||Boolean(health?.active)} onClick={()=>void repairGeneration(generation.id)}><RotateCcw size={12}/>{t('repairAudio')}</button>:(pausing===generation.id||active(generation.status))?<button disabled={Boolean(pausing)} onClick={()=>void pausePreparation(generation.id)}><Pause size={12}/>{pausing===generation.id?(settings?.language==='ru'?'Запрос паузы…':'Requesting pause…'):(settings?.language==='ru'?'Приостановить озвучку':'Pause preparation')}</button>:generation.status!=='ready'?<>{generation.status==='held'&&<button disabled={Boolean(busy)} onClick={()=>openModal('narration')}><Users size={12}/>{t('reviewHolds')}</button>}{failedSegment&&<button onClick={()=>navigateSource(failedSegment.source_id)}><ArrowRight size={12}/>{t('goToPassage')}</button>}<button disabled={Boolean(pausing)||Boolean(health?.active)} title={elsewhere||undefined} onClick={()=>void resumePreparation(generation.id)}><Play size={12}/>{t('resume')}</button></>:<span><Check size={12}/>{t('savedLocally')}</span>}</>}
-          onToggle={togglePlayback} onSkipOpening={player.skipOpening} onSkip={player.skip} onSelect={selectForPlayback} onSettings={()=>openModal('playback')} onHistory={()=>openModal('generations')} onUpdate={update}
+          onToggle={togglePlayback} onSeekTrack={seekTrackForPlayback} onSkip={player.skip} onSelect={selectForPlayback} onSettings={()=>openModal('playback')} onHistory={()=>openModal('generations')} onUpdate={update}
           showFollow={browsing&&Boolean(player.segment)} onFollow={()=>{if(!settings?.follow)void update({follow:true});resumeFollowing();focusIfLost(()=>viewRef.current);}} listener={listenerMode}/>:<footer className="no-generation"><div><Headphones size={23}/><div><strong>{t('noAudio')}</strong><p>{t('noGeneration')}</p></div></div><Button onClick={()=>openModal('generate')}><Sparkles/>{t('prepare')}</Button></footer>}
       </>}
     </main>

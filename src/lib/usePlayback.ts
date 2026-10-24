@@ -49,7 +49,7 @@ export function usePlayback(book: Book | null, generation: Generation | null, se
   }), []);
   const chapterTitle = book?.chapters.find(item => item.id === state.segment?.chapter_id)?.title ?? '';
   useEffect(() => {
-    describeMediaSession(book && state.segment ? {title: state.opening ? (settings?.language === 'ru' ? 'Заставка Dogma' : 'Dogma intro') : chapterTitle || book.title, artist: book.author || book.title, album: book.title} : null, state.playing);
+    describeMediaSession(book && (state.segment||state.opening) ? {title: chapterTitle || book.chapters[0]?.title || book.title, artist: book.author || book.title, album: book.title} : null, state.playing);
   }, [book, state.segment?.id, state.opening?.key, chapterTitle, state.playing, settings?.language]);
   useEffect(() => { controller.current?.update(book, generation); }, [book, generation]);
   useEffect(() => { if (settings) controller.current?.configure(settings); }, [settings]);
@@ -109,6 +109,7 @@ export function usePlayback(book: Book | null, generation: Generation | null, se
       controller.current?.adoptCorrection(nextBook,nextGeneration,affectedSegmentIds,affectedSourceIds)??false,
     toggle: () => controller.current?.toggle(),
     select: (id: string, play = true, time = 0) => controller.current?.select(id, play, time),
+    seekChapterTrack: (chapterId:string,seconds:number,play=true)=>controller.current?.seekChapterTrack(chapterId,seconds,play),
     preview: (id: string) => controller.current?.preview(id),
     seek: (seconds: number) => controller.current?.seek(seconds),
     skipOpening: () => controller.current?.skipOpening(),

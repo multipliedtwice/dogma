@@ -37,6 +37,17 @@ export function chapterTimeline(generation: Generation, selected: Segment | null
     previous: adjacent(-1), next: adjacent(1), selectedIndex: segments.findIndex(segment => segment.id === current?.id)};
 }
 
+/** Track time includes branding; all segment/reader offsets remain source time. */
+export function chapterTrackTimeline(generation:Generation, source:ReturnType<typeof chapterTimeline>, opening?:{position:number;duration:number}) {
+  const first=generation.segments[0]?.chapter_id||generation.config?.chapters?.[0]||'';
+  const chapterId=source.chapterId||first;
+  const asset=generation.config?.opening?.variants.music;
+  const openingDuration=chapterId===first&&source.mode!=='passage'&&asset?.audio_hash&&Number.isFinite(asset.duration)&&asset.duration>0?asset.duration:0;
+  return {...source,chapterId,openingDuration,duration:source.duration+openingDuration,
+    elapsed:opening&&openingDuration?Math.min(Math.max(0,opening.position),openingDuration):source.elapsed+openingDuration,
+    canSeek:Boolean(openingDuration||source.seekable.length)};
+}
+
 export function timelineTarget(segments: Segment[], seconds: number): {id: string; offset: number} | null {
   if (!Number.isFinite(seconds) || !segments.length || segments.some(segment => !playable(segment))) return null;
   let remaining = Math.max(0, seconds);

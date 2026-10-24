@@ -2,6 +2,7 @@ import type {Book, Generation, Position, Segment, Settings, PlaybackChunk, Playb
 import {createAudioCache, saveDataEnabled, type AudioCache, type AudioLease} from './audioCache';
 
 import {canKeepHlsPrefix, playbackChunkFor, playbackFailureFor, playbackMediaTime, playbackSourceAt, validPlaybackChunk} from './playbackStreams';
+import {chapterTimeline,timelineTarget} from './playerView';
 
 type Anchor = Position & {start?: number; end?: number; duration?: number};
 
@@ -359,6 +360,15 @@ export function createPlaybackController(initial: HTMLAudioElement, services: Se
   };
   const prefetch = () => {
     if (disposed) return;
+    if(openingActive&&!previewing&&generation){
+      const first=generation.segments[0];
+      const firstChunk=streaming&&first?playbackChunkFor(currentStreams(),generation,first):null;
+      // Warm the exact first speech asset during branding. HLS owns its MSE
+      // fragment queue; it attaches only when the speech transport takes over.
+      const hash=streaming?(firstChunk&&!firstChunk.hls&&!services.playbackAssetUrl?.(firstChunk.key)?'playback:'+firstChunk.key:'')
+        :first?.status==='ready'?first.audio_hash||'':'';
+      cache.keep(recent);cache.want(hash?[hash]:[]);return;
+    }
     if (streaming && !openingActive && !previewing) {
       const manifest = currentStreams();
       // HLS owns its fragment queue and MSE buffer on the current media element.
@@ -499,6 +509,33 @@ export function createPlaybackController(initial: HTMLAudioElement, services: Se
     previewFrom = null;
     provisional = false;
     choose(id, play, time, !silent);
+  };
+  const seekChapterTrack = (chapterId:string,seconds:number,play=wantsPlay) => {
+    if(!book||!generation||!Number.isFinite(seconds))return;
+    const first=generation.segments[0];
+    const firstChapter=first?.chapter_id||generation.config?.chapters?.[0];
+    const configured=generation.config?.opening;
+    const duration=chapterId===firstChapter?configured?.variants.music.duration||0:0;
+    const time=Math.max(0,seconds);
+    if(configured&&duration>0&&time<duration){
+      // A track seek intentionally revisits its first eight seconds. Source
+      // selection, restoration and correction adoption never enter this path.
+      void persist();unload();dropStandby();
+      selected=first??null;previewing=false;previewFrom=null;provisional=false;awaitingContinuation=false;
+      opening={key:configured.key,offset:time,complete:false,variant:'music'};openingActive=true;
+      position=time;wantsPlay=play;error='';failedSegment=null;
+      ensureAudio();void persist();return;
+    }
+    const selectedChapter=generation.segments.find(item=>item.chapter_id===chapterId);
+    if(!selectedChapter)return;
+    const timeline=chapterTimeline(generation,selectedChapter,0);
+    const target=timelineTarget(timeline.seekable,time-duration)??{id:selectedChapter.id,offset:0};
+    if(configured){
+      if(openingActive)finishOpening(false);
+      opening={key:configured.key,offset:configured.variants.music.duration,complete:true,variant:'music'};
+      openingActive=false;
+    }
+    select(target.id,play,target.offset);
   };
   const preview = (id: string) => {
     if (!generation?.segments.some(item => item.id === id)) return;
@@ -645,17 +682,25 @@ export function createPlaybackController(initial: HTMLAudioElement, services: Se
   };
   const skip = (delta: number) => {
     if (!Number.isFinite(delta)) return;
-    if (openingActive) { finishOpening(wantsPlay); return; }
-    if (!generation || !selected) return;
+    if (!generation) return;
+    const play=wantsPlay;
     syncSource();
+    const introDuration=openingAsset()?.duration||0;
+    let target=(openingActive?(binding?audio.currentTime:position):sourcePosition())+delta;
+    if(openingActive){
+      if(target<introDuration){seekChapterTrack(generation.segments[0]?.chapter_id||generation.config?.chapters?.[0]||'',Math.max(0,target),play);return;}
+      target-=introDuration;finishOpening(play);
+      selected=generation.segments[0]??null;
+    }
+    if(!selected)return;
     let index = generation.segments.findIndex(item => item.id === selected!.id);
-    let target = position + delta;
     while (target < 0 && index > 0) {
       const previous = afterHeld(index, -1);
       if (previous < 0 || generation.segments[previous].status !== 'ready') break;
       index = previous;
       target += generation.segments[index].duration;
     }
+    if(target<0&&index===0&&introDuration){seekChapterTrack(generation.segments[0].chapter_id,Math.max(0,introDuration+target),play);return;}
     while (index < generation.segments.length - 1 && generation.segments[index].duration > 0 && target >= generation.segments[index].duration) {
       target -= generation.segments[index].duration;
       const next = afterHeld(index);
@@ -663,7 +708,7 @@ export function createPlaybackController(initial: HTMLAudioElement, services: Se
       index = next;
       if (generation.segments[index].status !== 'ready') { target = 0; break; }
     }
-    select(generation.segments[index].id, wantsPlay, Math.max(0, target));
+    select(generation.segments[index].id, play, generation.segments[index].status==='ready'?Math.max(0,target):0);
   };
   const onTime = () => {
     if (!binding) return;
@@ -752,7 +797,7 @@ export function createPlaybackController(initial: HTMLAudioElement, services: Se
       void persist();
       return true;
     },
-    update, select, preview, toggle, seek, skip, pause, persist, clearError, skipOpening: () => finishOpening(wantsPlay),
+    update, select, seekChapterTrack, preview, toggle, seek, skip, pause, persist, clearError, skipOpening: () => finishOpening(wantsPlay),
     configure: (settings: Settings) => { rate = settings.playback_rate; volume = settings.volume; audio.playbackRate = openingActive ? 1 : rate; audio.volume = volume; },
     dispose: () => {
       void persist();
@@ -767,7 +812,10 @@ export function createPlaybackController(initial: HTMLAudioElement, services: Se
       if (!generation || !selected) return;
       const index = generation.segments.findIndex(item => item.id === selected?.id);
       const target = index >= 0 ? afterHeld(index, direction < 0 ? -1 : 1) : -1;
-      if (target >= 0 && generation.segments[target].status === 'ready') select(generation.segments[target].id, wantsPlay || !audio.paused);
+      if (target >= 0 && generation.segments[target].status === 'ready') {
+        if(target===0)seekChapterTrack(generation.segments[0].chapter_id,0,wantsPlay||!audio.paused);
+        else select(generation.segments[target].id,wantsPlay||!audio.paused);
+      }
     },
   };
 }

@@ -857,24 +857,62 @@ test('a stale not-ready error clears and the passage loads when it becomes ready
 
 
 function withOpening(d = data()) {
-  d.generation.config = {opening: {schema: 1, key: 'a'.repeat(64), language: 'en', text: 'Narrated with Dogma.',
+  d.generation.config = {chapters:['c1'],opening: {schema: 1, key: 'a'.repeat(64), language: 'en', text: 'Narrated with Dogma.',
     attribution: 'Fixture', variants: {speech: {audio_hash: 'dry-brand', duration: 3}, music: {audio_hash: 'musical-brand', duration: 8}}}};
   d.generation.status = 'rendering';
   return d;
 }
 
-test('branded intro uses musical asset with background music off and keeps book timeline untouched', async () => {
+test('branded intro uses musical asset with background music off and keeps source offsets untouched', async () => {
   const h = harness(); h.audio.duration = 8;
   const d = withOpening(); h.controller.configure({playback_rate: 1.5, volume: .7, music: false});
   h.controller.update(d.book, d.generation); await settle(); h.controller.toggle(); await settle();
-  assert.deepEqual(h.loads, ['musical-brand']); assert.equal(h.state().playing, true);
+  assert.deepEqual(h.loads, ['musical-brand','hash-s1']); assert.equal(h.state().playing, true);assert.equal(h.audio.src,'blob:0');
   assert.equal(h.audio.playbackRate, 1); assert.equal(h.state().segment.id, 's1');
   h.audio.currentTime = 4; h.audio.dispatchEvent(new Event('timeupdate')); await h.controller.persist();
   assert.equal(h.state().position, 0); assert.equal(h.state().opening.position, 4);
   assert.equal(h.saved.at(-1).offset, 0); assert.equal(h.saved.at(-1).opening.offset, 4);
   h.controller.configure({playback_rate: 2, volume: .6, music: true});
-  assert.deepEqual(h.loads, ['musical-brand']); assert.equal(h.audio.currentTime, 4);
+  assert.deepEqual(h.loads, ['musical-brand','hash-s1']); assert.equal(h.audio.currentTime, 4);assert.equal(h.audio.src,'blob:0');
   assert.equal(d.generation.segments.length, 1); h.controller.dispose();
+});
+
+test('first chapter track zero restores intro after an old generation saved midchapter',async()=>{
+  const h=harness();h.audio.duration=20;const d=withOpening(data([segment('s1'),segment('s2','ready',{source_id:'p2'})],'new'));
+  d.book.position={generation_id:'old',chapter_id:'c1',source_id:'p2',segment_id:'s2',offset:1};
+  h.controller.configure({playback_rate:2,volume:.7,music:false});h.controller.update(d.book,d.generation);await settle();
+  assert.equal(h.state().opening,undefined);assert.equal(h.state().segment.id,'s2');
+  h.controller.seekChapterTrack('c1',0,true);await settle();
+  assert.equal(h.state().opening.position,0);assert.equal(h.state().segment.id,'s1');assert.equal(h.audio.playbackRate,1);
+  assert.equal(h.saved.at(-1).generation_id,'new');assert.equal(h.saved.at(-1).offset,0);assert.equal(h.saved.at(-1).opening.complete,false);
+  h.audio.ended=true;h.audio.dispatchEvent(new Event('ended'));await settle();
+  assert.equal(h.state().opening,undefined);assert.equal(h.state().segment.id,'s1');assert.equal(h.state().position,0);assert.equal(h.audio.playbackRate,2);
+  h.controller.select('s2',false);h.controller.select('s1',false,0);await settle();
+  assert.equal(h.state().opening,undefined);assert.equal(h.saved.at(-1).opening.complete,true);h.controller.dispose();
+});
+
+test('chapter track seeks across intro boundary while keeping source offsets and pause intent',async()=>{
+  const h=harness();h.audio.duration=20;const d=withOpening(data([segment('s1','ready',{duration:10})]));
+  h.controller.update(d.book,d.generation);await settle();
+  h.controller.seekChapterTrack('c1',3,false);await settle();
+  assert.equal(h.state().opening.position,3);assert.equal(h.state().playing,false);assert.equal(h.saved.at(-1).offset,0);
+  h.controller.seekChapterTrack('c1',12,false);await settle();
+  assert.equal(h.state().opening,undefined);assert.equal(h.state().position,4);assert.equal(h.saved.at(-1).offset,4);
+  h.controller.seekChapterTrack('c1',0,false);await settle();assert.equal(h.state().opening.position,0);
+  h.controller.skip(5);await settle();assert.equal(h.state().opening.position,5);
+  h.controller.skip(5);await settle();assert.equal(h.state().opening,undefined);assert.equal(h.state().position,2);
+  h.controller.skip(-5);await settle();assert.equal(h.state().opening.position,5);assert.equal(h.state().playing,false);h.controller.dispose();
+});
+
+test('track seek leaves preview and plays intro before waiting for pending first speech',async()=>{
+  const h=harness();const d=withOpening(data([segment('s1','pending'),segment('s2','ready',{source_id:'p2'})]));
+  h.controller.update(d.book,d.generation);await settle();h.controller.preview('s2');await settle();
+  assert.equal(h.state().previewing,true);h.controller.seekChapterTrack('c1',0,true);await settle();
+  assert.equal(h.state().previewing,false);assert.equal(h.state().segment.id,'s1');assert.equal(h.state().opening.position,0);
+  h.audio.ended=true;h.audio.dispatchEvent(new Event('ended'));await settle();
+  assert.equal(h.state().opening,undefined);assert.equal(h.state().waiting,true);assert.equal(h.state().segment.id,'s1');
+  h.controller.update(d.book,{...d.generation,segments:[segment('s1'),d.generation.segments[1]]});await settle();
+  assert.equal(h.state().playing,true);assert.equal(h.state().segment.id,'s1');h.controller.dispose();
 });
 
 test('intro pauses, restores exact offset, survives polls and hands off once to narration', async () => {
@@ -919,7 +957,7 @@ test('correction delivered during branded intro leaves its playback intact for a
   const h=harness();const d=withOpening();h.controller.update(d.book,d.generation);await settle();
   h.controller.toggle();await settle();h.audio.currentTime=1;h.audio.dispatchEvent(new Event('timeupdate'));
   assert.equal(h.controller.adoptCorrection(d.book,{...d.generation,id:'g2'},['s1'],['p1']),false);await settle();
-  assert.equal(h.state().opening.position,1);assert.equal(h.state().playing,true);assert.deepEqual(h.loads,['musical-brand']);
+  assert.equal(h.state().opening.position,1);assert.equal(h.state().playing,true);assert.deepEqual(h.loads,['musical-brand','hash-s1']);assert.equal(h.audio.src,'blob:0');
   h.controller.dispose();
 });
 
@@ -984,7 +1022,7 @@ test('listen-from-start on a fresh generation retains branding before its first 
   const h=harness();const d=withOpening();h.controller.update(d.book,d.generation);await settle();
   h.controller.select('s1',true,0);await settle();
   assert.ok(h.state().opening);assert.equal(h.state().playing,true);
-  assert.deepEqual(h.loads,['musical-brand']);h.controller.dispose();
+  assert.deepEqual(h.loads,['musical-brand','hash-s1']);assert.equal(h.audio.src,'blob:0');h.controller.dispose();
 });
 
 
@@ -1004,6 +1042,27 @@ function streamHarness(extra={}) {
   h.audio.duration=300;
   return {...h,fetched};
 }
+
+test('first chapter track seeks cross the intro and prefetched compressed speech without changing source offsets',async()=>{
+  const h=streamHarness(),d=withOpening(streamData());
+  h.controller.configure({music:false,playback_rate:1.5});
+  h.controller.update(d.book,d.generation);h.controller.setStreams('g1',d.manifest);await settle();
+  h.controller.toggle();await settle();
+  assert.ok(h.state().opening);assert.equal(h.audio.playbackRate,1);
+  assert.deepEqual(h.loads,['musical-brand']);assert.ok(h.fetched.includes('chunk-one'));
+  assert.equal(h.state().streamKey,undefined,'Prefetch does not start source playback during the intro');
+  h.controller.seekChapterTrack('c1',11,true);await settle();
+  assert.equal(h.state().opening,undefined);assert.equal(h.state().segment.id,'s2');
+  assert.equal(h.state().position,1);assert.equal(h.audio.currentTime,3);assert.equal(h.audio.playbackRate,1.5);
+  await h.controller.persist();assert.equal(h.saved.at(-1).offset,1);
+  h.controller.seekChapterTrack('c1',0,true);await settle();assert.ok(h.state().opening);
+  assert.equal(h.audio.currentTime,0);assert.equal(h.audio.playbackRate,1);
+  h.audio.ended=true;h.audio.dispatchEvent(new Event('ended'));await settle();
+  assert.equal(h.state().segment.id,'s1');assert.equal(h.state().opening,undefined);
+  assert.equal(h.audio.currentTime,0);assert.equal(h.audio.playbackRate,1.5);
+  assert.equal(h.fetched.filter(key=>key==='chunk-one').length,1);
+  h.controller.dispose();
+});
 
 test('continuous playback waits for prepared chunks, never preloads sentence WAVs, and maps every source without handoffs',async()=>{
   const h=streamHarness(),d=streamData();

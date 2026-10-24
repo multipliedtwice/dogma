@@ -6,7 +6,7 @@ const ts=require('typescript');
 const {sourceTree}=require('./layout_source.cjs');
 const m={exports:{}};
 new Function('module','exports',ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/lib/playerView.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(m,m.exports);
-const {chapterTimeline,timelineTarget,timelineKeyTarget,spaceToggles,sleepDeadline}=m.exports;
+const {chapterTimeline,chapterTrackTimeline,timelineTarget,timelineKeyTarget,spaceToggles,sleepDeadline}=m.exports;
 const segment=(id,chapter='c1',duration=10,ready=true)=>({id,chapter_id:chapter,status:ready?'ready':'pending',audio_hash:ready?id:null,duration:ready?duration:0,cues:[],spoken:'Prepared passage',speaker:'narrator'});
 const g=segments=>({id:'g',book_id:'b',name:'Saved narration',status:'ready',segments,cast:[],analysis:{complete:true},exports:[]});
 const walk=(tree,check)=>Array.isArray(tree)?tree.flatMap(v=>walk(v,check)):!tree||typeof tree!=='object'?[]:[...(check(tree)?[tree]:[]),...walk(tree.props?.children,check)];
@@ -27,6 +27,9 @@ test('chapter seek uses only the complete prefix and never jumps over a pending 
   assert.equal(waiting.elapsed,10);assert.equal(waiting.mode,'chapter');
   const after=chapterTimeline(generation,generation.segments[2],3);
   assert.equal(after.mode,'passage');assert.equal(after.elapsed,3);assert.equal(after.duration,10);
+  generation.config={opening:{variants:{music:{audio_hash:'brand',duration:8}}}};
+  const isolated=chapterTrackTimeline(generation,after);
+  assert.equal(isolated.elapsed,3);assert.equal(isolated.duration,10);assert.equal(isolated.openingDuration,0);
 });
 test('missing, zero-duration, unready and nonfinite timeline inputs cannot become seek targets',()=>{
   assert.equal(timelineTarget([],1),null);
@@ -97,23 +100,41 @@ test('space toggles only playing audio or a passage with playable saved audio an
 });
 
 
-test('branded intro player shows its separate clock, permits pause without source segments, and skips explicitly',()=>{
+test('intro is the seekable first chapter prefix, including while speech is pending',()=>{
   const calls=[];
+  const generation=g([]);generation.config={chapters:['c1'],opening:{variants:{music:{audio_hash:'brand',duration:8}}}};
   const {tree}=sourceTree('src/components/PlayerBar.tsx',{}, {component:'PlayerBar',book:{id:'b',title:'Book',chapters:[]},
-    generation:g([]),settings:{language:'en',playback_rate:1},player:{segment:null,position:0,playing:true,waiting:false,error:'',sleepAt:0,
+    generation,settings:{language:'en',playback_rate:1},player:{segment:null,position:0,playing:true,waiting:false,error:'',sleepAt:0,
       opening:{key:'brand',position:3,duration:8}},status:'Preparing',statusAction:null,
-    onSelect:()=>calls.push('seek'),onSkipOpening:()=>calls.push('skip'),onToggle:()=>calls.push('pause'),
+    onSelect:()=>calls.push('source'),onSeekTrack:(...args)=>calls.push(args),onToggle:()=>calls.push('pause'),
     onSkip:()=>{},onUpdate:()=>{},onSettings:()=>{},onHistory:()=>{}});
   const range=walk(tree,n=>n.tag==='input'&&n.props.type==='range')[0];
-  assert.equal(range.props.value,3);assert.equal(range.props.max,8);assert.equal(range.props.disabled,true);
-  range.props.onChange({target:{value:'7'}});assert.deepEqual(calls,[]);
+  assert.equal(range.props.value,3);assert.equal(range.props.max,8);assert.equal(range.props.disabled,false);
+  range.props.onChange({target:{value:'7'}});assert.deepEqual(calls,[['c1',7,true]]);
   const pause=walk(tree,n=>n.tag==='button'&&n.props['aria-label']==='Pause')[0];
-  assert.equal(pause.props.disabled,false);pause.props.onClick();assert.deepEqual(calls,['pause']);
-  const skip=walk(tree,n=>n.tag==='button'&&n.props.children?.includes('Skip intro'))[0];
-  assert.ok(skip);
-  const frame=global.requestAnimationFrame;
-  try {global.requestAnimationFrame=()=>0;skip.props.onClick();} finally {global.requestAnimationFrame=frame;}
-  assert.deepEqual(calls,['pause','skip']);
+  assert.equal(pause.props.disabled,false);pause.props.onClick();assert.deepEqual(calls,[['c1',7,true],'pause']);
+  assert.equal(walk(tree,n=>n.tag==='button'&&n.props.children?.includes('Skip intro')).length,0);
+  assert.notEqual(range.props['aria-label'],'Dogma intro');
+});
+
+test('first chapter has one title and one continuous clock before and after the musical prefix',()=>{
+  const generation=g([segment('a'),segment('b'),segment('c','c2')]);
+  generation.config={chapters:['c1','c2'],opening:{variants:{music:{audio_hash:'brand',duration:8}}}};
+  const before=chapterTrackTimeline(generation,chapterTimeline(generation,generation.segments[0],0),{position:3,duration:8});
+  assert.equal(before.elapsed,3);assert.equal(before.duration,28);
+  const after=chapterTrackTimeline(generation,chapterTimeline(generation,generation.segments[1],3));
+  assert.equal(after.elapsed,21);assert.equal(after.duration,28);
+  const later=chapterTrackTimeline(generation,chapterTimeline(generation,generation.segments[2],3));
+  assert.equal(later.elapsed,3);assert.equal(later.duration,10);
+  const calls=[];
+  const {tree}=sourceTree('src/components/PlayerBar.tsx',{}, {component:'PlayerBar',book:{title:'Book',chapters:[{id:'c1',title:'Chapter one'}]},generation,
+    settings:{language:'en'},player:{segment:generation.segments[0],position:3,playing:false,waiting:false,sleepAt:0,premixed:true,bufferedSeconds:7},
+    status:'Saved',statusAction:null,onSelect:()=>calls.push('source'),onSeekTrack:(...args)=>calls.push(args),onToggle:()=>{},onSkip:()=>{},onUpdate:()=>{},onSettings:()=>{},onHistory:()=>{}});
+  const range=walk(tree,n=>n.tag==='input'&&n.props.type==='range')[0];
+  assert.equal(range.props.value,11);assert.equal(range.props.max,28);
+  range.props.onChange({target:{value:'0'}});assert.deepEqual(calls,[['c1',0,false]]);
+  assert.ok(walk(tree,n=>n.tag==='span'&&n.props.title==='Chapter one').length);
+  assert.ok(walk(tree,n=>n.tag==='small'&&n.props.children?.includes('Buffered 0:07')).length);
 });
 
 test('continuous player distinguishes buffered media from prepared narration',()=>{

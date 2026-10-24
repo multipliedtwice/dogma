@@ -91,7 +91,7 @@ function find(predicate) {
 }
 
 function compile(node, environment) {
-  environment={t,settings:null,flushReading:{current:()=>{}},manualReading:{current:false},scrollReaderTo:root=>root?.scrollTo({top:0}),...environment};
+  environment={t,settings:null,generation:null,chapterStartIntent:{current:''},flushReading:{current:()=>{}},manualReading:{current:false},scrollReaderTo:root=>root?.scrollTo({top:0}),...environment};
   const js = ts.transpileModule(`const callback = ${node.getText(tree)};`, {
     compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS},
   }).outputText;
@@ -154,11 +154,31 @@ test('main Play starts the chapter selected in the reader instead of resuming an
       {id:'chapter-3-start',chapter_id:'chapter-3',status:'ready',audio_hash:'audio',duration:2},
     ],
     playable:segment=>segment.status==='ready'&&Boolean(segment.audio_hash)&&segment.duration>0,
-    player:{playing:false,waiting:false,segment:{id:'old',chapter_id:'chapter-1'},select:(...args)=>calls.push(['select',...args]),toggle:()=>calls.push(['toggle'])},
+    player:{playing:false,waiting:false,segment:{id:'old',chapter_id:'chapter-1'},seekChapterTrack:(...args)=>calls.push(['track',...args]),toggle:()=>calls.push(['toggle'])},
     resumeFollowing:()=>calls.push(['follow']),setNotice:value=>calls.push(['notice',value]),
   });
   toggle();
-  assert.deepEqual(calls,[['follow'],['select','chapter-3-start',true]]);
+  assert.deepEqual(calls,[['follow'],['track','chapter-3',0,true]]);
+});
+
+test('selecting the same chapter then Play starts track zero; scrolling alone resumes',()=>{
+  const calls=[],intent={current:''};
+  const select=callback('selectChapter',{chapterStartIntent:intent,manualReading:{current:false},setBrowsing:()=>{},setChapterId:()=>{},setSelectedSource:()=>{},setNavigation:()=>{},viewRef:{current:null},book:null,focusIfLost:()=>{}});
+  select('c1');assert.equal(intent.current,'c1');
+  const environment={chapterStartIntent:intent,browsing:true,chapter:{id:'c1'},chapterSegments:[{status:'ready'}],playable:()=>true,
+    player:{playing:false,waiting:false,segment:{chapter_id:'c1'},seekChapterTrack:(...args)=>calls.push(['track',...args]),toggle:()=>calls.push(['resume'])},
+    resumeFollowing:()=>{intent.current='';},setNotice:()=>{}};
+  callback('togglePlayback',environment)();assert.deepEqual(calls,[['track','c1',0,true]]);
+  callback('togglePlayback',environment)();assert.deepEqual(calls,[['track','c1',0,true],['resume']]);
+});
+
+test('first chapter Play starts its verified intro while every source is pending',()=>{
+  const calls=[];
+  callback('togglePlayback',{chapterStartIntent:{current:'c1'},browsing:true,chapter:{id:'c1'},chapterSegments:[],playable:()=>false,
+    generation:{segments:[{chapter_id:'c1'}],config:{opening:{variants:{music:{audio_hash:'brand',duration:8}}}}},
+    player:{playing:false,waiting:false,segment:null,seekChapterTrack:(...args)=>calls.push(args),toggle:()=>calls.push('toggle')},
+    resumeFollowing:()=>{},setNotice:()=>calls.push('missing')})();
+  assert.deepEqual(calls,[['c1',0,true]]);
 });
 
 test('main Play never resumes another chapter when the selected chapter has no playable audio', () => {

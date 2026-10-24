@@ -3,7 +3,7 @@ import {useMemo, useRef, useSyncExternalStore, type ReactNode} from 'react';
 import type {createPlaybackClock} from '../lib/playbackClock';
 import type {Book, Generation, Segment, Settings} from '../lib/types';
 import type {PlaybackSnapshot} from '../lib/playback';
-import {chapterTimeline, timelineKeyTarget, timelineTarget} from '../lib/playerView';
+import {chapterTimeline, chapterTrackTimeline, timelineKeyTarget, timelineTarget} from '../lib/playerView';
 import {cn, duration} from '../lib/utils';
 import {translator} from '../lib/i18n';
 import {preparationPercent} from '../lib/castReview';
@@ -21,7 +21,7 @@ export type PlayerBarProps = {
   warningDetail?: string;
   statusAction: ReactNode;
   onToggle: () => void;
-  onSkipOpening?: () => void;
+  onSeekTrack?: (chapterId:string,seconds:number,play:boolean)=>void;
   onSkip: (delta: number) => void;
   onSelect: (id: string, play: boolean, offset?: number) => void;
   onSettings: () => void;
@@ -32,7 +32,7 @@ export type PlayerBarProps = {
   listener?: boolean;
 };
 
-export function PlayerBar({book, generation, player: control, settings, status, error = '', warning = '', warningDetail = '', statusAction, onToggle, onSkip, onSkipOpening, onSelect, onSettings, onHistory, onUpdate, showFollow=false, onFollow, listener=false}: PlayerBarProps) {
+export function PlayerBar({book, generation, player: control, settings, status, error = '', warning = '', warningDetail = '', statusAction, onToggle, onSkip, onSeekTrack, onSelect, onSettings, onHistory, onUpdate, showFollow=false, onFollow, listener=false}: PlayerBarProps) {
   const live = useSyncExternalStore(control.clock?.subscribe || (() => () => {}), control.clock?.getSnapshot || (() => control));
   const player = {...control, ...live};
   const t = translator(settings?.language || 'en');
@@ -40,8 +40,7 @@ export function PlayerBar({book, generation, player: control, settings, status, 
   const current = useMemo(() => generation.segments.find(segment => segment.id === player.segment?.id) ?? null, [generation.segments, player.segment?.id]);
   const base = useMemo(() => chapterTimeline(generation, player.segment, 0), [generation.segments, player.segment?.id]);
   const bookTimeline = {...base, elapsed: base.elapsed + (current && base.seekable.some(segment => segment.id === current.id) ? Math.min(Math.max(0, player.position), current.duration) : 0)};
-  const timeline = player.opening ? {...bookTimeline, elapsed: player.opening.position, duration: player.opening.duration} : bookTimeline;
-  const openingLabel = ru ? 'Заставка Dogma' : 'Dogma intro';
+  const timeline = chapterTrackTimeline(generation,bookTimeline,player.opening);
   const chapter = book.chapters.find(item => item.id === timeline.chapterId);
   const play = player.playing || player.waiting;
   const progress = useMemo(() => preparationPercent(generation), [generation.segments, generation.status, generation.analysis]);
@@ -52,14 +51,14 @@ export function PlayerBar({book, generation, player: control, settings, status, 
     ? Math.min(timeline.duration, timeline.elapsed + Math.max(0, player.bufferedSeconds || 0)) : timeline.elapsed;
   const playedPercent = timeline.duration ? timeline.elapsed / timeline.duration * 100 : 0;
   const bufferedPercent = timeline.duration ? bufferedUntil / timeline.duration * 100 : 0;
-  const clockLabel = player.opening ? openingLabel : timeline.mode === 'passage' ? t('passageTimeline') : timeline.complete ? t('chapterTimeline') : t('preparedTimeline');
+  const clockLabel = timeline.mode === 'passage' ? t('passageTimeline') : timeline.complete ? t('chapterTimeline') : t('preparedTimeline');
   const seek = (seconds: number) => {
-    if (player.opening) return;
-    const target = timelineTarget(timeline.seekable, seconds);
+    if(onSeekTrack&&timeline.mode!=='passage'){onSeekTrack(timeline.chapterId,seconds,play);return;}
+    const target = timelineTarget(timeline.seekable, seconds-timeline.openingDuration);
     if (target) onSelect(target.id, play, target.offset);
   };
   const playButton = useRef<HTMLButtonElement>(null);
-  const select = (segment: Segment | null) => { if (!segment) return; onSelect(segment.id, play, 0); focusIfLost(() => playButton.current); };
+  const select = (segment: Segment | null) => { if (!segment) return; if(onSeekTrack)onSeekTrack(segment.chapter_id,0,play);else onSelect(segment.id, play, 0); focusIfLost(() => playButton.current); };
   return <footer className="player-dock" aria-label={t('audiobookPlayer')}>
     <div className="dock-main">
       <button className="dock-book" onClick={onHistory} disabled={listener} title={listener?generation.name:t('generations')} aria-label={`${t('generations')}: ${generation.name}`}>
@@ -79,10 +78,10 @@ export function PlayerBar({book, generation, player: control, settings, status, 
         <button aria-label={t('playbackSettings')} title={player.sleepAt ? t('sleepActive') : t('playbackSettings')} onClick={onSettings}>{player.sleepAt ? <Timer size={19}/> : <Settings2 size={19}/>}</button>
       </div>
     </div>
-    <div className="dock-timeline-heading"><span title={chapter?.title}>{player.opening ? openingLabel : chapter?.title || t('chapters')}</span><small>{player.opening ? <button onClick={() => {onSkipOpening?.(); focusIfLost(() => playButton.current);}}>{ru ? 'Пропустить заставку' : 'Skip intro'}</button> : player.premixed && (player.bufferedSeconds || 0) > 0 ? `${ru ? 'В буфере' : 'Buffered'} ${duration(player.bufferedSeconds || 0)}` : clockLabel}</small></div>
+    <div className="dock-timeline-heading"><span title={chapter?.title}>{chapter?.title || t('chapters')}</span><small>{player.premixed && (player.bufferedSeconds || 0) > 0 ? `${ru ? 'В буфере' : 'Buffered'} ${duration(player.bufferedSeconds || 0)}` : clockLabel}</small></div>
     <div className="dock-timeline">
       <span>{duration(timeline.elapsed)}</span>
-      <input type="range" min="0" max={Math.max(.01, timeline.duration)} step=".05" value={timeline.elapsed} disabled={Boolean(player.opening) || !timeline.seekable.length}
+      <input type="range" min="0" max={Math.max(.01, timeline.duration)} step=".05" value={timeline.elapsed} disabled={!timeline.canSeek}
         aria-label={clockLabel} aria-valuetext={`${duration(timeline.elapsed)} / ${duration(timeline.duration)}`}
         style={{background: `linear-gradient(to right, hsl(var(--primary)) 0%, hsl(var(--primary)) ${playedPercent}%, hsl(var(--muted-foreground) / .45) ${playedPercent}%, hsl(var(--muted-foreground) / .45) ${bufferedPercent}%, hsl(var(--border)) ${bufferedPercent}%)`}}
         onKeyDown={event => {const target = timelineKeyTarget(event.key, timeline.elapsed, timeline.duration); if (target === null) return; event.preventDefault(); seek(target);}}

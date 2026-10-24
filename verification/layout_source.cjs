@@ -65,7 +65,7 @@ function sourceTree(file, fixture = {}, props = {}) {
       if(request==='@radix-ui/react-dialog')return {Root:props=>props.open?props.children:null,Portal:props=>props.children,Overlay:props=>h('div',props),Content:props=>h('section',{role:'dialog',...props},props.children),Close:props=>h('button',props,props.children),Title:props=>h('h2',props,props.children),Description:props=>h('p',props,props.children)};
       if(request.startsWith('@tauri-apps'))return {invoke:async()=>{throw Error('No native calls in a layout fixture');}};
       const resolved=path.resolve(path.dirname(filename),request);
-      if(resolved===path.join(root,'src/lib/usePlayback'))return {usePlayback:()=>({...fixture.player,select:()=>{},stop:async()=>{},toggle:()=>{},skip:()=>{},seek:()=>{},setSleepAt:()=>{}})};
+      if(resolved===path.join(root,'src/lib/usePlayback'))return {usePlayback:()=>({...fixture.player,select:()=>{},seekChapterTrack:()=>{},stop:async()=>{},toggle:()=>{},skip:()=>{},seek:()=>{},setSleepAt:()=>{}})};
       if(resolved===path.join(root,'src/lib/api'))return {native:()=>fixture.native===true,hostedListenerConfig:()=>fixture.listener||{enabled:false,base:'',target:null},api:async()=>{throw Error('No network in a layout fixture');},isRuntimeLoss:()=>false,runtimeConnection:{subscribe:()=>()=>{},lost:()=>fixture.runtimeLost===true}};
       if(resolved===path.join(root,'src/components/Media'))return {
         AssetImage:props=>h('span',{className:'asset-image '+(props.className||'')},h('img',{alt:props.alt||'',src:fixture.assets?.[props.id]||'',loading:'eager'})),

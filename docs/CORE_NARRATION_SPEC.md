@@ -445,7 +445,8 @@ retain bounded compressed MP3 playback. Chapter music is premixed at the selecte
 music volume; a phone does not load a second full-chapter PCM WAV or repeatedly
 seek a separate music player. Music settings, source hashes, layout and encoder
 recipe are immutable cache inputs. Source audio, source offsets, quality holds
-and export audio remain unchanged. The Dogma opening stays a separate phase.
+and export audio remain unchanged. The Dogma opening retains its own immutable
+asset internally, but is part of the first generated chapter's playback track.
 
 New audiobook generations include one mandatory, matching-language Dogma branded
 opening, using the approved Soft narrator and Mist music. Its music is part of
@@ -453,6 +454,14 @@ the branding recording and always plays, including when optional chapter music
 is off. The opening is a separate immutable audio asset, never source-book text
 or a fabricated narration segment. A missing matching-language recording blocks
 new generation until an approved recording is available.
+
+The first chapter has one timeline beginning with that opening: its duration
+and elapsed time include the opening, and seeking to zero plays it automatically.
+Seeking within the opening or across its boundary works like any other point
+in the track. Do not expose branding as an optional listening mode, a separate
+intro clock or a special skip control. Resuming a source passage preserves its
+source-relative position; reader alignment and source audio offsets exclude the
+opening. Later chapters do not repeat it.
 
 Exports prepend that opening once when their selection includes the generation's
 first chapter. Later-chapter selections do not repeat it; a chapter ZIP adds it
