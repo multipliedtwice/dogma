@@ -30,6 +30,9 @@ from rimsky.util import atomic_write, file_digest as _file_digest, now, write_js
 SCHEMA = 1
 ENGINE = 'higgs_audio_tts_q8_external_preview'
 MUSIC_MODE = 'verified-chapter-mix-v1'
+UNCHECKED = {'recognition_status': 'not_checked', 'machine_verified': False,
+             'human_approval': False, 'production_approved': False, 'post_processing': 'off'}
+UNCHECKED_NOTICE = 'One-shot audio: recognition and acoustic checks were not run; no listening approval.'
 _DIGEST_CACHE = {}
 
 
@@ -120,6 +123,38 @@ def _published_status(progress: dict) -> str:
     return 'held'
 
 
+def _unchecked_state(progress: dict, chapters: dict) -> dict:
+    """Opt in only through an explicit, internally consistent one-shot record.
+
+    Missing legacy fields retain their historical meaning. An explicit disabled
+    check, however, must never fall through to the legacy zero-counter defaults.
+    The returned state describes review, independently of technical readiness.
+    """
+    if progress.get('post_processing') != 'off' and progress.get('recognition_status') != 'not_checked':
+        return {}
+    _validate_unchecked(progress, 'Progress', required=True)
+    if progress.get('effects_policy') != 'disabled':
+        raise ValueError('One-shot progress must explicitly disable effects')
+    for chapter_id, ready in chapters.items():
+        if not isinstance(ready, dict):
+            raise ValueError(f'Invalid publication record for {chapter_id}')
+        _validate_unchecked(ready, chapter_id)
+    if progress.get('status') == 'complete' and any(ready.get('complete') is not True for ready in chapters.values()):
+        raise ValueError('One-shot technical completion requires complete published chapters')
+    return dict(UNCHECKED)
+
+
+def _validate_unchecked(record: dict, label: str, *, required=False):
+    for key, expected in UNCHECKED.items():
+        if (required or key in record) and (type(record.get(key)) is not type(expected) or record.get(key) != expected):
+            raise ValueError(f'{label} contradicts explicit unchecked state: {key}')
+    # Even a numeric zero would falsely present a check that was never run.
+    for key in ('word_flags', 'recognition_flags', 'open_recognition_flags', 'verified_units',
+                'asr_exact', 'recognition_passed', 'audited'):
+        if key in record and record[key] is not None:
+            raise ValueError(f'{label} reports {key} although recognition was not checked')
+
+
 def _source_ranges(book: dict, rows: list[dict]) -> dict[str, tuple[int, int]]:
     blocks = {block['id']: block.get('text', '') for chapter in book['chapters'] for block in chapter['blocks']}
     cursors: dict[str, int] = {}
@@ -200,10 +235,12 @@ def _write_audio(data_dir: Path, raw: bytes, samples: int, rate: int):
     return key, value['duration']
 
 
-def _chapter_key(ready: dict) -> str:
+def _chapter_key(ready: dict, unchecked: dict | None = None) -> str:
     binding = ready.get('timeline_asset') or {}
-    return hashlib.sha256(json.dumps({'audio': ready.get('wav_sha256'), 'timeline': binding.get('sha256'),
-                                      'units': ready.get('units')}, sort_keys=True).encode()).hexdigest()
+    value = {'audio': ready.get('wav_sha256'), 'timeline': binding.get('sha256'), 'units': ready.get('units')}
+    if unchecked:
+        value['review_state'] = unchecked
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
 def _chapter_reusable(store: Store, generation_id: str, chapter_id: str, checkpoint: dict) -> bool:
@@ -353,6 +390,7 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
     chapters = progress.get('chapters')
     if not isinstance(chapters, dict) or not chapters:
         raise ValueError('No published chapters are available for the production reader')
+    unchecked = _unchecked_state(progress, chapters)
     music_publications = {chapter_id: _music_publications(workspace, chapter_id, ready)
                           for chapter_id, ready in chapters.items()}
     has_music = any(music_publications.values())
@@ -381,7 +419,13 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
             config = {'pack_name': 'Fine-tuned Higgs listening generation',
                       'pack_fingerprint': hashlib.sha256(generation_name.encode()).hexdigest(),
                       'chapters': chapter_ids, 'align_words': False, 'engine': ENGINE,
-                      **({'external_music': MUSIC_MODE} if has_music else {})}
+                      # One-shot jobs own their cached music externally, even
+                      # before the first cue arrives. Do not let MusicJobs
+                      # schedule automatic fallback generation in that gap.
+                      **({'external_music': MUSIC_MODE} if has_music or unchecked else {})}
+            if unchecked:
+                config.update(unchecked)
+                config['review_notice'] = UNCHECKED_NOTICE
             # The watcher never replaces or backfills a historical generation's pin.
             if current:
                 old_config = json.loads(current[0]['config'])
@@ -390,8 +434,14 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
             else:
                 from rimsky.opening import attach_opening
                 config['opening'] = attach_opening(store, book)
+            if unchecked:
+                from rimsky.opening import matching_language, validate_opening
+                opening = validate_opening(config.get('opening'))
+                if opening['language'] != matching_language(book):
+                    raise ValueError('One-shot opening does not match the source language')
             status = _published_status(progress)
-            assignment_flags = {chapter_id: int(ready.get('assignment_flags', 0) or 0)
+            assignment_flags = {chapter_id: (None if unchecked and ready.get('assignment_flags') is None
+                                            else int(ready.get('assignment_flags', 0) or 0))
                                 for chapter_id, ready in chapters.items()}
             held_sections = dict(progress.get('held_sections') or {})
             production_approved = bool(progress.get('production_approved')) and status == 'ready'
@@ -404,7 +454,14 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
                                              'limitations': list(progress.get('limitations') or []),
                                              'pending_checks': {
                                                  'held_sections': len(held_sections),
-                                                 'assignment_flags': sum(assignment_flags.values())}}}
+                                                 'assignment_flags': (None if None in assignment_flags.values()
+                                                                      else sum(assignment_flags.values()))}}}
+            if unchecked:
+                analysis.update(unchecked)
+                analysis['external_preview'].update(unchecked)
+                analysis['external_preview']['review_notice'] = UNCHECKED_NOTICE
+                analysis['external_preview']['pending_checks'].update(
+                    recognition_status='not_checked', recognition_flags=None)
             created = current[0]['created'] if current else now()
             error = str(progress.get('error') or '')[:4000]
             if not current:
@@ -421,8 +478,11 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
                 if not isinstance(ready, dict):
                     raise ValueError(f'Invalid publication record for {chapter_id}')
                 media, rows = _load_publication(workspace, generation_dir, chapter_id, ready)
+                if unchecked:
+                    for row in rows:
+                        _validate_unchecked(row, f'Timeline unit {row.get("id")}')
                 ranges = _source_ranges(prepared, rows)
-                key = _chapter_key(ready)
+                key = _chapter_key(ready, unchecked)
                 checkpoint = (prior.get('chapters') or {}).get(chapter_id, {})
                 reusable = checkpoint.get('key') == key and _chapter_reusable(store, generation_id, chapter_id, checkpoint)
                 if reusable:
@@ -457,11 +517,17 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
                                                         'clip_frame_start': first, 'clip_frame_end': last}}
                     if isinstance(row.get('synthesis'), dict):
                         performance['synthesis_snapshot'] = row['synthesis']
+                    if unchecked:
+                        performance.update(unchecked)
+                        performance['external_preview'].update(unchecked)
+                        parts = (row.get('performance') or {}).get('analysis_parts', row.get('analysis_parts'))
+                        if isinstance(parts, list):
+                            performance['analysis_parts'] = parts
                     built.append({'generation_id': generation_id, 'id': row['id'], 'ordinal': ordinal_base + index,
                                   'chapter_id': chapter_id, 'source_id': row['source_id'], 'start': start, 'end': end,
                                   'text': row['text'], 'spoken': row['text'].strip(), 'speaker': speaker,
                                   'delivery': delivery, 'status': 'ready', 'audio_hash': audio_hash,
-                                  'duration': duration, 'cues': '[]', 'warning': '',
+                                  'duration': duration, 'cues': '[]', 'warning': UNCHECKED_NOTICE if unchecked else '',
                                   'performance': json.dumps(performance, ensure_ascii=False)})
                 columns = ('generation_id','id','ordinal','chapter_id','source_id','start','end','text','spoken','speaker',
                            'delivery','status','audio_hash','duration','cues','warning','performance')
@@ -483,6 +549,9 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
                 changed_chapters.append(chapter_id)
 
             music_cues = _sync_music(store, data_dir, generation_id, chapters, music_publications) if has_music else 0
+            if unchecked and not has_music and store.rows("SELECT name FROM sqlite_master WHERE type='table' AND name='music_cues'"):
+                music_cues = store.rows('SELECT count(*) AS count FROM music_cues WHERE generation_id=?',
+                                        (generation_id,))[0]['count']
 
             cast = [{'id': speaker, 'name': 'Narrator' if speaker == 'narrator' else speaker,
                      'aliases': [], 'description': '', 'evidence': [], 'voice_id': voice, 'voice_name': voice}
@@ -503,6 +572,8 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
                       'music_cues': music_cues,
                       'changed_chapters': changed_chapters, 'metadata_changed': metadata_changed,
                       'synced_at': now()}
+            if unchecked:
+                result.update(unchecked)
             write_json(state_path, result)
             return result
         finally:

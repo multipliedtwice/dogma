@@ -19,6 +19,7 @@ from rimsky.production_higgs_model import resolve_production_higgs_model
 FOLDER = ROOT/'training-work/elirm-iv-higgs-mvp'
 SRC = FOLDER/'audio-palette-v3-descriptors'
 ANSWER = FOLDER/'name-stress-v1/characters.answer.json'
+DEFAULT_PRONUNCIATION_POLICY = 'stress-rare-v4'
 read = lambda p: json.loads(Path(p).read_text('utf8'))
 
 
@@ -88,7 +89,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--name', required=True, help='generation folder name, e.g. audio-palette-v3-iter2')
     p.add_argument('--chapter', nargs='+', default=['c0003']); p.add_argument('--page', required=True)
-    p.add_argument('--pronunciation-policy', default='stress-rare-v2'); p.add_argument('--homograph-stress', type=Path, help='homograph.answer.json for stress-rare-v3/v4'); p.add_argument('--yo-restoration', type=Path, help='yo.answer.json for stress-rare-v4'); p.add_argument('--reference-onset-padding', action='store_true')
+    p.add_argument('--pronunciation-policy', default=DEFAULT_PRONUNCIATION_POLICY, help='New development generations default to v4; frozen generations are never upgraded in place'); p.add_argument('--homograph-stress', type=Path, help='homograph.answer.json for stress-rare-v3/v4'); p.add_argument('--yo-restoration', type=Path, help='yo.answer.json for stress-rare-v4'); p.add_argument('--reference-onset-padding', action='store_true')
     p.add_argument('--number-policy', choices=['grouped-digits-v3']); p.add_argument('--terminal-punctuation', action='store_true'); p.add_argument('--stress-witness', action='store_true', help='retake word-exact takes whose acoustic stress contradicts a mark')
     p.add_argument('--one-shot', action='store_true', help='Freeze a first-take-only render policy; no synthesis retakes or recovery renders')
     p.add_argument('--section-markers', type=Path, help='confirmed.json from build_section_markers.py (structural pauses)')
@@ -98,6 +99,8 @@ def main():
     p.add_argument('--hard-e', type=Path, help='hard-e-v1-opus/respellings.json (scripts/build_hard_e.py); listener respellings override it')
     a = p.parse_args(); dst = FOLDER/a.name
     if (dst/'manifest.json').exists():raise SystemExit('Generation already exists: ' + str(dst))
+    if a.pronunciation_policy == 'stress-rare-v4' and (not a.homograph_stress or not a.yo_restoration):
+        p.error('New v4 preparation requires --homograph-stress and --yo-restoration bound answers')
     dst.mkdir()
     book = read(FOLDER/'source/book.json'); answer = read(ANSWER)['answer']
     names = {r['character_id']: {'name': r['name'], 'stressed': r['stressed'], 'confidence': r['confidence'],
