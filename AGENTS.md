@@ -169,6 +169,17 @@
   unaffected audio and retain earlier attempts. Feedback from an old generation
   must reach the current book generation and future regenerations. Report real
   queued/running/applied/held state; saving a note is not proof of repaired audio.
+- User clarification, 2026-10-25: proper-name corrections persist across every
+  regeneration of every volume in the same series, in development and production.
+  The latest explicit human choice wins, including a correction of the user's
+  own earlier choice; retain both raw notes without letting an old generation,
+  volume, preparation cache or imported history resurrect the earlier mark.
+  Apply the latest choice to every matching name inflection in the current book
+  and regenerate all its available mentions. Preserve unrelated audio and use
+  the corrected family when rendering later passages or other series volumes.
+  A previously validated, uniquely matching series family may resolve an
+  ambiguous form in a later volume. Never merge unrelated series or conflicting
+  character families merely because a surface name matches.
 - Explicit listener corrections remain enabled when automatic post-processing
   is off. Applying a saved instruction does not enable blanket recognition or
   quality-retake loops, change source text/human labels, or authorize production

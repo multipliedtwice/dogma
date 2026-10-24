@@ -14,7 +14,7 @@ from pathlib import Path
 from .book_identity import hints, parse_title
 from .name_stress import ACUTE, VOWELS, build, name_spans
 from .respelling import substitute, validate_respelling
-from .util import digest, now
+from .util import digest, now, file_digest
 
 
 WORD = re.compile(r'[А-Яа-яЁё]+(?:[-‐‑][А-Яа-яЁё]+)*')
@@ -256,6 +256,80 @@ def _base_match(character: dict, selected: str, intended: str) -> tuple[str, str
     return unique[0] if len(unique) == 1 else None
 
 
+def _canonical_family_binding(store,book,report):
+    """Resolve identity from reviewed series families; keep this report's mark."""
+    from .listener_stress import _journal,_ordinary_context,_proper_family,_legacy_family
+    if _ordinary_context(report):return None
+    series=identity(store,book)
+    with _journal(store) as db:
+        rows=db.execute('SELECT report_id,raw,family FROM corrections WHERE series_id=? AND family IS NOT NULL ORDER BY created,rowid',
+            (series['id'],)).fetchall()
+    families={};witnesses={}
+    for row in rows:
+        raw=json.loads(row['raw']);family=json.loads(row['family'])
+        if raw.get('kind')=='legacy_family':
+            validated,_ordinary=_legacy_family(store,book,raw)
+            if validated!=family:continue
+        elif raw.get('kind')=='stress' and not _ordinary_context(raw):
+            selected=raw.get('selected_text','');offset=raw.get('text_offset');passage=raw.get('passage_text','')
+            review=raw.get('review_request') or {}
+            is_review=(raw.get('feedback_source')=='cast_name_stress' and review.get('operation')=='cast_name_stress'
+                and review.get('book_id')==raw.get('book_id') and review.get('generation_id')==raw.get('generation_id'))
+            if not is_review and (type(offset) is not int or passage[offset:offset+len(selected)]!=selected):continue
+            rebound=[_base_match({'canonical_name':stressed.replace(ACUTE,'')},selected,raw.get('intended_stress',''))
+                for stressed in family.values()]
+            rebound=list(dict.fromkeys(value for value in rebound if value))
+            if len(rebound)!=1 or {rebound[0][0]:rebound[0][1]}!=family:continue
+        else:continue
+        for base,stressed in family.items():
+            families[base]=stressed;witnesses[base]=row['report_id']
+    selected=report['selected_text'].replace(ACUTE,'')
+    position=_stress_position(selected,report['intended_stress'])
+    if position is None:return None
+    stress_index,_=position
+    lexical=[]
+    for base,stressed in families.items():
+        plain=stressed.replace(ACUTE,'')
+        vowels=[index for index,letter in enumerate(plain) if letter in VOWELS]
+        probe=_marked(plain,vowels[0]) if vowels else None
+        if probe and normalized(selected) in build({'probe':probe},implicit_single=True):
+            lexical.append((base,plain,witnesses[base]))
+    # Stress in an ending cannot eliminate a rival identity: it may mean that
+    # the correction is occurrence-only for that identity, not a different name.
+    if len({base for base,_plain,_witness in lexical})!=1:return None
+    matches=[]
+    for base,plain,witness in lexical:
+        left=selected.casefold().replace('ё','е');right=plain.casefold().replace('ё','е')
+        shared=next((i for i,(a,b) in enumerate(zip(left,right)) if a!=b),min(len(left),len(right)))
+        if stress_index>=shared:continue
+        found=_base_match({'canonical_name':plain},selected,report['intended_stress'])
+        if found:matches.append((found,witness))
+    identities=list(dict.fromkeys(found for found,_witness in matches))
+    if len(identities)!=1:return None
+    base,stressed=identities[0]
+    # Positive evidence for another identity in this book outranks an old
+    # family's mere spelling compatibility. Let the local resolver handle it.
+    local=_proper_family(book,report)
+    if local and base not in local:return None
+    family={base:stressed};encoded=json.dumps(family,ensure_ascii=False)
+    resolver_sha=file_digest(Path(__file__))
+    with _journal(store) as db:
+        # An append-only derived binding proposal, not a new human receipt.
+        # The subsequent core record adds its accepted resolution separately.
+        if not db.execute('SELECT 1 FROM correction_resolutions WHERE report_id=? AND family=? AND resolver_sha256=?',
+                (report['id'],encoded,resolver_sha)).fetchone():
+            db.execute('INSERT INTO correction_resolutions(report_id,created,family,occurrence,resolver_sha256) VALUES(?,?,?,?,?)',
+                (report['id'],now(),encoded,None,resolver_sha))
+    # The core binds both canonical_name and pronunciation keys. Keep the
+    # same source case here so they deduplicate as one identity rather than
+    # yielding two case-only stressed candidates in its historical contract.
+    return {'status':'updated','canonical_name':stressed.replace(ACUTE,''),
+        'pronunciations':{stressed.replace(ACUTE,''):stressed},
+        'series_id':series['id'],'series_name':series['name'],
+        'family_resolution':{'method':'canonical-series-family-v1','resolver_sha256':resolver_sha,
+            'witness_report_ids':sorted({witness for found,witness in matches if found==(base,stressed)})}}
+
+
 def record_listener_stress(store, report: dict) -> dict:
     """Promote a stress report only when it names exactly one known character."""
     selected = report['selected_text'].replace(ACUTE, '')
@@ -278,6 +352,9 @@ def record_listener_stress(store, report: dict) -> dict:
     matched = [(row, _base_match(row, report['selected_text'], report['intended_stress'])) for row in records]
     matched = [(row, base) for row, base in matched if base]
     if len(matched) != 1:
+        if not matched:
+            canonical=_canonical_family_binding(store,book,report)
+            if canonical:return canonical
         return {'status': 'ambiguous' if matched else 'not_character', 'series_id': series['id'],
                 'series_name': series['name'], 'matches': len(matched)}
     row, (base, stressed) = matched[0]

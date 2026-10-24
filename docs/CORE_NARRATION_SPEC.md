@@ -258,6 +258,21 @@ playback. A report from a stale generation must still update the shared rule and
 reach the current generation. Show actual queued/running/applied/held status;
 do not present a saved report as a completed repair.
 
+User clarification, 2026-10-25: a proper-name choice belongs to the character's
+series, across every volume and regeneration in both development and production.
+The latest explicit human choice replaces earlier choices, including accidental
+ones. Original notes and audio remain historical evidence. Reopening an old
+volume, replaying an old queue item or importing old preparation must never make
+its superseded choice authoritative again; equal timestamps follow save order.
+Use an established, uniquely matching series family to resolve an ambiguous name
+form in a later volume, while retaining identity and ordinary-word guards.
+Regenerate every available matching mention in the current book after an explicit
+name correction, including inflected forms and passages already carrying the same
+input mark. The latter may still have been spoken incorrectly. Keep the real
+heard-note provenance distinct from derived family propagation; do not fabricate
+listening evidence for the other mentions. Future rendering in any series volume
+uses the latest choice. Context-only ordinary-word notes remain occurrence-bound.
+
 If an external renderer publishes a replacement generation, return its identity
 and affected source passages in the correction outcome. The player must adopt
 that replacement while the listener remains on the requesting book/version,

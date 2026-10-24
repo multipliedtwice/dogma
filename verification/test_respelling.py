@@ -65,6 +65,24 @@ class ValidatorTests(unittest.TestCase):
 
 
 class NameInflectionTests(unittest.TestCase):
+    def test_names_do_not_match_inside_unicode_identifiers(self):
+        lexicon={'alexander':'Алекса'+A+'ндр'}
+        for text in ('xАлександр','Александр2','_Александр','Александр_',
+                     'éАлександр','αАлександр','字Александр','Александр١','Александр漢',
+                     'xАле'+A+'ксандр','Але'+A+'ксандр2'):
+            with self.subTest(text=text):self.assertEqual([],name_spans(text,lexicon))
+
+    def test_name_boundaries_keep_inflections_explicit_acutes_and_compound_components(self):
+        lexicon={'alexander':'Алекса'+A+'ндр','hakon':'Хако'+A+'н'}
+        self.assertEqual([],name_spans('александр',lexicon))
+        self.assertEqual([(1,len('Александром')+1,'Алекса'+A+'ндром')],name_spans('«Александром»',lexicon))
+        explicit='Але'+A+'ксандр'
+        self.assertEqual([(0,len(explicit),explicit)],name_spans(explicit,lexicon))
+        for dash in ('-','‐','‑'):
+            word='Ар'+dash+'Хакону'
+            self.assertEqual([(3,len(word),'Хако'+A+'ну')],name_spans(word,lexicon))
+        self.assertEqual([],name_spans('2игв',{'cw:игв':'и'+A+'гв'},implicit_single=True))
+
     def test_respelling_follows_stress_into_inflected_forms(self):
         for printed, expected in (('Мозес', 'Мо' + A + 'зэс'), ('Мозеса', 'Мо' + A + 'зэса'), ('Мозесом', 'Мо' + A + 'зэсом'),
                                   ('Мозесу', 'Мо' + A + 'зэсу')):

@@ -22,9 +22,10 @@ class ListenerStressChronologyTest(unittest.TestCase):
     def tearDown(self):
         for store in self.stores:store.close()
         self.temp.cleanup()
-    def store(self,name,text='Она гуляла с Маришкой.',cast=()):
+    def store(self,name,text='Она гуляла с Маришкой.',cast=(),volume=4,series='Элирм'):
         store=Store(self.root/name,correction_profile=self.profile);self.stores.append(store)
-        book=store.import_data(fb2('Synthetic IV',4,text),'fixture.fb2')
+        source=fb2('Synthetic IV' if volume==4 else f'Synthetic volume {volume}',volume,text).replace('Элирм'.encode(),series.encode())
+        book=store.import_data(source,'fixture.fb2')
         generation=store.create_generation(book['id'],{})
         store.execute('UPDATE generations SET cast=? WHERE id=?',(json.dumps(list(cast)),generation['id']))
         store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('a'*64,generation['id']))
@@ -60,7 +61,8 @@ class ListenerStressChronologyTest(unittest.TestCase):
             (native,_),frozen=self.render(two,book)
         self.assertEqual('Она гуляла с Мари́шкой.',native)
         self.assertGreater(frozen['family_evidence']['маришка']['journal_order'],0)
-    def test_newer_source_occurrence_wins_older_family(self):
+    @patch('rimsky.series_characters._canonical_family_binding',return_value=None)
+    def test_newer_source_occurrence_wins_older_family(self,_identity_adapter):
         one,book,generation=self.store('one');old=self.report(one,generation,'Маришкой','Мари́шкой','2026-10-23T00:00:00Z')
         two,book,generation=self.store('two')
         with patch.object(live,'_proper_family',return_value=None):new=self.report(two,generation,'Маришкой','Ма́ришкой')
@@ -171,5 +173,122 @@ class ListenerStressChronologyTest(unittest.TestCase):
         parses=[SimpleNamespace(normal_form='first',lexeme=[SimpleNamespace(word='стоит')]),
             SimpleNamespace(normal_form='second',lexeme=[SimpleNamespace(word='ждёт')])]
         self.assertIsNone(candidate._attested_name_lemma({'chapters':[{'blocks':[{'text':'Стоит человек.'}]}]},parses,['first','second']))
+
+    def test_latest_self_correction_crosses_volumes_and_independent_libraries(self):
+        from rimsky.series_characters import identity
+        one,first,old_generation=self.store('dev','Маришка ждала. Она говорила с Маришкой.',volume=4)
+        wrong=self.report(one,old_generation,'Маришка','Ма́ришка','2026-10-23T00:00:00Z')
+        old_frozen=candidate.snapshot(one,first)
+        self.assertEqual('Ма́ришка',old_frozen['names']['маришка'])
+        two,second,new_generation=self.store('production','Она говорила с Маришкой.',volume=5)
+        self.assertEqual(identity(one,first)['id'],identity(two,second)['id'])
+        self.assertNotEqual(candidate._book_key(first),candidate._book_key(second))
+        corrected=self.report(two,new_generation,'Маришкой','Мари́шкой','2026-10-24T00:00:00Z')
+        expected='Мари́шка Мари́шки Мари́шке Мари́шку Мари́шкой Мари́шкою маришка.'
+        source='Маришка Маришки Маришке Маришку Маришкой Маришкою маришка.'
+        for store,book in ((one,first),(two,second)):
+            frozen=candidate.snapshot(store,book)
+            self.assertEqual(expected,candidate.apply(source,frozen)[0])
+            self.assertEqual(corrected['id'],frozen['family_evidence']['маришка']['report_id'])
+        three,third,_=self.store('fresh-install','Маришка вошла.',volume=6)
+        self.assertEqual(expected,candidate.apply(source,candidate.snapshot(three,third))[0])
+        # Earlier immutable preparation remains reproducible evidence; it is
+        # not confused with the current canonical human choice.
+        self.assertEqual('Ма́ришкой',candidate.apply('Маришкой',old_frozen)[0])
+        history={row['report']['id']:row['report'] for row in candidate.notes(two,second)}
+        self.assertEqual('Ма́ришка',history[wrong['id']]['intended_stress'])
+        self.assertEqual('Мари́шкой',history[corrected['id']]['intended_stress'])
+
+    def test_ambiguous_new_volume_reuses_unique_validated_series_family(self):
+        one,first,generation=self.store('first','Она говорила с Алексой. Алекса вошла.',volume=4)
+        self.report(one,generation,'Алекса','Але́кса','2026-10-23T00:00:00Z')
+        two,second,later=self.store('later','Алекса вошла. Она ждала Алексу.',volume=5)
+        new=self.report(two,later,'Алекса','А́лекса','2026-10-24T00:00:00Z')
+        # Read the ambiguous later volume first: opening the earlier volume
+        # must not be needed to repair identity or share the latest choice.
+        for store,book in ((two,second),(one,first)):
+            frozen=candidate.snapshot(store,book)
+            self.assertEqual('А́лекса',frozen['names']['алекса'])
+            self.assertEqual(new['id'],frozen['family_evidence']['алекса']['report_id'])
+            self.assertEqual('А́лекса А́лексой А́лексы А́лексу Александр.',candidate.apply('Алекса Алексой Алексы Алексу Александр.',frozen)[0])
+
+    def test_conflicting_established_families_keep_new_ambiguous_note_source_bound(self):
+        one,first,generation=self.store('female','Она говорила с Алексой. Алекса вошла.',volume=4)
+        self.report(one,generation,'Алекса','Але́кса','2026-10-22T00:00:00Z')
+        two,second,generation=self.store('male','Я видел Алекса. Алекс вошёл.',volume=5)
+        male=self.report(two,generation,'Алекса','А́лекса','2026-10-23T00:00:00Z')
+        # Local exclusive evidence must win over compatibility with the old
+        # female family; both identities then genuinely exist in this series.
+        self.assertEqual('А́лекс',candidate.snapshot(two,second)['names']['алекс'])
+        three,third,generation=self.store('ambiguous','Алекса вошла.',volume=6)
+        latest=self.report(three,generation,'Алекса','Алекса́','2026-10-24T00:00:00Z')
+        frozen=candidate.snapshot(three,third)
+        self.assertIn(latest['id'],[row['report_id'] for row in frozen['occurrences']])
+        self.assertEqual('А́лекс',frozen['names']['алекс']);self.assertEqual('Але́кса',frozen['names']['алекса'])
+
+    def test_stale_ordinary_projection_cannot_resolve_identity(self):
+        one,first,generation=self.store('old','Она говорила с алексой. алекса вошла.',volume=4)
+        old=self.report(one,generation,'алекса','але́кса','2026-10-23T00:00:00Z')
+        # A previous resolver's invalid lowercase projection is not authority.
+        with closing(sqlite3.connect(self.profile)) as db:
+            with db:db.execute('UPDATE corrections SET family=?,occurrence=NULL WHERE report_id=?',(json.dumps({'алекса':'Але́кса'}),old['id']))
+        two,second,generation=self.store('later','Алекса вошла.',volume=5)
+        report=self.report(two,generation,'Алекса','А́лекса')
+        self.assertNotEqual('updated',report['character_state']['status'])
+
+    def test_other_exact_series_identity_cannot_resolve_matching_name(self):
+        # A valid family from another exact source-author/series identity also
+        # cannot authorize the fallback merely because the name matches.
+        one,first,generation=self.store('other','Она говорила с Алексой. Алекса вошла.',volume=4,series='Other synthetic series')
+        self.report(one,generation,'Алекса','Але́кса','2026-10-23T00:00:00Z')
+        three,third,generation=self.store('third','Алекса вошла.',volume=6)
+        report=self.report(three,generation,'Алекса','А́лекса')
+        self.assertNotEqual('updated',report['character_state']['status'])
+
+    def test_reimport_old_generation_cannot_resurrect_superseded_family(self):
+        from rimsky.series_characters import apply_pronunciations,sync_generation
+        one,first,old_generation=self.store('old-library','Она говорила с Маришкой.',[{'id':'m','name':'Маришка'}],volume=4)
+        wrong=self.report(one,old_generation,'Маришкой','Ма́ришкой','2026-10-23T00:00:00Z')
+        old_analysis={'names':{'m':{'name':'Маришка','stressed':'Ма́ришка','source':'series_listener'}}}
+        two,second,new_generation=self.store('new-library','Маришка вошла.',[{'id':'m','name':'Маришка'}],volume=5)
+        corrected=self.report(two,new_generation,'Маришка','Мари́шка','2026-10-24T00:00:00Z')
+        raw_before={row['report']['id']:row['report'] for row in candidate.notes(two,second)}
+        # Importing the old source/analysis into the newer library must replay
+        # original timestamps and IDs, never reinterpret it as a fresh choice.
+        old_source=two.import_data(fb2('Synthetic IV',4,'Она говорила с Маришкой.'),'old-again.fb2')
+        imported=two.create_generation(old_source['id'],{})
+        imported={**imported,'cast':[{'id':'m','name':'Маришка'}],'analysis':{'pronunciation':old_analysis}}
+        sync_generation(two,old_source,imported,old_analysis)
+        candidate.record(two,old_source,raw_before[wrong['id']],{'status':'updated','canonical_name':'Маришка','pronunciations':{'маришка':'Ма́ришка'}})
+        for store,book in ((one,first),(two,second),(two,old_source)):
+            frozen=candidate.snapshot(store,book)
+            self.assertEqual('Мари́шкой',candidate.apply('Маришкой',frozen)[0])
+            self.assertEqual(corrected['id'],frozen['family_evidence']['маришка']['report_id'])
+        inherited=apply_pronunciations(two,old_source,imported['cast'],old_analysis)
+        self.assertEqual('Мари́шка',inherited['names']['m']['stressed'])
+        self.assertEqual(raw_before,{row['report']['id']:row['report'] for row in candidate.notes(two,second)})
+
+    def test_self_correction_invalidates_every_current_family_mention_only(self):
+        from rimsky.jobs import Jobs
+        text='Маришка вошла.</p><p>Он говорил с Маришкой.</p><p>Он ждал Маришку.</p><p>Обычная фраза.'
+        store,book,old_generation=self.store('current',text,[{'id':'m','name':'Маришка'}])
+        self.report(store,old_generation,'Маришка','Ма́ришка','2026-10-23T00:00:00Z')
+        with patch('rimsky.store.now',return_value='2026-10-25T00:00:00Z'):
+            current=store.create_generation(book['id'],{})
+        store.execute('UPDATE generations SET cast=? WHERE id=?',(json.dumps([{'id':'m','name':'Маришка'}]),current['id']))
+        store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('b'*64,current['id']))
+        store.execute("UPDATE generations SET status='ready' WHERE id=?",(current['id'],))
+        before=store.generation(current['id']);old_before=store.generation(old_generation['id'])['segments']
+        report=self.report(store,current,'Маришкой','Мари́шкой','2026-10-26T00:00:00Z')
+        jobs=Jobs(store,ROOT,engine_factory=lambda _pack:None)
+        with patch.object(jobs,'_start_listener_queue'):
+            outcome=jobs.listener_stress(report)
+        after=store.generation(current['id'])
+        affected=[row for row in after['segments'] if any(word in row['text'] for word in ('Маришка','Маришкой','Маришку'))]
+        self.assertEqual(3,len(affected));self.assertEqual(3,outcome['targets'])
+        self.assertTrue(all(row['status']=='pending' and row['audio_hash'] is None for row in affected))
+        unchanged=next(row for row in after['segments'] if 'Обычная' in row['text'])
+        self.assertEqual(next(row for row in before['segments'] if row['id']==unchanged['id']),unchanged)
+        self.assertEqual(old_before,store.generation(old_generation['id'])['segments'])
 
 if __name__=='__main__':unittest.main()

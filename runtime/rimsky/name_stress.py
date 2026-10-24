@@ -111,6 +111,12 @@ def name_spans(text: str, lexicon: dict[str, str], common=frozenset(), implicit_
     common = {w.casefold().replace('ё', 'е') for w in common}
     spans = []
     for match in _WORD.finditer(text):
+        # The Cyrillic matcher must not select a name embedded in a mixed
+        # identifier. Hyphens remain valid separators for compound names.
+        before=text[match.start()-1] if match.start() else ''
+        after=text[match.end()] if match.end()<len(text) else ''
+        if any(char.isalnum() or char=='_' for char in (before,after)):
+            continue
         word = match[0]
         if not word[:1].isupper() and word.replace(ACUTE, '').casefold().replace('ё', 'е') not in any_case:
             continue
