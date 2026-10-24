@@ -143,6 +143,17 @@
 
 ## Preparation layers (user findings, 2026-10-17)
 
+- User decision, 2026-10-24: dictionary homographs receive contextual stress
+  decisions from GPT-6 Luna (`gpt-6-luna`, Codex CLI, low effort), including
+  words left unmarked by taggers and cases where taggers agree. Bind the exact
+  source occurrence and selected е/ё spelling. Contextually selected stress
+  must survive the adjacent-stress guard; preserve prior automatic evidence.
+  Detect candidates from the pinned homograph lexicon, never book-specific
+  phrases. This contextual authority supersedes older automatic homograph
+  choices while preserving explicit source stress and reviewed proper names.
+  Emit a private ambiguity report before rendering: every detected stress
+  alternative, exact source occurrence, Luna choice and reason. Keep rejected
+  responses visible in their evidence; a text decision is not audio approval.
 - User decision, 2026-10-24: every ambiguous е/ё occurrence is decided during
   preprocessing by GPT-6 Luna (`gpt-6-luna`, Codex CLI, low effort), including
   occurrences where Silero and RUAccent agree. Their agreement is evidence,

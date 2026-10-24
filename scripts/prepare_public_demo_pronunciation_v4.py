@@ -17,8 +17,10 @@ sys.path[:0]=[str(ROOT/'runtime'),str(ROOT/'scripts')]
 import freeze_public_audiobook_demo as legacy
 import build_yo_restoration as builder
 import build_homograph_stress as stress_builder
+import build_contextual_stress as context_builder
 from rimsky import yo_restoration as yo,homograph_stress as hs
 from rimsky import russian_pronunciation as phonetics
+from rimsky import contextual_stress
 from rimsky.auto_pronunciation import auto_pronunciation,policy_options
 from rimsky.util import digest,file_digest
 
@@ -36,7 +38,7 @@ SYSTEM=yo.SYSTEM+(' For these ambiguous finite-verb items, jointly decide the co
 
 
 def dependencies():
-    modules=(legacy,builder,stress_builder,yo,hs,phonetics)
+    modules=(legacy,builder,stress_builder,context_builder,yo,hs,phonetics,contextual_stress)
     return {str(Path(m.__file__).resolve().relative_to(ROOT)).replace('\\','/'):file_digest(Path(m.__file__)) for m in modules}|{
         SELF.relative_to(ROOT).as_posix():file_digest(SELF),'runtime/rimsky/auto_pronunciation.py':file_digest(ROOT/'runtime/rimsky/auto_pronunciation.py')}
 
@@ -182,20 +184,32 @@ def prepare_rows(units,names,common,homograph,out):
             'choice':row['yo_decision']['choice'],'basis':'luna-yo-choice-with-separate-opus-stress'})
     answer={'rule':yo.RULE,'guard':RULE,'yo_policy':builder.POLICY,'yo_metadata':{'batches':[b['metadata'] for b in batches]},
         'decisions':[d for a in analyses for d in a['auto']]+regular_decisions+context_decisions,'context':contextual,'human_approval':False}
-    immutable(out/'yo.answer.json',answer);answer_sha=file_digest(out/'yo.answer.json');result=[]
+    immutable(out/'yo.answer.json',answer);answer_sha=file_digest(out/'yo.answer.json');result=[];intermediate=[]
     for unit,analysis in zip(units,analyses,strict=True):
         local=[d for d in analysis['auto']]+[d for r,d in zip(regular,regular_decisions,strict=True) if r['unit']==unit['id']]
         local += [d for row,d in zip(contextual,context_decisions,strict=True) if row['row']['unit']==unit['id']]
         options=policy_options('stress-rare-v4',{'homograph_stress':homograph,'yo_restoration':{'rule':yo.RULE,'answer_sha256':answer_sha,'decisions':local}})
         synthesis,record=auto_pronunciation(unit['spoken'],names,common,**options)
         synthesis,context_record=overlay_context(unit,synthesis,[r for r in contextual if r['row']['unit']==unit['id']],homograph)
+        intermediate.append((unit,synthesis,record,context_record))
+    context_block=context_builder.prepare([{'source':unit['spoken'],'selected':synthesis,'names':names,'common':common}
+        for unit,synthesis,record,context_record in intermediate],out/'dictionary-context')
+    for unit,synthesis,record,context_record in intermediate:
+        protected={(r['word'].casefold().replace('ё','е'),r['index']) for r in homograph.get('overrides',[])
+                   if r['sha256']==digest(unit['spoken'].encode('utf8'))}
+        protected|={(r['word'].casefold().replace('ё','е'),r['index']) for r in record.get('homograph_overrides',{}).get('applied',[])}
+        protected|={(r['row']['word'],r['row']['index']) for r in contextual if r['row']['unit']==unit['id']}
+        synthesis,dictionary_context=contextual_stress.apply(unit['spoken'],synthesis,context_block,names,common,protected)
+        dictionary_context['module_sha256']=file_digest(Path(contextual_stress.__file__))
         before_phonetic=synthesis;synthesis,phonetic_records=phonetics.apply(before_phonetic)
         phonetic={'rule':phonetics.RULE,'prephonetic_source':before_phonetic,'records':phonetic_records,
                   'module_sha256':file_digest(Path(phonetics.__file__))}
         legacy.validate_synthesis_pronunciation(unit['spoken'],synthesis,phonetic)
         if record['yo_restoration']['unbound'] or record.get('homograph_overrides',{}).get('unbound'):raise ValueError('Unbound pronunciation occurrence')
-        result.append({**unit,'synthesis_text':synthesis,'pronunciation':{**record,'context_stress':context_record,'russian_phonetics':phonetic}})
-    return result,{'policy':'stress-rare-v4','context_policy':RULE,'phonetic_policy':phonetics.RULE,'yo_answer_sha256':answer_sha,'context_conflicts':sum(len(u['pronunciation']['context_stress']['conflicts']) for u in result),
+        result.append({**unit,'synthesis_text':synthesis,'pronunciation':{**record,'context_stress':context_record,
+            'dictionary_context_stress':dictionary_context,'russian_phonetics':phonetic}})
+    return result,{'policy':'stress-rare-v4','context_policy':RULE,'dictionary_context_policy':contextual_stress.RULE,
+        'dictionary_context_answer_sha256':context_block['answer_sha256'],'phonetic_policy':phonetics.RULE,'yo_answer_sha256':answer_sha,'context_conflicts':sum(len(u['pronunciation']['context_stress']['conflicts']) for u in result),
         'scope':'Development/demo text preparation only; no audio regeneration or acoustic-stress claim'}
 
 

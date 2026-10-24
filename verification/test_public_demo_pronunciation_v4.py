@@ -49,8 +49,12 @@ class ContextV4(unittest.TestCase):
         def luna(system,request,*args):
             return {'decisions':[{'id':i['id'],'choice':'yo' if 'Каждый день' in i['sentence'] else 'e',
                 'word':i['candidate_yo'] if 'Каждый день' in i['sentence'] else i['candidate_e'],'basis':'Sentence meaning.'} for i in request['items']]},metadata
+        def context_luna(system,request,*args):
+            return {'decisions':[{'id':i['id'],'word':i['word'],'stressed':i['word'].replace('узнает','узна́ет'),'basis':'Future meaning.'}
+                for i in request['items']]},{**metadata,'policy':m.contextual_stress.RULE}
         with patch('rimsky.auto_pronunciation.yo_witnesses',side_effect=self.witnesses),patch.object(m,'analyse',side_effect=analyse),\
-             patch.object(m.builder,'call',side_effect=luna),patch.object(m,'context_adjudicate',side_effect=adjudicate),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
+             patch.object(m.builder,'call',side_effect=luna),patch.object(m.context_builder,'call',side_effect=context_luna),\
+             patch.object(m,'context_adjudicate',side_effect=adjudicate),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
             prepared,details=m.prepare_rows(units,{},[],HOMOGRAPH,self.out)
         self.assertIn('узна́ет',prepared[0]['synthesis_text']);self.assertNotIn('узнаёт',prepared[0]['synthesis_text'])
         self.assertIn('узнаёт',prepared[1]['synthesis_text']);self.assertEqual(units,before);self.assertEqual(details['context_conflicts'],0)

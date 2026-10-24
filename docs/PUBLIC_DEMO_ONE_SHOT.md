@@ -60,14 +60,31 @@ There is no provider/model fallback. Homograph stress stays Opus 5.5 high. The
 public v4 preparation pipeline sends finite-verb YO choices to Luna first, then
 constrains the separate Opus contextual-stress pass to that exact spelling.
 
+The final dictionary-context stress layer also uses Luna low. It detects every
+same-spelling homograph with multiple stress positions in the pinned local
+RUAccent homograph lexicon, including unmarked words and model agreement; its
+scope includes dictionary noun homographs as well as verbs. Thus стоит receives a
+sentence-specific choice between сто́ит (costs) and стои́т (stands), without a
+book-specific phrase rule. Source acute marks, names and the selected е/ё spelling
+remain authoritative. The final overlay records any superseded automatic mark,
+retains earlier HS/guard evidence, then reruns the close-mark guard with contextual
+targets and prior HS targets protected. It checks that every chosen mark survives;
+an unprotected neighboring automatic mark can be removed instead.
+Context policy v2 accepts a case-insensitive match to exactly one supplied stressed
+candidate (for example model `ду́ши` → source `Ду́ши`), then reconstructs source
+case. The word echo must still match source case exactly, and letters or acute
+positions cannot change. Both `raw_model_stressed` and the explicit case-projection
+record remain in the decision and final synthesis evidence. V1 attempts remain
+immutable; use a fresh preparation output/cache namespace for v2.
+
 The previous debug owner and native worker have stopped; their prepared inputs,
 implementation and first-take evidence remain preserved. New debug preparation
 uses separate validators: actual Opus-high provenance for homograph stress and the
 new Luna policy for YO, with zero automatic ambiguous choices. Do not put Luna
 answers into an old frozen generation or resume it under changed implementation.
-Use a fresh sibling output. Rendering remains paused until the separately reviewed
-phonetic preparation fix is ready; the commands below describe the workflow, not
-authorization to bypass that pause. The requested new render does not reuse old takes.
+Use a fresh sibling output. Rendering requires completed contextual preparation
+and exclusive queue ownership; the commands below do not bypass an explicit
+render pause. The requested new render does not reuse old takes.
 
 `scripts/debug_higgs_one_shot.py` prepares a new, private sibling generation for
 chapter debugging. It checks every original source slice, installs the current
@@ -89,9 +106,44 @@ that record before applying the original strict letter check to prephonetic text
 For example, prepare Chapters 1–3 without starting speech generation:
 
 ```powershell
-$debugGeneration = 'training-work/elirm-iv-higgs-mvp/audio-palette-yo-luna-fresh-ch123-oneshot-20261024'
+$debugGeneration = 'training-work/elirm-iv-higgs-mvp/audio-palette-context-stress-luna-ch123-oneshot-20261024'
 training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/debug_higgs_one_shot.py --source-generation training-work/elirm-iv-higgs-mvp/audio-palette-stress-scale-v1-yo-hard-e-ch123-oneshot --output $debugGeneration --chapters c0001 c0002 c0003 --stage prepare
 ```
+
+For an explicitly reviewed fresh sibling containing byte-identical source
+assignments and already bound HS/YO answers, the new context stage can run alone
+before a direct freeze, without repeating those earlier providers:
+
+```powershell
+training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/build_contextual_stress.py --generation $debugGeneration --output "$debugGeneration/preparation/context" --chapters c0001 c0002 c0003
+```
+
+Its immutable `inputs.json`, request/schema, CLI provenance, raw attempts and
+`answer.json` stay private. Substantive/schema errors hold preparation; only
+transport failures receive bounded retries. No recognizer, speech or GPU worker is
+started by this command. Direct freeze requires the completed context answer and
+rehashes its evidence. Existing first-take audio is not reused for this new render.
+
+After context preparation completes, generate a private inventory of detected
+stress ambiguities without another provider or audio call:
+
+```powershell
+training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/report_pronunciation_ambiguities.py --answer "$debugGeneration/preparation/context/answer.json" --output "$debugGeneration/ambiguity-report"
+```
+
+For public-demo preparation, point `--answer` at its
+`pronunciation/yo-v4/dictionary-context/answer.json` and add `--assignment` with
+that preparation's `assignment.json` to include chapter/unit/original source
+ranges. The report always retains exact prepared-text hashes and word occurrence
+indices; it adds original word offsets only when the text matches byte for byte.
+Private inputs already supply chapter locations. `report.json`, `report.txt` and
+their hash manifest list every detected dictionary candidate, possible stress
+readings, Luna's chosen/raw form, case projection and reason. The selected-input
+snapshot shows unmarked words and a superseded automatic mark when observable;
+it does not invent missing model history. This is an ambiguity inventory, not a
+confidence score or exhaustive natural-language analysis, and never audio,
+recognition or human approval. Artifacts are immutable on rerun. Keep reports
+under ignored private working data; this command never publishes book text.
 
 After preparation and queue review, use the durable supervisor with **both**
 current public-demo outputs. It waits for their complete, stopped-worker evidence

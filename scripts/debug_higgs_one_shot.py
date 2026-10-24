@@ -87,6 +87,9 @@ def prepare(source,output,chapters):
         command=[sys.executable,'-X','utf8','-u',str(ROOT/'scripts'/script),'--generations',output.name,'--chapters',*chapters,'--output',str(output/'preparation'/folder)]
         with (output/(folder+'-preparation.log')).open('ab') as log:
             subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=5400,env={**os.environ,'PYTHONUTF8':'1','PYTHONIOENCODING':'utf-8','CUDA_VISIBLE_DEVICES':''},**basic.assets.HIDDEN)
+    import build_contextual_stress as context_builder
+    inputs=context_builder.private_inputs(output,chapters,output/'preparation/homograph/homograph.answer.json',output/'preparation/yo/yo.answer.json')
+    context_builder.prepare(inputs,output/'preparation/context')
     return freeze(source,output,chapters)
 
 
@@ -117,14 +120,16 @@ def validate_adjudication(answer,kind='homograph'):
 
 def freeze(source,output,chapters):
     import render_higgs_book_trial as trial
+    import build_contextual_stress as context_builder
     from rimsky.yo_restoration import yo_block
     hp=output/'preparation/homograph/homograph.answer.json';yp=output/'preparation/yo/yo.answer.json'
     hs=read(hp);validate_adjudication(hs);validate_adjudication(read(yp),'yo')
+    cp=output/'preparation/context/answer.json';context_block=context_builder.block(cp)
     yo=yo_block(yp);records=[];units=[]
     for cid in chapters:
         for path in canonical_assignments(output,cid):
             assignment=read(path);spec=copy.deepcopy(assignment['pronunciation']);spec.update(policy='stress-rare-v4',
-                homograph_stress={'rule':hs['rule'],'answer_sha256':file_digest(hp),'overrides':hs['overrides']},yo_restoration=yo)
+                homograph_stress={'rule':hs['rule'],'answer_sha256':file_digest(hp),'overrides':hs['overrides']},yo_restoration=yo,contextual_stress=context_block)
             frozen_path=path.with_name('one-shot-assignment.json');write(frozen_path,{**assignment,'pronunciation':spec},immutable=True)
             context=trial.prepare(frozen_path,path.parent/'one-shot-plan',[cid]);plan=read(context['path'])
             records.append({'assignment':frozen_path.relative_to(output).as_posix(),'sha256':file_digest(frozen_path),
@@ -149,6 +154,7 @@ def freeze(source,output,chapters):
     ready={'schema':1,'policy':POLICY,'source':str(source),'chapters':chapters,'unit_count':len(units),
            'source_sha256':file_digest(source.parent/'source/book.json'),'preparation_sha256':file_digest(output/'prepared-inputs.json'),
            'homograph_answer_sha256':file_digest(hp),'yo_answer_sha256':file_digest(yp),'plans':records,'native_manifest':native_manifest,
+           'context_answer_sha256':file_digest(cp),'context_builder_sha256':file_digest(Path(context_builder.__file__)),
            'implementation_sha256':file_digest(SELF),'generic_primitives_sha256':file_digest(Path(basic.__file__)),
            'trial_preparation_sha256':file_digest(Path(trial.__file__)),'music_volume_scale':.9,'music_files':music_files,**UNCHECKED}
     ready['manifest_sha256']=file_digest(output/'manifest.json')
@@ -169,6 +175,10 @@ def planned(output,ready):
     basic.checked(output/'prepared-inputs.json',ready['preparation_sha256'])
     basic.checked(output/'preparation/homograph/homograph.answer.json',ready['homograph_answer_sha256'])
     basic.checked(output/'preparation/yo/yo.answer.json',ready['yo_answer_sha256'])
+    import build_contextual_stress as context_builder
+    basic.checked(Path(context_builder.__file__),ready['context_builder_sha256'])
+    basic.checked(output/'preparation/context/answer.json',ready['context_answer_sha256'])
+    context_builder.block(output/'preparation/context/answer.json')
     basic.checked(output.parent/'source/book.json',ready['source_sha256'])
     units=[]
     for record in ready['plans']:
@@ -208,6 +218,10 @@ def validate_synthesis(plan,ready):
             or re.search(r'(?:\[\s*|<\|\s*)(?:emotion|prosody|pitch|speed|vocal|style|effect)',plan['prompt'],re.I)):
         raise ValueError('Native plan enables effects or a nonproduction checkpoint/runner')
     validate_reference(plan['reference'])
+    if plan.get('contextual_stress'):
+        from rimsky import contextual_stress
+        if plan['contextual_stress'].get('module_sha256')!=file_digest(Path(contextual_stress.__file__)):
+            raise ValueError('Contextual stress implementation changed')
     if plan.get('russian_phonetics'):
         from freeze_public_audiobook_demo import validate_synthesis_pronunciation
         phonetic=plan['russian_phonetics']

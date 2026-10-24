@@ -265,7 +265,7 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
         pronunciation=None
         if unit['id'] not in frozen_units or frozen_units[unit['id']]['synthesis'].get('phrase_pronunciation'):
             native_spoken,pronunciation=phrase_stress(native_spoken)
-        automatic=None;respelled=[]
+        automatic=None;respelled=[];context_source=native_spoken
         spec=assignment.get('pronunciation')
         if spec:
             from rimsky.auto_pronunciation import auto_pronunciation,policy_options
@@ -275,6 +275,7 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
             # Listener respellings (е->э/ё) are applied first so every later pass and word check sees the spoken spelling.
             from rimsky.respelling import respell_text
             native_spoken,respelled=respell_text(native_spoken,names,spec.get('common',[]),spec.get('terms'),options.get('implicit_single',False),spec.get('respelling_sources'))
+            context_source=native_spoken
             native_spoken,automatic=auto_pronunciation(native_spoken,names,spec.get('common',[]),**options)
             require_bound_pronunciation(unit['id'], automatic)
         suppressed=None
@@ -287,6 +288,14 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
             native_spoken=re.sub('[А-Яа-яЁё́]+',lambda m:m[0] if m[0] in keep else m[0].replace('́',''),native_spoken)
             suppressed={'policy':'suppress-automatic-v1','marked_text':before,'kept':sorted(keep)}
         stripped=None
+        contextual=None
+        if spec and spec.get('contextual_stress'):
+            from rimsky import contextual_stress
+            protected={(r['word'].casefold().replace('ё','е'),r['index']) for r in spec.get('homograph_stress',{}).get('overrides',[])
+                       if r['sha256']==digest(context_source.encode('utf8'))}
+            protected|={(r['word'].casefold().replace('ё','е'),r['index']) for r in (automatic or {}).get('homograph_overrides',{}).get('applied',[])}
+            native_spoken,contextual=contextual_stress.apply(context_source,native_spoken,spec['contextual_stress'],names,spec.get('common',[]),protected)
+            contextual['module_sha256']=file_digest(Path(contextual_stress.__file__))
         phonetic=None
         if unit['id'] not in frozen_units or frozen_units[unit['id']]['synthesis'].get('russian_phonetics'):
             from rimsky import russian_pronunciation as phonetics
@@ -322,6 +331,7 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
         if unit.get('spoken_text_plan'):synthesis['spoken_text_plan']=copy.deepcopy(unit['spoken_text_plan'])
         if pronunciation:synthesis['phrase_pronunciation']=pronunciation
         if automatic:synthesis['automatic_pronunciation']=automatic
+        if contextual:synthesis['contextual_stress']=contextual
         if phonetic:synthesis['russian_phonetics']=phonetic
         if respelled:
             from rimsky.respelling import disclosure
