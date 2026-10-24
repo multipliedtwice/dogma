@@ -143,6 +143,18 @@
 
 ## Preparation layers (user findings, 2026-10-17)
 
+- User decision, 2026-10-24: every ambiguous е/ё occurrence is decided during
+  preprocessing by GPT-6 Luna (`gpt-6-luna`, Codex CLI, low effort), including
+  occurrences where Silero and RUAccent agree. Their agreement is evidence,
+  not an automatic verdict. Keep dictionary-certain spellings deterministic,
+  bind decisions to exact source occurrences, and preserve frozen generations.
+  This changes ё selection only; homograph stress keeps its separate policy.
+- User pronunciation correction, 2026-10-24: final synthesis input uses the
+  deterministic whole-word spellings `кого` → `каво` and `никого` → `никаво`,
+  including recognized pronoun-particle forms. Preserve stress, case and source
+  text, and record the source-bound phonetic substitutions after ё/stress
+  preparation. Never replace a substring inside `коготь`, `коготки` or other
+  words, or generalize this to arbitrary `-ого` endings.
 - Stress: silero homograph marks are cross-checked with RUAccent; disagreements are
   adjudicated once per book by Claude Opus 5.5 at high effort (measured best on 75
   hand-labelled items; Luna and Haiku misplace stress too often, so the Luna decision

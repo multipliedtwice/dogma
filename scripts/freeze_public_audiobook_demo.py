@@ -101,6 +101,19 @@ def validate_pronunciation(spoken, synthesis):
         raise ValueError('Disabled Higgs effect tag')
 
 
+def validate_synthesis_pronunciation(spoken,synthesis,phonetic=None):
+    """Keep the original letter gate; only an exact pinned phonetic record bridges it."""
+    if phonetic is None:
+        validate_pronunciation(spoken,synthesis);return
+    from rimsky import russian_pronunciation as rules
+    if (set(phonetic)!={'rule','prephonetic_source','records','module_sha256'} or phonetic['rule']!=rules.RULE
+            or phonetic['module_sha256']!=file_digest(Path(rules.__file__))):
+        raise ValueError('Unpinned Russian phonetic pronunciation provenance')
+    before=phonetic['prephonetic_source']
+    rules.validate(before,synthesis,phonetic['records'])
+    validate_pronunciation(spoken,before)
+
+
 def verify_assignment_source(folder, assigned):
     from rimsky.speech_quality import word_tokens
     book_path = folder / 'prepared/book.json'
@@ -396,7 +409,8 @@ def freeze(folder, music_path=None):
     for original, unit in zip(assigned['units'], assignment['units'], strict=True):
         if original['id'] != unit['id'] or original['text'] != unit['text']:
             raise ValueError('Pronunciation reordered or changed source units')
-        validate_pronunciation(unit['spoken'], unit.get('synthesis_text', unit['spoken']))
+        validate_synthesis_pronunciation(unit['spoken'],unit.get('synthesis_text',unit['spoken']),
+                                         unit.get('pronunciation',{}).get('russian_phonetics'))
         ref = unit['palette_reference']
         if ref.get('reviewed') is not True or ref.get('voice_family') != unit['voice'] or ref.get('mood') != unit['mood']:
             raise ValueError('Missing matching reviewed voice/mood reference')

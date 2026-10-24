@@ -10,9 +10,10 @@ Here ё is decided only by this layer, from the pymorphy3 DICTIONARY (predictor/
 * unique_e   one surface, plain е (конфеты, тебе): untouched;
 * ambiguous  both surfaces (все/всё, осел/осёл, небо/нёбо): decided by a frozen per-occurrence decision;
 * unknown    no dictionary parse: untouched; a stressed е (silero/long-tail) or a RUAccent ё sends it to adjudication.
-Decisions are made once per book by scripts/build_yo_restoration.py: silero and RUAccent agreeing (and, for
-все, the first finite verb of the clause not contradicting) is accepted, everything else goes to the pinned
-adjudicator. At render time nothing is guessed: an ambiguous occurrence without a decision bound to
+New decisions are made once per book by scripts/build_yo_restoration.py: every ambiguous occurrence goes to
+pinned GPT-6 Luna at low effort, including silero/RUAccent agreement. The analyze() default retains historical
+agreement behavior only for frozen evaluations; new builders enable force_all. At render time nothing is guessed:
+an ambiguous occurrence without a decision bound to
 sha256(unit input text) + word + occurrence keeps the source spelling and is reported as unbound, and an
 automatic acute is never emitted on the е of an undecided word. Proper nouns and masked names are never touched.
 """
@@ -267,9 +268,11 @@ def verb_number(text: str, end: int) -> str | None:
     return None
 
 
-def analyze(text: str, spans, silero_yo: list[str], silero_dense: list[str], ruaccent) -> dict:
+def analyze(text: str, spans, silero_yo: list[str], silero_dense: list[str], ruaccent, *, force_all=False) -> dict:
     """Automatic decisions and adjudication rows of one unit text.
 
+    force_all promotes agreeing ambiguous occurrences to adjudication too. Its default preserves historical
+    evaluation behavior; new book builders explicitly enable it.
     silero_yo / silero_dense: the unit's Cyrillic words (same order, masked ones included) after silero with
     ё on, and after every-word stress with ё off. ruaccent: ruaccent_yo(text), or None when unavailable.
     """
@@ -279,6 +282,7 @@ def analyze(text: str, spans, silero_yo: list[str], silero_dense: list[str], rua
     stats = dict.fromkeys(('unique_yo', 'unique_e', 'ambiguous', 'multi_yo', 'unknown', 'ambiguous_auto', 'ambiguous_rows', 'unknown_rows'), 0)
     for e in eligible(text, spans):
         cls = e['cls']; stats[cls] += 1; ns = [by_start[p] for p in e['parts']]
+        if force_all and cls == 'multi_yo':raise ValueError('Multiple YO candidates need explicit preparation support: '+e['word'])
         sil = ' '.join(silero_yo[n] for n in ns); dense = ' '.join(silero_dense[n] for n in ns)
         got = None if ruaccent is None else [ruaccent.get(part_key[p]) for p in e['parts']]
         theirs = None if got is None or None in got else ' '.join(got)
@@ -293,7 +297,7 @@ def analyze(text: str, spans, silero_yo: list[str], silero_dense: list[str], rua
             # Measured on 1,500 author-yofied sentences (2026-10-21): silero and RUAccent agreeing on всё without a
             # verb to confirm it were wrong 7/435 times; only the "yo" side of все needs positive grammar evidence.
             needs_grammar = e['key'] == 'все' and choice == 'yo'
-            if ru_yo is not None and ru_yo == sil_yo and grammar in ((choice,) if needs_grammar else (None, choice)):
+            if not force_all and ru_yo is not None and ru_yo == sil_yo and grammar in ((choice,) if needs_grammar else (None, choice)):
                 auto.append({**base, 'yo': e['yo'], 'choice': choice, 'basis': 'auto-agree', 'witnesses': witnesses}); stats['ambiguous_auto'] += 1
             else:
                 rows.append({**base, 'kind': 'ambiguous', 'yo': e['yo'], 'witnesses': witnesses, 'sentence': sentence_of(text, e['start'])})

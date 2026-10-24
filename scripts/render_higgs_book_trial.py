@@ -287,6 +287,14 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
             native_spoken=re.sub('[А-Яа-яЁё́]+',lambda m:m[0] if m[0] in keep else m[0].replace('́',''),native_spoken)
             suppressed={'policy':'suppress-automatic-v1','marked_text':before,'kept':sorted(keep)}
         stripped=None
+        phonetic=None
+        if unit['id'] not in frozen_units or frozen_units[unit['id']]['synthesis'].get('russian_phonetics'):
+            from rimsky import russian_pronunciation as phonetics
+            before_phonetic=native_spoken
+            native_spoken,phonetic_records=phonetics.apply(before_phonetic)
+            phonetics.validate(before_phonetic,native_spoken,phonetic_records)
+            phonetic={'rule':phonetics.RULE,'prephonetic_source':before_phonetic,'records':phonetic_records,
+                      'module_sha256':file_digest(Path(phonetics.__file__))}
         pack=execution_pack(pack,unit.get('decoding_profile'),native_spoken)
         synthesis=synthesis_plan(pack,pack['voices'][0],native_spoken,unit['mood'],None,resolved,unit.get('retake_number',0))
         # Both the human-readable checkpoint and its verified artifact hash are
@@ -314,6 +322,7 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
         if unit.get('spoken_text_plan'):synthesis['spoken_text_plan']=copy.deepcopy(unit['spoken_text_plan'])
         if pronunciation:synthesis['phrase_pronunciation']=pronunciation
         if automatic:synthesis['automatic_pronunciation']=automatic
+        if phonetic:synthesis['russian_phonetics']=phonetic
         if respelled:
             from rimsky.respelling import disclosure
             synthesis['listener_respelling']=disclosure(respelled)

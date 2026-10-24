@@ -3,6 +3,8 @@
 Read source + existing reviewed name/homograph evidence with --folder, write a
 NEW --output folder, then --stage freeze consumes that actual synthesis input.
 No synthesis, recognition or retake implementation lives in this entrypoint.
+Every ambiguous YO occurrence is decided by isolated GPT-6 Luna at low effort;
+finite-verb stress remains a separate Opus-high pass constrained to that spelling.
 """
 from __future__ import annotations
 import argparse
@@ -16,6 +18,7 @@ import freeze_public_audiobook_demo as legacy
 import build_yo_restoration as builder
 import build_homograph_stress as stress_builder
 from rimsky import yo_restoration as yo,homograph_stress as hs
+from rimsky import russian_pronunciation as phonetics
 from rimsky.auto_pronunciation import auto_pronunciation,policy_options
 from rimsky.util import digest,file_digest
 
@@ -33,7 +36,7 @@ SYSTEM=yo.SYSTEM+(' For these ambiguous finite-verb items, jointly decide the co
 
 
 def dependencies():
-    modules=(legacy,builder,stress_builder,yo,hs)
+    modules=(legacy,builder,stress_builder,yo,hs,phonetics)
     return {str(Path(m.__file__).resolve().relative_to(ROOT)).replace('\\','/'):file_digest(Path(m.__file__)) for m in modules}|{
         SELF.relative_to(ROOT).as_posix():file_digest(SELF),'runtime/rimsky/auto_pronunciation.py':file_digest(ROOT/'runtime/rimsky/auto_pronunciation.py')}
 
@@ -80,6 +83,9 @@ def context_request(rows):
     for item,row in zip(value['items'],rows,strict=True):
         item.update(source_binding=row['source_binding'],dictionary_forms=row['dictionary_forms'],
             witnesses=row['witnesses'],stress_required=True,tagger_agreement_is_not_context_authority=True)
+        if row.get('yo_decision'):
+            item['frozen_yo_decision']=row['yo_decision']
+            item['instruction']='The separate Luna e/yo choice is fixed; determine stress for exactly that word, never revise its letters or choice.'
     return value
 
 
@@ -91,6 +97,9 @@ def context_schema(request):
 def validate_context(answer,request):
     yo.validate(answer,request)
     for row in answer['decisions']:
+        source=next(i for i in request['items'] if i['id']==row['id'])
+        fixed=source.get('frozen_yo_decision')
+        if fixed and any(row[k]!=fixed[k] for k in ('choice','word')):raise ValueError('Context stress changed the frozen Luna YO choice')
         if set(row)!={'id','choice','word','basis','stressed'} or not row['basis'].strip():raise ValueError('Incomplete contextual stress decision')
         marked=row['stressed'];word=row['word'];plain=marked.replace('\u0301','')
         if plain!=word:raise ValueError('Context stress changed chosen letters')
@@ -158,16 +167,21 @@ def overlay_context(unit,synthesis,rows,homograph):
 def prepare_rows(units,names,common,homograph,out):
     analyses=[analyse(u,names,common) for u in units];immutable(out/'analysis.json',{'rule':RULE,'units':analyses,'dependencies':dependencies(),'versions':yo._versions()})
     context_rows=[r for a in analyses for r in a['context']];regular=[r for a in analyses for r in a['regular']]
-    contextual=context_adjudicate(out/'context',context_rows)
-    req=yo.request(regular);immutable(out/'regular.request.json',{'request':req,'rows':regular})
-    batches=builder.adjudicate(out/'regular',req) if regular else []
-    for batch in batches:validate_provider(batch['metadata'])
+    all_rows=regular+context_rows
+    req=yo.request(all_rows);immutable(out/'regular.request.json',{'request':req,'rows':all_rows,'policy':builder.POLICY,'provider':builder.PIN})
+    batches=builder.adjudicate(out/'regular',req) if all_rows else []
+    for batch in batches:builder.validate_provider(batch['metadata'])
     merged={'decisions':[d for b in batches for d in b['answer']['decisions']]};yo.validate(merged,req)
-    regular_decisions=yo.decisions_from(regular,merged);context_decisions=[]
+    all_decisions=yo.decisions_from(all_rows,merged);regular_decisions=all_decisions[:len(regular)]
+    choices={d['id']:d for d in merged['decisions']}
+    context_rows=[{**r,'yo_decision':choices[f'y{n+len(regular):04d}']} for n,r in enumerate(context_rows)]
+    contextual=context_adjudicate(out/'context',context_rows)
+    context_decisions=[]
     for item in contextual:
         row=item['row'];decision=item['decision'];context_decisions.append({**{k:row[k] for k in ('sha256','word','index','surface','yo')},
-            'choice':decision['choice'],'basis':'context-adjudicated'})
-    answer={'rule':yo.RULE,'guard':RULE,'decisions':[d for a in analyses for d in a['auto']]+regular_decisions+context_decisions,'context':contextual,'human_approval':False}
+            'choice':row['yo_decision']['choice'],'basis':'luna-yo-choice-with-separate-opus-stress'})
+    answer={'rule':yo.RULE,'guard':RULE,'yo_policy':builder.POLICY,'yo_metadata':{'batches':[b['metadata'] for b in batches]},
+        'decisions':[d for a in analyses for d in a['auto']]+regular_decisions+context_decisions,'context':contextual,'human_approval':False}
     immutable(out/'yo.answer.json',answer);answer_sha=file_digest(out/'yo.answer.json');result=[]
     for unit,analysis in zip(units,analyses,strict=True):
         local=[d for d in analysis['auto']]+[d for r,d in zip(regular,regular_decisions,strict=True) if r['unit']==unit['id']]
@@ -175,9 +189,13 @@ def prepare_rows(units,names,common,homograph,out):
         options=policy_options('stress-rare-v4',{'homograph_stress':homograph,'yo_restoration':{'rule':yo.RULE,'answer_sha256':answer_sha,'decisions':local}})
         synthesis,record=auto_pronunciation(unit['spoken'],names,common,**options)
         synthesis,context_record=overlay_context(unit,synthesis,[r for r in contextual if r['row']['unit']==unit['id']],homograph)
+        before_phonetic=synthesis;synthesis,phonetic_records=phonetics.apply(before_phonetic)
+        phonetic={'rule':phonetics.RULE,'prephonetic_source':before_phonetic,'records':phonetic_records,
+                  'module_sha256':file_digest(Path(phonetics.__file__))}
+        legacy.validate_synthesis_pronunciation(unit['spoken'],synthesis,phonetic)
         if record['yo_restoration']['unbound'] or record.get('homograph_overrides',{}).get('unbound'):raise ValueError('Unbound pronunciation occurrence')
-        result.append({**unit,'synthesis_text':synthesis,'pronunciation':{**record,'context_stress':context_record}})
-    return result,{'policy':'stress-rare-v4','context_policy':RULE,'yo_answer_sha256':answer_sha,'context_conflicts':sum(len(u['pronunciation']['context_stress']['conflicts']) for u in result),
+        result.append({**unit,'synthesis_text':synthesis,'pronunciation':{**record,'context_stress':context_record,'russian_phonetics':phonetic}})
+    return result,{'policy':'stress-rare-v4','context_policy':RULE,'phonetic_policy':phonetics.RULE,'yo_answer_sha256':answer_sha,'context_conflicts':sum(len(u['pronunciation']['context_stress']['conflicts']) for u in result),
         'scope':'Development/demo text preparation only; no audio regeneration or acoustic-stress claim'}
 
 

@@ -49,18 +49,47 @@ write errors remain visible; this does not authorize another synthesis attempt.
 
 ## Private chapter debugging in the local reader
 
+For new preparation, `scripts/build_yo_restoration.py` now sends every ambiguous
+е/ё occurrence to isolated `gpt-6-luna` at low effort, including Silero/RUAccent
+agreement. Dictionary-certain spellings and explicit source stress remain
+authoritative. Requests/cache keys bind the new policy and provider/model/effort;
+immutable attempts retain the CLI executable checksum, version and isolated-call
+implementation. The CLI API does not expose server-reported model usage, so its
+metadata explicitly records model selection rather than inventing that evidence.
+There is no provider/model fallback. Homograph stress stays Opus 5.5 high. The
+public v4 preparation pipeline sends finite-verb YO choices to Luna first, then
+constrains the separate Opus contextual-stress pass to that exact spelling.
+
+The previous debug owner and native worker have stopped; their prepared inputs,
+implementation and first-take evidence remain preserved. New debug preparation
+uses separate validators: actual Opus-high provenance for homograph stress and the
+new Luna policy for YO, with zero automatic ambiguous choices. Do not put Luna
+answers into an old frozen generation or resume it under changed implementation.
+Use a fresh sibling output. Rendering remains paused until the separately reviewed
+phonetic preparation fix is ready; the commands below describe the workflow, not
+authorization to bypass that pause. The requested new render does not reuse old takes.
+
 `scripts/debug_higgs_one_shot.py` prepares a new, private sibling generation for
 chapter debugging. It checks every original source slice, installs the current
 number policy before looking up spoken corrections, and retains only exactly
 bound listener/editorial corrections. Homograph stress and YO v4 decisions are
 rebuilt on the final unit texts; old answers are not rebound to changed wording.
-Every adjudicated batch must report actual Opus 5.5 high usage and CLI provenance.
+Homograph batches must report actual Opus 5.5 high usage; YO batches must carry
+the pinned Luna-low selection and isolated CLI provenance described above.
 Existing frozen generations remain unchanged.
+
+The final synthesis-only phonetic stage runs after stress and YO decisions. Its
+closed rule maps whole pronouns кого → каво and никого → никаво, including approved
+кого particle forms, while retaining case and acute positions. Коготь, коготки,
+некого and unrelated endings remain unchanged. Original source/captions and YO
+decision bindings retain their orthography. Each native request records its
+prephonetic text, exact substitutions, rule and module checksum; freeze recomputes
+that record before applying the original strict letter check to prephonetic text.
 
 For example, prepare Chapters 1–3 without starting speech generation:
 
 ```powershell
-$debugGeneration = 'training-work/elirm-iv-higgs-mvp/audio-palette-yo-v4-fresh-ch123-oneshot-20261024'
+$debugGeneration = 'training-work/elirm-iv-higgs-mvp/audio-palette-yo-luna-fresh-ch123-oneshot-20261024'
 training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/debug_higgs_one_shot.py --source-generation training-work/elirm-iv-higgs-mvp/audio-palette-stress-scale-v1-yo-hard-e-ch123-oneshot --output $debugGeneration --chapters c0001 c0002 c0003 --stage prepare
 ```
 

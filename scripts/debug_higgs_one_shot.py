@@ -90,9 +90,21 @@ def prepare(source,output,chapters):
     return freeze(source,output,chapters)
 
 
-def validate_adjudication(answer):
+def validate_adjudication(answer,kind='homograph'):
     batches=answer.get('metadata',{}).get('batches')
     if not isinstance(batches,list):raise ValueError('Missing pronunciation adjudication batches')
+    if kind=='yo':
+        import build_yo_restoration as builder
+        stats=answer.get('stats',{})
+        if (answer.get('policy')!=builder.POLICY or stats.get('ambiguous_auto')!=0
+                or type(stats.get('ambiguous')) is not int or stats['ambiguous']<0
+                or stats.get('ambiguous_rows')!=stats['ambiguous']
+                or (stats['ambiguous']+stats.get('unknown_rows',0)>0 and not batches)
+                or any(d.get('basis')=='auto-agree' for d in answer.get('decisions',[]))):
+            raise ValueError('YO preparation must send every ambiguous occurrence to Luna')
+        for metadata in batches:builder.validate_provider(metadata)
+        return
+    if kind!='homograph':raise ValueError('Unknown pronunciation adjudication layer')
     for metadata in batches:
         if any(metadata.get(k)!=v for k,v in zip(('provider','model','effort'),('claude_cli','claude-opus-5-5','high'))):
             raise ValueError('Expected pinned Opus-high pronunciation adjudication')
@@ -107,7 +119,7 @@ def freeze(source,output,chapters):
     import render_higgs_book_trial as trial
     from rimsky.yo_restoration import yo_block
     hp=output/'preparation/homograph/homograph.answer.json';yp=output/'preparation/yo/yo.answer.json'
-    hs=read(hp);validate_adjudication(hs);validate_adjudication(read(yp))
+    hs=read(hp);validate_adjudication(hs);validate_adjudication(read(yp),'yo')
     yo=yo_block(yp);records=[];units=[]
     for cid in chapters:
         for path in canonical_assignments(output,cid):
@@ -196,6 +208,11 @@ def validate_synthesis(plan,ready):
             or re.search(r'(?:\[\s*|<\|\s*)(?:emotion|prosody|pitch|speed|vocal|style|effect)',plan['prompt'],re.I)):
         raise ValueError('Native plan enables effects or a nonproduction checkpoint/runner')
     validate_reference(plan['reference'])
+    if plan.get('russian_phonetics'):
+        from freeze_public_audiobook_demo import validate_synthesis_pronunciation
+        phonetic=plan['russian_phonetics']
+        validate_synthesis_pronunciation(phonetic['prephonetic_source'],plan['text'],phonetic)
+        if not plan['prompt'].endswith(plan['text']):raise ValueError('Phonetic input differs from actual native prompt')
 
 
 def collect(output,session):
@@ -217,8 +234,7 @@ def native_batch(output,ready,units,timeout):
     basic.assets.wait_for_audio_resources();pin,runner=basic.model_guard(ready['native_manifest'])
     requests=[]
     for unit in units:
-        plan=unit['synthesis'];validate_reference(plan['reference'])
-        if plan['effects_policy']!='disabled' or re.search(r'(?:\[\s*|<\|\s*)(?:emotion|prosody|pitch|speed|vocal|style|effect)',plan['prompt'],re.I):raise ValueError('Disabled effect in prepared native request')
+        plan=unit['synthesis'];validate_synthesis(plan,ready)
         requests.append(trial.sequence_request(unit['id'],plan))
     sid=digest({'requests':requests,'units':units,'ready_sha256':file_digest(output/'ready.json')});folder=output/'native'/sid;folder.mkdir(parents=True,exist_ok=True)
     write(folder/'requests.json',{'requests':requests},immutable=True)

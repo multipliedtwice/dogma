@@ -35,15 +35,22 @@ class ContextV4(unittest.TestCase):
             result=self.analysis(self.unit(text));rows=[r for r in result['context'] if r['word']=='узнает']
             self.assertEqual(len(rows),1);self.assertFalse(any(d['word']=='узнает' for d in result['auto']))
             self.assertEqual(rows[0]['witnesses']['silero'],'yo');self.assertEqual(rows[0]['witnesses']['ruaccent'],'yo')
-            self.assertEqual(rows[0]['prior_tagger_basis'],'auto-agree');self.assertTrue(rows[0]['dictionary_forms'])
+            self.assertIsNone(rows[0]['prior_tagger_basis']);self.assertTrue(rows[0]['dictionary_forms'])
             self.assertEqual(rows[0]['source_binding']['surface'],'узнает')
     def test_future_explicit_stress_and_true_present_survive_wrong_final_silero(self):
         units=[self.unit(),self.unit(PRESENT,'present')];before=copy.deepcopy(units)
         original=m.analyse
         def analyse(unit,*args):return original(unit,{},[],ruaccent=self.ruaccent)
         def adjudicate(out,rows):return [self.result(r,'e' if r['unit']=='future' else 'yo') for r in rows]
+        metadata={**dict(zip(('provider','model','effort'),m.builder.PIN)),'policy':m.builder.POLICY,
+            'requested_model':'gpt-6-luna','model_provenance':'explicit-cli-model-selection','cli_version':'fixture',
+            'executable':sys.executable,'executable_sha256':m.file_digest(Path(sys.executable)),
+            'structured_call_sha256':m.file_digest(Path(m.builder.codex_analysis.__file__))}
+        def luna(system,request,*args):
+            return {'decisions':[{'id':i['id'],'choice':'yo' if 'Каждый день' in i['sentence'] else 'e',
+                'word':i['candidate_yo'] if 'Каждый день' in i['sentence'] else i['candidate_e'],'basis':'Sentence meaning.'} for i in request['items']]},metadata
         with patch('rimsky.auto_pronunciation.yo_witnesses',side_effect=self.witnesses),patch.object(m,'analyse',side_effect=analyse),\
-             patch.object(m,'context_adjudicate',side_effect=adjudicate),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
+             patch.object(m.builder,'call',side_effect=luna),patch.object(m,'context_adjudicate',side_effect=adjudicate),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
             prepared,details=m.prepare_rows(units,{},[],HOMOGRAPH,self.out)
         self.assertIn('узна́ет',prepared[0]['synthesis_text']);self.assertNotIn('узнаёт',prepared[0]['synthesis_text'])
         self.assertIn('узнаёт',prepared[1]['synthesis_text']);self.assertEqual(units,before);self.assertEqual(details['context_conflicts'],0)
@@ -62,6 +69,12 @@ class ContextV4(unittest.TestCase):
             with self.assertRaises(ValueError):m.validate_context({'decisions':[{**good,'stressed':marked}]},request)
         result=self.result(row);changed=self.unit(FUTURE+' Потом.')
         with self.assertRaises(ValueError):m.overlay_context(changed,changed['spoken'],[result],HOMOGRAPH)
+    def test_context_stress_cannot_reverse_separate_luna_yo_choice(self):
+        row=self.analysis(self.unit())['context'][0]
+        row['yo_decision']={'choice':'e','word':row['surface']}
+        request=m.context_request([row]);m.validate_context({'decisions':[self.result(row)['decision']]},request)
+        with self.assertRaisesRegex(ValueError,'frozen Luna'):
+            m.validate_context({'decisions':[self.result(row,'yo')['decision']]},request)
     def test_older_homograph_disagreement_is_recorded_and_not_silently_replaced(self):
         unit=self.unit();row=self.analysis(unit)['context'][0];result=self.result(row)
         override={'sha256':m.digest(unit['spoken'].encode('utf8')),'word':'узнает','index':0,'stress':4,'choice':'ruaccent'}

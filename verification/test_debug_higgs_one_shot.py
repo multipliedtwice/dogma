@@ -25,6 +25,23 @@ class DebugOneShot(unittest.TestCase):
         self.assertEqual(m.prepare(source,output,['c0001']),ready)
         for wrong_source,chapters in ((source,['c0002']),(self.root/'other',['c0001'])):
             with self.assertRaisesRegex(ValueError,'scope differs'):m.prepare(wrong_source,output,chapters)
+    def test_yo_requires_all_ambiguous_luna_while_homograph_stays_opus(self):
+        import build_yo_restoration as builder
+        metadata=dict(zip(('provider','model','effort'),builder.PIN))|{
+            'policy':builder.POLICY,'requested_model':'gpt-6-luna','model_provenance':'explicit-cli-model-selection',
+            'cli_version':'fixture','executable':sys.executable,'executable_sha256':m.file_digest(Path(sys.executable)),
+            'structured_call_sha256':m.file_digest(Path(builder.codex_analysis.__file__))}
+        answer={'policy':builder.POLICY,'metadata':{'batches':[metadata]},
+                'stats':{'ambiguous':1,'ambiguous_rows':1,'ambiguous_auto':0},'decisions':[{'basis':'adjudicated'}]}
+        m.validate_adjudication(answer,'yo')
+        with self.assertRaises(ValueError):m.validate_adjudication(answer,'homograph')
+        for change in ({'policy':'old-opus'},{'stats':{'ambiguous':1,'ambiguous_rows':0,'ambiguous_auto':1}},
+                       {'decisions':[{'basis':'auto-agree'}]},
+                       {'metadata':{'batches':[]}},
+                       {'metadata':{'batches':[{**metadata,'model':'claude-opus-5-5'}]}}):
+            with self.subTest(change=change),self.assertRaises(ValueError):m.validate_adjudication({**answer,**change},'yo')
+        m.validate_adjudication({'policy':builder.POLICY,'metadata':{'batches':[]},
+            'stats':{'ambiguous':0,'ambiguous_rows':0,'ambiguous_auto':0},'decisions':[]},'yo')
     def test_number_policy_precedes_lookup_and_obsolete_automatic_recipe_is_not_rebound(self):
         from render_higgs_book_trial import spoken_text
         unit={'id':'c0003-u0522','text':'В 2058-м году.','voice':'masculine_3','mood':'neutral','render_seed':7,
