@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS reading_positions (book_id TEXT PRIMARY KEY REFERENCE
 CREATE TABLE IF NOT EXISTS bookmarks (id TEXT PRIMARY KEY, book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, source_id TEXT, note TEXT, created TEXT);
 CREATE TABLE IF NOT EXISTS stress_reports (id TEXT PRIMARY KEY, book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, generation_id TEXT NOT NULL, segment_id TEXT NOT NULL, chapter_id TEXT NOT NULL, source_id TEXT NOT NULL, selected_text TEXT NOT NULL, text_offset INTEGER, audio_offset REAL, audio_hash TEXT, passage_text TEXT NOT NULL, spoken_text TEXT NOT NULL, created TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'stress', comment TEXT NOT NULL DEFAULT '', intended_stress TEXT, synthesis_snapshot TEXT);
 CREATE INDEX IF NOT EXISTS stress_reports_book ON stress_reports(book_id,created);
+CREATE TABLE IF NOT EXISTS listener_correction_jobs (
+    id TEXT PRIMARY KEY,report_id TEXT NOT NULL,book_id TEXT NOT NULL,
+    generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+    segment_ids TEXT NOT NULL,status TEXT NOT NULL,created TEXT NOT NULL,
+    updated TEXT NOT NULL,error TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS series_character_state (
     series_id TEXT NOT NULL,
     character_key TEXT NOT NULL,
@@ -231,7 +236,8 @@ def revision_name(name, maximum=200):
     return base[:maximum - len(suffix)].rstrip() + suffix
 
 class Store:
-    def __init__(self, root: Path, *, recover_interrupted=False, resources: Path | None = None):
+    def __init__(self, root: Path, *, recover_interrupted=False, resources: Path | None = None, correction_profile: Path | None = None):
+        self.correction_profile=Path(correction_profile) if correction_profile is not None else Path(root)/'user-stress-corrections.sqlite3'
         self.root = root.resolve()
         self.resources = resources.resolve() if resources is not None else None
         for folder in ('books', 'audio', 'exports', 'visuals', 'work'):
@@ -507,6 +513,20 @@ class Store:
                   'synthesis_snapshot': (segment.get('performance') or {}).get('synthesis_snapshot')}
         with self.lock, self.db:
             self.db.execute('INSERT INTO stress_reports (id,book_id,generation_id,segment_id,chapter_id,source_id,selected_text,text_offset,audio_offset,audio_hash,passage_text,spoken_text,created,kind,comment,intended_stress,synthesis_snapshot) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (*list(report.values())[:-1], json.dumps(report['synthesis_snapshot'], ensure_ascii=False) if report['synthesis_snapshot'] is not None else None))
+        if kind == 'stress':
+            from .series_characters import record_listener_stress
+            try:
+                report['character_state'] = record_listener_stress(self, report)
+            except Exception as error:
+                # Raw notes are already committed; failure is explicit and can
+                # be reconciled later without requiring another listener report.
+                report['character_state'] = {'status': 'held', 'error': str(error)}
+            from .listener_stress import record
+            canonical=record(self,book,report,report.get('character_state'))
+            if canonical:report['character_state']=canonical
+        else:
+            from .listener_stress import record
+            record(self,book,report)
         return report
 
     def stress_reports(self, book_id):

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'runtime'))
 
-from rimsky.series_characters import apply_pronunciations, propagation_targets, record_listener_stress, seed_cast, sync_generation
+from rimsky.series_characters import apply_pronunciations, propagation_targets, record_listener_stress, seed_cast, sync_generation,identity,upsert_character
 from rimsky.store import Store
 
 
@@ -64,6 +64,89 @@ class SeriesCharacterStateTest(unittest.TestCase):
                                       {'policy': 'test', 'names': {'gundahar': {'name': 'Гундахар', 'stressed': 'Гу́ндахар', 'source': 'model'}}})
         self.assertEqual('Гунда́хар', seeded['names']['gundahar']['stressed'])
         self.assertEqual('series_listener', seeded['names']['gundahar']['source'])
+        from rimsky.listener_stress import notes
+        legacy=next(row['report'] for row in notes(self.store,second) if row['report'].get('original_report_id')==report['id'])
+        self.assertEqual('legacy_family',legacy['kind'])
+        self.assertEqual(report['selected_text'],legacy['legacy_evidence']['selected_text'])
+        self.assertEqual(first['id'],legacy['book_id'])
+        self.assertNotIn('text_offset',legacy);self.assertNotIn('passage_text',legacy)
+
+    def formal_report(self,book,generation,selected,intended):
+        self.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('a'*64,generation['id']))
+        segment=next(row for row in self.store.generation(generation['id'])['segments'] if selected in row['text'])
+        return self.store.report_stress(generation['id'],segment['id'],segment['source_id'],selected,
+            segment['start']+segment['text'].index(selected),intended_stress=intended)
+
+    def stale_projection(self,book,character,report,stressed):
+        evidence={key:report[key] for key in ('book_id','generation_id','selected_text','intended_stress','created')}
+        evidence.update(report_id=report['id'],source='listener')
+        upsert_character(self.store,identity(self.store,book),character,state={'pronunciation_source':'listener',
+            'pronunciations':{character['name'].casefold():stressed},'pronunciation_evidence':[evidence]})
+        return {'names':{character['id']:{'name':character['name'],'stressed':stressed,'source':'series_listener'}}}
+
+    def test_lowercase_note_downgrade_removes_saved_legacy_projection(self):
+        book=self.store.import_data(fb2('Synthetic IV',4,'Он не видел мира.'),'four.fb2')
+        character={'id':'mira','name':'Мира'};generation=self.generation(book,[character])
+        report=self.formal_report(book,generation,'мира','мира́')
+        saved=self.stale_projection(book,character,report,'Мира́')
+        result=apply_pronunciations(self.store,book,[character],saved)
+        self.assertNotIn('mira',result['names']);self.assertTrue(result['listener_projection_holds'])
+        from rimsky.listener_stress import snapshot
+        frozen=snapshot(self.store,book)
+        self.assertEqual({},frozen['names']);self.assertEqual('мира́',frozen['occurrences'][0]['intended_stress'])
+
+    def test_sentence_initial_ordinary_note_does_not_survive_as_family_projection(self):
+        book=self.store.import_data(fb2('Synthetic IV',4,'Стоит человек.'),'four.fb2')
+        character={'id':'stoit','name':'Стоит'};generation=self.generation(book,[character])
+        report=self.formal_report(book,generation,'Стоит','Стои́т')
+        saved=self.stale_projection(book,character,report,'Сто́ит')
+        result=apply_pronunciations(self.store,book,[character],saved)
+        self.assertNotIn('stoit',result['names'])
+
+    def test_explicit_saved_canonical_family_overrides_automatic_and_old_projection(self):
+        book=self.store.import_data(fb2('Synthetic IV',4,'Он говорил с Гундахаром.'),'four.fb2')
+        character={'id':'gundahar','name':'Гундахар'};generation=self.generation(book,[character])
+        report=self.formal_report(book,generation,'Гундахаром','Гунда́харом')
+        result=apply_pronunciations(self.store,book,[character],{'names':{'gundahar':{'name':'Гундахар','stressed':'Гу́ндахар','source':'model'}}})
+        self.assertEqual('Гунда́хар',result['names']['gundahar']['stressed'])
+        from rimsky.listener_stress import notes
+        rows=notes(self.store,book)
+        self.assertEqual(1,len(rows));self.assertEqual(report['id'],rows[0]['report']['id'])
+        self.assertEqual('stress',rows[0]['report']['kind'])
+
+    def test_legacy_family_migration_uses_own_retained_marks_not_latest_projection(self):
+        book=self.store.import_data(fb2('Synthetic IV',4,'Он говорил с Гундахаром.'),'four.fb2')
+        character={'id':'gundahar','name':'Гундахар'}
+        evidence=[{'report_id':'old','book_id':'deleted','generation_id':'old-generation','selected_text':'Гундахар',
+            'intended_stress':'Гу́ндахар','created':'2026-10-20','source':'listener'},
+            {'report_id':'new','book_id':'deleted','generation_id':'old-generation','selected_text':'Гундахар',
+            'intended_stress':'Гунда́хар','created':'2026-10-21','source':'listener'}]
+        upsert_character(self.store,identity(self.store,book),character,state={'pronunciation_source':'listener',
+            'pronunciations':{'гундахар':'Гу́ндахар'},'pronunciation_evidence':evidence})
+        result=apply_pronunciations(self.store,book,[character],{})
+        self.assertEqual('Гунда́хар',result['names']['gundahar']['stressed'])
+        from rimsky.listener_stress import notes
+        rows=notes(self.store,book)
+        self.assertEqual(['Гу́ндахар','Гунда́хар'],[r['family']['гундахар'] for r in rows])
+        self.assertEqual(evidence,[r['report']['legacy_evidence'] for r in rows])
+
+    def test_lowercase_context_note_cannot_become_a_cast_name_rule(self):
+        book = self.store.import_data(fb2('Synthetic IV', 4, 'Он не видел мира.'), 'context.fb2')
+        generation = self.generation(book, [{'id': 'mira', 'name': 'Мира'}])
+        report = {'id': 'ordinary', 'book_id': book['id'], 'generation_id': generation['id'],
+                  'selected_text': 'мира', 'intended_stress': 'ми́ра', 'created': '2026-10-24T00:00:00Z'}
+        self.assertEqual('not_character', record_listener_stress(self.store, report)['status'])
+        self.assertFalse(any(json.loads(r['state'] or '{}').get('pronunciations')
+                             for r in self.store.rows('SELECT state FROM series_character_state')))
+
+    def test_sentence_initial_common_word_cannot_become_a_cast_name_rule(self):
+        text = 'Стоит человек.'
+        book = self.store.import_data(fb2('Synthetic IV', 4, text), 'context.fb2')
+        generation = self.generation(book, [{'id': 'stoit', 'name': 'Стоит'}])
+        report = {'id': 'ordinary', 'book_id': book['id'], 'generation_id': generation['id'],
+                  'selected_text': 'Стоит', 'intended_stress': 'Стои́т', 'text_offset': 0,
+                  'passage_text': text, 'created': '2026-10-24T00:00:00Z'}
+        self.assertEqual('not_character', record_listener_stress(self.store, report)['status'])
 
     def test_propagation_includes_inflected_forms_and_groups_one_retake_per_segment(self):
         state = {'status': 'updated', 'pronunciations': {'гундахар': 'Гунда́хар'}}

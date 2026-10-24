@@ -105,7 +105,7 @@ function callback(name, environment) {
 test('feedback save stays bound to the generation selected when its context menu opened',async()=>{
   const requests=[],pending=[];
   const save=callback('saveNarrationFeedback',{ru:false,run:(_label,action)=>{pending.push(action());},player:{segment:{id:'segment-1'},position:12.5},
-    api:(operation,payload)=>{requests.push([operation,payload]);return Promise.resolve({});},setStressMenu:()=>{},setStressMenuComment:()=>{},setModal:()=>{},setFeedbackSelection:()=>{},setFeedbackComment:()=>{},setNotice:()=>{}});
+    api:(operation,payload)=>{requests.push([operation,payload]);return Promise.resolve({});},correctionAdoption:{current:{watch:()=>{},receive:async()=>{}}},feedbackServicesRef:{current:{selection:()=>({})}},setStressMenu:()=>{},setStressMenuComment:()=>{},setModal:()=>{},setFeedbackSelection:()=>{},setFeedbackComment:()=>{},setNotice:()=>{}});
   save({sourceId:'source-1',text:'плоти',textOffset:7,segmentId:'segment-1',generationId:'heard-generation'},'stress','','плоти́');
   await Promise.all(pending);
   assert.equal(requests[0][0],'report_stress');

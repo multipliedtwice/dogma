@@ -14,13 +14,58 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .util import AppError, file_digest, now, write_json
+from .util import AppError, digest, file_digest, now, write_json
 from .series_characters import propagation_targets
 
 
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = 'higgs_audio_tts_q8_external_preview'
 ACTIVE = frozenset({'queued', 'running'})
+_WORKERS = {}
+
+
+def _origin(report):
+    return {key:report.get(key) for key in ('id','book_id','generation_id','segment_id','chapter_id','source_id',
+        'selected_text','text_offset','audio_offset','audio_hash','passage_text','spoken_text','created','kind','comment','intended_stress','synthesis_snapshot')}
+
+
+def _debug_pending(folder):
+    ready=folder/'ready.json'
+    if not ready.is_file():return False
+    document=json.loads(ready.read_text('utf8'))
+    expected=document.get('unit_count')
+    if type(expected) is not int or expected<1:return False
+    if sum(1 for _ in (folder/'units').glob('*.json'))<expected:return True
+    return json.loads((folder/'progress.json').read_text('utf8')).get('status')!='complete'
+
+
+def _planned_report_targets(folder,report):
+    """Unpublished units are absent from the Store's progressive projection."""
+    path=folder/'ready.json'
+    if not path.exists():return []
+    ready=json.loads(path.read_text('utf8'));result=[]
+    offset=report.get('text_offset');word=report['selected_text']
+    if type(offset) is not int:return []
+    for record in ready.get('plans',[]):
+        plan=(folder/record['plan']).resolve()
+        if not plan.is_relative_to(folder.resolve()) or file_digest(plan)!=record['plan_sha256']:
+            raise AppError('The unpublished correction target has no valid frozen plan.')
+        for unit in json.loads(plan.read_text('utf8')).get('units',[]):
+            if (unit.get('source_id')==report['source_id'] and unit['start']<=offset
+                and offset+len(word)<=unit['end']
+                and unit['text'][offset-unit['start']:offset-unit['start']+len(word)]==word):
+                result.append(unit)
+    return result
+
+
+def _inherit_development_barrier(folder,item):
+    barrier=folder/'listener-stress-queue/development-dispatch-barrier.json'
+    if barrier.exists():
+        decision=json.loads(barrier.read_text('utf8'))
+        if decision.get('state')=='awaiting_reviewed_release':
+            item['development_dispatch_barrier']={'barrier_file':'listener-stress-queue/development-dispatch-barrier.json',
+                'reason':decision.get('reason','Waiting for the reviewed preprocessing release.'),'required_coalescing':True}
+    return item
 
 
 def _external_folder(store, generation):
@@ -40,9 +85,12 @@ def _external_folder(store, generation):
     return folder
 
 
-def _python():
+def _python(folder=None):
     # Retakes reuse the production render pipeline, including its pinned
     # Russian stress preprocessor. The generic TTS venv lacks silero_stress.
+    if folder is not None and (folder/'ready.json').is_file():
+        full=ROOT/'training-work/.venv-asr/Scripts/python.exe'
+        if full.is_file():return full
     for preferred in (ROOT / 'training-work/higgs-production/.venv/Scripts/python.exe',
                       ROOT / 'training-work/.venv-tts/Scripts/python.exe'):
         if preferred.is_file():
@@ -97,25 +145,39 @@ def _target_reports(generation, report):
 
 
 def _start_worker(folder, data_dir, generation_id):
+    prior=_WORKERS.get(str(folder))
+    if prior is not None and prior.poll() is None:return
+    state=folder/'listener-stress-queue/worker-state.json'
+    if state.exists():
+        with contextlib.suppress(OSError,ValueError,KeyError,ImportError):
+            import psutil
+            identity=json.loads(state.read_text('utf8'))
+            with contextlib.suppress(psutil.Error):
+                process=psutil.Process(identity['pid'])
+                command=process.cmdline()
+                if (abs(process.create_time()-identity['create_time'])<.01
+                    and str(ROOT/'scripts/process_listener_stress_queue.py') in command
+                    and str(folder) in command):return
     logs = folder / 'listener-stress-queue/logs'
     logs.mkdir(parents=True, exist_ok=True)
     output = (logs / 'worker.stdout.log').open('ab')
     errors = (logs / 'worker.stderr.log').open('ab')
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
     try:
-        subprocess.Popen([
-            str(_python()), '-X', 'utf8', '-u',
+        child=subprocess.Popen([
+            str(_python(folder)), '-X', 'utf8', '-u',
             str(ROOT / 'scripts/process_listener_stress_queue.py'),
             '--generation', str(folder), '--data-dir', str(data_dir),
             '--generation-id', generation_id,
         ], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output, stderr=errors,
            creationflags=flags, close_fds=True)
+        _WORKERS[str(folder)]=child
     finally:
         output.close()
         errors.close()
 
 
-def enqueue_listener_stress_retake(store, report):
+def _enqueue_generation(store, report):
     """Return queue metadata, or None when this is not an external stress report."""
     if report.get('kind') != 'stress' or not report.get('intended_stress'):
         return None
@@ -163,6 +225,11 @@ def enqueue_listener_stress_retake(store, report):
             'publication': (segment.get('performance') or {}).get('external_preview') or {},
             'human_audio_approval': False,
         }
+        origin=report.get('_origin_report') or _origin(report)
+        item.update(origin_report=origin,origin_report_sha256=digest(origin))
+        if _debug_pending(folder):
+            item.update(phase='awaiting_render_completion',reason='The current frozen render will finish before this saved correction is applied automatically.')
+        _inherit_development_barrier(folder,item)
         path = queue / f"{item['id']}.json"
         if path.exists():
             # A previously held immutable attempt keeps its evidence. A repaired
@@ -181,4 +248,165 @@ def enqueue_listener_stress_retake(store, report):
     first = created[0] if created else reused[0]
     return {'id': first['id'], 'status': first['status'], 'existing': not created,
             'targets': len(targets), 'queued': len(created), 'reused': len(reused),
-            'character': (report.get('character_state') or {}).get('canonical_name')}
+            'character': (report.get('character_state') or {}).get('canonical_name'),
+            **({key:first[key] for key in ('phase','reason') if key in first}),
+            'family_status': (report.get('character_state') or {}).get('family_status')}
+
+
+def enqueue_listener_stress_retake(store, report):
+    """Apply a note to the current book, even when an old tab reported it."""
+    if report.get('kind')!='stress' or not report.get('intended_stress'):return None
+    if not hasattr(store,'generation_list'):
+        return _enqueue_generation(store,report)
+    generations=store.generation_list(report['book_id'])
+    candidates=[row['id'] for row in generations[:1]]
+    positions=store.rows('SELECT value FROM positions WHERE book_id=?',(report['book_id'],))
+    if positions:
+        with contextlib.suppress(ValueError,TypeError):
+            current=json.loads(positions[0]['value']).get('generation_id')
+            if current in [row['id'] for row in generations]:candidates.append(current)
+    receipts=[]
+    for gid in dict.fromkeys(candidates):
+        generation=store.generation(gid)
+        folder=_external_folder(store,generation)
+        if folder is None:continue
+        targets=[s for s in generation['segments'] if s['source_id']==report['source_id']
+            and type(report.get('text_offset')) is int
+            and s['start']<=report['text_offset']<s['end'] and s.get('audio_hash')]
+        if len(targets)!=1:
+            # The current external generation has already frozen its plans.
+            # It cannot pretend a note was applied merely because the heard
+            # passage has not been published here yet. Keep a durable refresh
+            # hold for the renderer and the listening UI instead of sending a
+            # nonexistent receipt to the legacy retake worker.
+            pending=[s for s in generation['segments'] if s['source_id']==report['source_id']
+                and type(report.get('text_offset')) is int
+                and s['start']<=report['text_offset']<s['end']]
+            if not pending:pending=_planned_report_targets(folder,report)
+            queue=folder/'listener-stress-queue';queue.mkdir(parents=True,exist_ok=True)
+            identifier=report['id']+'-preparation-refresh'
+            path=queue/(identifier+'.json')
+            reason=('The listener correction is saved, but this passage has no published take in the current '
+                    'frozen generation. Its pending preparation must be refreshed before synthesis.')
+            if not pending:reason=('The listener correction is saved, but the reported source passage is outside '
+                    'the current frozen generation coverage. Preparation refresh needs source coverage review.')
+            bound={**report,'generation_id':gid,
+                'reported_generation_id':report['generation_id'],
+                'segment_id':pending[0]['id'] if len(pending)==1 else report['segment_id']}
+            deferred=bool(pending and (folder/'ready.json').exists())
+            origin=_origin(report)
+            item={'schema':2,'id':identifier,'kind':'preparation_refresh_required','status':'queued' if deferred else 'held',
+                'created':now(),'updated':now(),'generation_id':gid,'external_generation':folder.name,
+                'report':bound,'pending_segment_ids':[s['id'] for s in pending],
+                'origin_report':origin,'origin_report_sha256':digest(origin),
+                'phase':'awaiting_render_completion' if deferred else 'source_coverage_hold',
+                'reason':reason,'error':'' if deferred else reason,'human_audio_approval':False}
+            existed=path.exists()
+            _inherit_development_barrier(folder,item)
+            if not existed:write_json(path,item)
+            else:item=json.loads(path.read_text('utf8'))
+            if item['status']=='queued':_start_worker(folder,store.root,gid)
+            receipts.append({'id':item['id'],'status':item['status'],'existing':existed,
+                'targets':len(pending),'queued':1 if item['status']=='queued' else 0,'reused':0,
+                'kind':item['kind'],'error':item['error'],'phase':item['phase'],'reason':item['reason']})
+            continue
+        segment=targets[0]
+        derived={**report,'generation_id':gid,'segment_id':segment['id'],
+            'chapter_id':segment['chapter_id'],'audio_hash':segment['audio_hash'],
+            'spoken_text':segment['spoken'],'reported_generation_id':report['generation_id'],
+            '_origin_report':_origin(report)}
+        receipts.append(_enqueue_generation(store,derived))
+    if not receipts:return None
+    first=next((row for row in receipts if row.get('status')=='held'),receipts[0])
+    return {**first,'targets':sum(r['targets'] for r in receipts),
+        'queued':sum(r['queued'] for r in receipts),'generations':len(receipts)}
+
+
+def resume_external_listener_queues(store):
+    """Restart durable explicit correction owners; worker locks prevent duplicates."""
+    for generation in store.rows('SELECT id,book_id,config,analysis FROM generations'):
+        config=json.loads(generation['config'])
+        if config.get('engine')!=ENGINE:continue
+        full={**generation,'config':config,'analysis':json.loads(generation['analysis'])}
+        with contextlib.suppress(AppError,OSError,ValueError):
+            folder=_external_folder(store,full)
+            if folder is None:continue
+            pending=False
+            for path in (folder/'listener-stress-queue').glob('*.json'):
+                row=json.loads(path.read_text('utf8'))
+                if not (row.get('report') or {}).get('id'):continue
+                previous_barrier=row.get('development_dispatch_barrier')
+                _inherit_development_barrier(folder,row)
+                if row.get('development_dispatch_barrier')!=previous_barrier:write_json(path,row)
+                if (row.get('status')=='held' and row.get('phase')=='awaiting_source_repair'
+                    and row.get('deferred_hold_code','').startswith('listener_source_') and not _debug_pending(folder)):
+                    # Source repair/resume has now completed. Reuse the saved
+                    # human request; no listener resubmission or semantic vote.
+                    history=folder/'listener-stress-queue/hold-history'/(row['id']+'-'+digest(row)[:12]+'.json')
+                    if not history.exists():write_json(history,row)
+                    row.update(status='queued',phase='awaiting_render_completion',updated=now(),error='',
+                        resumed_after_source_repair=history.name)
+                    write_json(path,row)
+                if row.get('status') in ACTIVE:pending=True;break
+            if pending:_start_worker(folder,store.root,generation['id'])
+
+
+def _queue_status(rows,runtime_jobs):
+    if runtime_jobs:
+        status=next((state for state in ('held','running','queued','paused') if any(r['status']==state for r in runtime_jobs)),'applied')
+        return {'status':status,'targets':sum(len(json.loads(row['segment_ids'])) for row in runtime_jobs),
+            'applied':sum(len(json.loads(row['segment_ids'])) for row in runtime_jobs if row['status']=='applied'),
+            **({'error':next(row['error'] for row in runtime_jobs if row['error'])} if any(row['error'] for row in runtime_jobs) else {})}
+    if not rows:return None
+    effective={}
+    for row in sorted(rows,key=lambda item:(item.get('created',''),item.get('updated',''),item.get('id',''))):
+        target=row.get('report') or {}
+        # A newer attempt for the same passage supersedes the old held result;
+        # its immutable historical request stays on disk.
+        key=(target.get('source_id'),target.get('segment_id'),target.get('text_offset'))
+        effective[key]=row
+    rows=list(effective.values())
+    status=next((state for state in ('held','running','queued') if any(r.get('status')==state for r in rows)),'applied')
+    errors=[r['error'] for r in rows if r.get('error')]
+    published=[r for r in rows if r.get('status')=='applied' and
+        (r.get('published_generation_id') or (r.get('result') or {}).get('published_generation_id'))]
+    delivery={}
+    if published:
+        latest=max(published,key=lambda r:(r.get('updated',''),r.get('created',''),r.get('id','')))
+        result=latest.get('result') or {}
+        delivered=latest.get('published_generation_id') or result['published_generation_id']
+        siblings=[r for r in published if (r.get('published_generation_id') or (r.get('result') or {}).get('published_generation_id'))==delivered]
+        delivery={'published_generation_id':delivered,
+            'affected_segment_ids':sorted({value for r in siblings for value in (r.get('affected_segment_ids') or (r.get('result') or {}).get('affected_segment_ids') or [])}),
+            'affected_source_ids':sorted({value for r in siblings for value in (r.get('affected_source_ids') or (r.get('result') or {}).get('affected_source_ids') or [])})}
+    origins=sorted({r['report']['generation_id'] for r in rows if (r.get('report') or {}).get('generation_id')})
+    return {'status':status,'targets':len(rows),'applied':sum(r.get('status')=='applied' for r in rows),
+            'origin_generation_ids':origins,**delivery,
+            **({'phase':'awaiting_preparation_release','reason':'Waiting for the reviewed preprocessing release; correction will run automatically afterwards.'}
+               if status in ACTIVE and any(r.get('phase')=='awaiting_preparation_release' for r in rows) else {}),
+            **({'phase':'awaiting_render_completion','reason':'Waiting for the current frozen render to finish; the saved correction will run automatically.'}
+               if status in ACTIVE and any(r.get('phase')=='awaiting_render_completion' for r in rows) else {}),
+            **({'error':errors[0]} if errors else {})}
+
+
+def queue_status_index(store,book_id):
+    """Read each queue once; never load whole generation segment arrays to poll notes."""
+    external={};jobs={}
+    for job in store.rows('SELECT * FROM listener_correction_jobs WHERE book_id=?',(book_id,)):
+        jobs.setdefault(job['report_id'],[]).append(job)
+    for row in store.rows('SELECT id,config,analysis FROM generations WHERE book_id=?',(book_id,)):
+        generation={**row,'config':json.loads(row['config']),'analysis':json.loads(row['analysis'])}
+        if generation['config'].get('engine')!=ENGINE:continue
+        with contextlib.suppress(AppError,OSError,ValueError):
+            folder=_external_folder(store,generation)
+            if folder is None:continue
+            for path in (folder/'listener-stress-queue').glob('*.json'):
+                item=json.loads(path.read_text('utf8'));identifier=(item.get('report') or {}).get('id')
+                if identifier:external.setdefault(identifier,[]).append(item)
+    return {identifier:_queue_status(external.get(identifier,[]),jobs.get(identifier,[]))
+        for identifier in external.keys()|jobs.keys()}
+
+
+def report_queue_status(store, report, index=None):
+    """Read durable queue outcomes without rewriting the original human note."""
+    return (queue_status_index(store,report['book_id']) if index is None else index).get(report['id'])

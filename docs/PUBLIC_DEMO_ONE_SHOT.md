@@ -49,120 +49,62 @@ write errors remain visible; this does not authorize another synthesis attempt.
 
 ## Private chapter debugging in the local reader
 
-For new preparation, `scripts/build_yo_restoration.py` now sends every ambiguous
-Ðµ/Ñ‘ occurrence to isolated `gpt-6-luna` at low effort, including Silero/RUAccent
-agreement. Dictionary-certain spellings and explicit source stress remain
-authoritative. Requests/cache keys bind the new policy and provider/model/effort;
-immutable attempts retain the CLI executable checksum, version and isolated-call
-implementation. The CLI API does not expose server-reported model usage, so its
-metadata explicitly records model selection rather than inventing that evidence.
-There is no provider/model fallback. The older Silero/RUAccent disagreement HS
-step keeps its separate Opus evidence. New YO and dictionary-context stress each
-request one Luna opinion with an integer self-rated confidence of 0–100. If that
-valid opinion keeps the bound existing proposal, preparation accepts it without
-a second call, even at confidence zero. EVERY proposed change receives a second
-independent check, even at confidence 100. An unmarked/unknown baseline also
-requires that check. Confidence is diagnostic, not calibrated or a routing threshold.
-Pass 2 sees only that changed subset, no first answer, reason or confidence; it
-uses a distinct grammar/inflected-form prompt and reversed item/candidate order.
-Both get the same upstream proposals and witnesses as advisory input. Context
-labels the selected snapshot accurately as after Silero + existing HS/YO/guards,
-rather than calling that mixed result pure Silero. No additional Silero pass runs.
+User decision, 2026-10-25: restore the previous stress pipeline. Silero
+homograph marks are cross-checked with RUAccent, and pinned Claude Opus 5.5 at
+high effort resolves their disagreements. The blanket Luna dictionary-context
+stress overlay is disabled for new preparation. Its historical decisions,
+provider evidence and audio remain immutable; do not resume a frozen generation
+under a changed recipe.
 
-YO compares against the categorical Silero е/ё witness; missing witnesses are unknown.
-User policy: when a second opinion is required and both are valid, the SECOND is authoritative even if
-they disagree. Keep both reasons/raw choices/CLI records and report agreement or
-disagreement; never call a split vote consensus or ask Opus/a third Luna to settle
-it. A missing, malformed or unbound required opinion still holds preparation. The new
-public pipeline disables its old single-Opus finite-verb context vote. Selected
-YO spelling stays fixed while the conditional dictionary-context checks choose stress.
-Each call uses an audited single-execution CLI wrapper; malformed JSON is saved
-and held. Only actual transport failures receive bounded same-request retries.
+`scripts/build_yo_restoration.py` continues to send every ambiguous е/ё
+occurrence to isolated `gpt-6-luna` at low effort, including tagger agreement.
+Dictionary-certain spellings and explicit source marks remain authoritative.
+Its first opinion includes self-rated confidence; every proposed change from
+the categorical Silero witness gets an independent second check. Missing or
+unmarked witnesses also require that check. The second valid YO opinion wins
+on disagreement; retain both opinions and reasons. Confidence never controls
+routing. Malformed or unbound answers hold preparation; only transport errors
+receive bounded retries. Provider/model provenance and CLI isolation remain
+required, with no silent fallback.
 
-The final dictionary-context stress layer also uses Luna low. It detects every
-same-spelling homograph with multiple stress positions in the pinned local
-RUAccent homograph lexicon, including unmarked words and model agreement; its
-scope includes dictionary noun homographs as well as verbs. Thus ÑÑ‚Ð¾Ð¸Ñ‚ receives a
-sentence-specific choice between ÑÑ‚Ð¾ÌÐ¸Ñ‚ (costs) and ÑÑ‚Ð¾Ð¸ÌÑ‚ (stands), without a
-book-specific phrase rule. Source acute marks, names and the selected Ðµ/Ñ‘ spelling
-remain authoritative. The final overlay records any superseded automatic mark,
-retains earlier HS/guard evidence, then reruns the close-mark guard with contextual
-targets and prior HS targets protected. It checks that every chosen mark survives;
-an unprotected neighboring automatic mark can be removed instead.
-Context policy v4 and YO policy v3 use per-item enumerated candidates, preventing
-free-form/double-acute spellings. Preserve source case, letters and selected YO.
-Earlier single-pass/v2 case-projection attempts remain immutable historical
-evidence; use fresh output/cache namespaces for the conditional-check policies.
+For public-demo preparation, `scripts/prepare_public_demo_pronunciation_v4.py`
+uses recipe `public-demo-luna-yo-opus-stress-v4`. After Luna chooses е/ё, the
+separate Opus finite-verb stress pass preserves that exact spelling. It cannot
+replace the older bound Opus homograph decision silently: conflicts hold the
+preparation. No blanket dictionary-context Luna stress call runs.
 
-The previous debug owner and native worker have stopped; their prepared inputs,
-implementation and first-take evidence remain preserved. New debug preparation
-uses separate validators: actual Opus-high provenance for homograph stress and the
-new Luna policy for YO, with zero automatic ambiguous choices. Do not put Luna
-answers into an old frozen generation or resume it under changed implementation.
-Use a fresh sibling output. Rendering requires completed contextual preparation
-and exclusive queue ownership; the commands below do not bypass an explicit
-render pause. The requested new render does not reuse old takes.
+For private chapter debugging, `scripts/debug_higgs_one_shot.py` prepares a new
+sibling generation, verifies source slices and binds HS/YO answers to the final
+unit texts. It freezes a disabled contextual-stress receipt instead of requesting
+Luna stress decisions. Every generation consumes a frozen shared human-correction
+snapshot. Explicit listener corrections apply after automatic stress/YO and before
+the final synthesis-only phonetic stage. Proper-name corrections cover the full
+name family; ordinary contextual corrections remain occurrence-bound.
 
-`scripts/debug_higgs_one_shot.py` prepares a new, private sibling generation for
-chapter debugging. It checks every original source slice, installs the current
-number policy before looking up spoken corrections, and retains only exactly
-bound listener/editorial corrections. Homograph stress and YO v4 decisions are
-rebuilt on the final unit texts; old answers are not rebound to changed wording.
-Homograph batches must report actual Opus 5.5 high usage; YO batches must carry
-the pinned Luna-low selection and isolated CLI provenance described above.
-Existing frozen generations remain unchanged.
+To restore an already delivered Luna-stress generation, the listener repair helper
+uses the full retained pre-context text and source-bound automatic evidence. It
+replays the old contextual overlay and requires exact agreement with the archived
+result before accepting that baseline. Then it applies the latest human notes,
+recomputes phonetics and regenerates only changed/requested units. Missing proof
+holds restoration rather than guessing. Music, voice references, source/captions,
+model pin and post-processing mode remain unchanged.
 
-The final synthesis-only phonetic stage runs after stress and YO decisions. Its
-closed rule maps whole pronouns ÐºÐ¾Ð³Ð¾ â†’ ÐºÐ°Ð²Ð¾ and Ð½Ð¸ÐºÐ¾Ð³Ð¾ â†’ Ð½Ð¸ÐºÐ°Ð²Ð¾, including approved
-ÐºÐ¾Ð³Ð¾ particle forms, while retaining case and acute positions. ÐšÐ¾Ð³Ð¾Ñ‚ÑŒ, ÐºÐ¾Ð³Ð¾Ñ‚ÐºÐ¸,
-Ð½ÐµÐºÐ¾Ð³Ð¾ and unrelated endings remain unchanged. Original source/captions and YO
-decision bindings retain their orthography. Each native request records its
-prephonetic text, exact substitutions, rule and module checksum; freeze recomputes
-that record before applying the original strict letter check to prephonetic text.
+The closed whole-word phonetic rule maps кого → каво and никого → никаво,
+preserving source text, case and stress. It does not alter коготь or коготки.
+Each native request records prephonetic text, substitutions and implementation
+checksum. Basic freeze validation recomputes that receipt.
 
-For example, prepare Chapters 1â€“3 without starting speech generation:
+Example preparation without speech generation:
 
 ```powershell
-$debugGeneration = 'training-work/elirm-iv-higgs-mvp/audio-palette-luna-double-ch123-oneshot-20261024'
+$debugGeneration = 'training-work/elirm-iv-higgs-mvp/audio-palette-restored-stress-ch123'
 training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/debug_higgs_one_shot.py --source-generation training-work/elirm-iv-higgs-mvp/audio-palette-stress-scale-v1-yo-hard-e-ch123-oneshot --output $debugGeneration --chapters c0001 c0002 c0003 --stage prepare
 ```
 
-For an explicitly reviewed fresh sibling containing byte-identical source
-assignments and already bound HS/YO answers, the new context stage can run alone
-before a direct freeze, without repeating those earlier providers:
-
-```powershell
-training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/build_contextual_stress.py --generation $debugGeneration --output "$debugGeneration/preparation/context" --chapters c0001 c0002 c0003
-```
-
-Its immutable `inputs.json`, request/schema, CLI provenance, raw attempts and
-`answer.json` stay private. Substantive/schema errors hold preparation; only
-transport failures receive bounded retries. No recognizer, speech or GPU worker is
-started by this command. Direct freeze requires the completed context answer and
-rehashes its evidence. Existing first-take audio is not reused for this new render.
-
-After context preparation completes, generate a private inventory of detected
-stress ambiguities without another provider or audio call:
-
-```powershell
-training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/report_pronunciation_ambiguities.py --answer "$debugGeneration/preparation/context/answer.json" --output "$debugGeneration/ambiguity-report"
-```
-
-For public-demo preparation, point `--answer` at its
-`pronunciation/yo-v4/dictionary-context/answer.json` and add `--assignment` with
-that preparation's `assignment.json` to include chapter/unit/original source
-ranges. The report always retains exact prepared-text hashes and word occurrence
-indices; it adds original word offsets only when the text matches byte for byte.
-Private inputs already supply chapter locations. `report.json`, `report.txt` and
-their hash manifest list every detected dictionary candidate, possible stress
-readings, Luna's chosen/raw form, case projection and reason. The selected-input
-snapshot shows unmarked words and a superseded automatic mark when observable;
-it does not invent missing model history. This is an ambiguity inventory, not a
-confidence score or exhaustive natural-language analysis, and never audio,
-recognition or human approval. Artifacts are immutable on rerun. Keep reports
-under ignored private working data; this command never publishes book text.
-The report also exposes both independent opinions, their reasons/provenance,
-agreement counts and the explicit second-opinion authority on disagreement.
+The historical `build_contextual_stress.py` and `report_pronunciation_ambiguities.py`
+remain available for inspecting preserved experiments. They are not the default
+preparation path or an instruction to reinstate Luna stress authority. Their private
+reports describe text decisions, never auditory or human approval.
 
 After preparation and queue review, use the durable supervisor with **both**
 current public-demo outputs. It waits for their complete, stopped-worker evidence

@@ -54,6 +54,30 @@ test('empty library does not enter an endless waiting state', () => {
   assert.equal(h.state().waiting, false); assert.equal(h.state().segment, null); h.controller.dispose();
 });
 
+test('published correction adopts the exact source, resets changed audio and saves its new generation anchor',async()=>{
+  const h=harness();const d=data();h.controller.update(d.book,d.generation);await settle();
+  h.controller.toggle();await settle();h.audio.currentTime=1;h.audio.dispatchEvent(new Event('timeupdate'));
+  const updated={...d.generation,id:'g2',segments:[segment('new-id','ready',{audio_hash:'corrected'})]};
+  assert.equal(h.controller.adoptCorrection(d.book,updated,['s1'],['p1']),true);await settle();
+  assert.equal(h.state().segment.id,'new-id');assert.equal(h.state().position,0);assert.equal(h.state().playing,true);
+  assert.equal(h.saved.at(-1).generation_id,'g2');assert.equal(h.saved.at(-1).segment_id,'new-id');assert.equal(h.saved.at(-1).offset,0);
+  h.controller.dispose();
+});
+
+test('unaffected paused passage keeps exact offset when corrected generation is adopted',async()=>{
+  const h=harness();const d=data();h.controller.update(d.book,d.generation);await settle();
+  h.controller.seek(.8);await settle();
+  assert.equal(h.controller.adoptCorrection(d.book,{...d.generation,id:'g2'},['another'],['p1']),true);await settle();
+  assert.equal(h.state().playing,false);assert.equal(h.audio.currentTime,.8);assert.equal(h.saved.at(-1).generation_id,'g2');
+  assert.equal(h.saved.at(-1).offset,.8);h.controller.dispose();
+});
+
+test('correction adoption refuses a missing source instead of jumping to another chapter',async()=>{
+  const h=harness();const d=data();h.controller.update(d.book,d.generation);await settle();
+  assert.equal(h.controller.adoptCorrection(d.book,{...d.generation,id:'g2',segments:[segment('elsewhere','ready',{source_id:'other'})]},[],[]),false);
+  assert.equal(h.state().segment.id,'s1');h.controller.dispose();
+});
+
 test('saved generation restores source-bound offset without autoplay', async () => {
   const h = harness(); const d = data();
   d.book.position = {generation_id: 'g1', segment_id: 's1', offset: .75};
@@ -889,6 +913,23 @@ test('skipping branded intro waits for pending narration and resumes progressive
   h.controller.update(d.book,{...d.generation,segments:[segment('split','ready')]}); await settle();
   assert.equal(h.state().segment.id,'split'); assert.equal(h.state().playing,true);
   assert.equal(h.saved.at(-1).opening.complete,true); h.controller.dispose();
+});
+
+test('correction delivered during branded intro leaves its playback intact for an explicit later switch',async()=>{
+  const h=harness();const d=withOpening();h.controller.update(d.book,d.generation);await settle();
+  h.controller.toggle();await settle();h.audio.currentTime=1;h.audio.dispatchEvent(new Event('timeupdate'));
+  assert.equal(h.controller.adoptCorrection(d.book,{...d.generation,id:'g2'},['s1'],['p1']),false);await settle();
+  assert.equal(h.state().opening.position,1);assert.equal(h.state().playing,true);assert.deepEqual(h.loads,['musical-brand']);
+  h.controller.dispose();
+});
+
+test('adopting first corrected source after intro completion does not replay a new opening asset',async()=>{
+  const h=harness();const d=withOpening();h.controller.update(d.book,d.generation);await settle();
+  h.controller.skipOpening();await settle();
+  const next={...d.generation,id:'g2',config:{...d.generation.config,opening:{...d.generation.config.opening,key:'other-opening'}}};
+  assert.equal(h.controller.adoptCorrection(d.book,next,['s1'],['p1']),true);await settle();
+  assert.equal(h.state().opening,undefined);assert.equal(h.state().playing,false);assert.equal(h.saved.at(-1).opening.complete,true);
+  h.controller.dispose();
 });
 
 test('branding can play while analysis has no source segments and later hands off without replay', async () => {

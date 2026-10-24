@@ -143,6 +143,39 @@
 
 ## Preparation layers (user findings, 2026-10-17)
 
+- User decision, 2026-10-25: restore the previous stress pipeline after the
+  Luna contextual-stress regression. Use Silero homograph stress cross-checked
+  with RUAccent and pinned Opus 5.5 high for disagreements. Disable the blanket
+  Luna dictionary-context stress overlay for new preparation. Luna remains the
+  provider for ambiguous е/ё, with its conditional second check unchanged.
+  Explicit source marks and durable human corrections remain authoritative;
+  apply human corrections last. This supersedes the 2026-10-24 Luna STRESS and
+  second-opinion stress-authority decisions below, which describe historical
+  generations only. Preserve their artifacts and use a fresh versioned recipe
+  when restoring earlier inputs; never edit a frozen generation in place.
+
+- User decision, 2026-10-24: explicit listener stress/pronunciation notes are
+  durable user instructions shared by development and production, across all
+  regenerations of the same source book. Store them outside generation folders
+  in the shared local user correction profile; preserve raw notes, provenance
+  and superseded decisions. Every preparation/render path must consume a frozen
+  correction snapshot. Automatic analysis and copied old plans cannot override
+  it. Other contextual words remain bound to their exact source occurrence.
+- A stress correction to a proper noun applies to its whole name family,
+  including inflections and names absent from the character cast. Resolve the
+  family from the source and morphology; never hard-code a book's name. Apply
+  the corrected stem stress throughout the book, regenerate affected available
+  passages automatically and use it when rendering later passages. Reuse
+  unaffected audio and retain earlier attempts. Feedback from an old generation
+  must reach the current book generation and future regenerations. Report real
+  queued/running/applied/held state; saving a note is not proof of repaired audio.
+- Explicit listener corrections remain enabled when automatic post-processing
+  is off. Applying a saved instruction does not enable blanket recognition or
+  quality-retake loops, change source text/human labels, or authorize production
+  to modify application code. New synthesis keys include the effective corrected
+  text and the bound correction evidence; cache invalidation is scoped to the
+  affected passages.
+
 - User decision, 2026-10-24: YO ambiguity and dictionary-context stress preprocessing
   first request one `gpt-6-luna` low opinion with self-rated integer confidence 0–100.
   Keep an unchanged bound preparation proposal after that single valid opinion.

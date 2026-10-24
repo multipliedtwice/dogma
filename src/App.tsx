@@ -18,6 +18,7 @@ import {active,bytes,cn,duration,errorText} from './lib/utils';
 import {blockKindLabel,localMessage,preview,characterName,count,deliveryLabel,passageNote,passageProgress,importNotice,jobElsewhere,locale,operationMessage,playerMessage,statusLabel,translator} from './lib/i18n';
 import {confirmPartRequest,confirmPresentationRequest,confirmSpeakerRequest,heldCount,heldLabel,holdQueue,mixedSegment,partRequests,partVerdicts,presentationLine,withPartSpeaker,preparationPercent,preparationStatus,segmentHeld,speakerConfirmationAvailable,speakerLabels,stageProgress} from './lib/castReview';
 import {usePlayback} from './lib/usePlayback';
+import {createCorrectionAdoption,type CorrectionPublication} from './lib/correctionAdoption';
 import {useMusic} from './lib/useMusic';
 import {playable,spaceToggles} from './lib/playerView';
 import {acceptVisualRefresh,acceptVisualPoll,preserveVisualRevision,bookIndex,segmentIndex,paragraphImages,titleSource} from './lib/readerIndexes';
@@ -99,6 +100,8 @@ export default function App(){
   const [stressMenuComment,setStressMenuComment]=useState('');
   const [respelling,setRespelling]=useState('');
   const [stressReports,setStressReports]=useState<StressReport[]>([]);
+  const [correctionOffer,setCorrectionOffer]=useState<CorrectionPublication|null>(null);
+  const correctionAdoption=useRef(createCorrectionAdoption());
   const [retake,setRetake]=useState(false);
   const [queued,setQueued]=useState(0);
   const [nativeQueued,setNativeQueued]=useState(false);
@@ -131,6 +134,19 @@ export default function App(){
   const removeNoteText=(note:string)=>ru?`Заметка «${preview(note)}» тоже будет удалена.`:`Its note “${preview(note)}” will also be deleted.`;
   const bookmarked=useMemo(()=>new Set(book?.bookmarks.map(mark=>mark.source_id)),[book?.bookmarks]);
   const player=usePlayback(book,generation,settings);
+  const feedbackContext=useRef({book,generation,player,epoch:selectionEpoch.current});
+  feedbackContext.current={book,generation,player,epoch:selectionEpoch.current};
+  const feedbackServices={
+    selection:()=>{const current=feedbackContext.current;return {bookId:current.book?.id||'',generationId:current.generation?.id||'',epoch:selectionEpoch.current};},
+    load:async(publication:CorrectionPublication)=>{const [nextBook,nextGeneration]=await Promise.all([
+      api<Book>('book',{id:publication.bookId}),api<Generation>('generation',{id:publication.generationId})]);return {book:nextBook,generation:nextGeneration};},
+    adopt:(nextBook:Book,nextGeneration:Generation,publication:CorrectionPublication)=>{
+      if(!feedbackContext.current.player.adoptCorrection(nextBook,nextGeneration,publication.affectedSegmentIds,publication.affectedSourceIds))return false;
+      setBook(current=>preserveVisualRevision(current,nextBook));setGeneration(nextGeneration);setCorrectionOffer(null);return true;
+    },
+    offer:setCorrectionOffer,
+  };
+  const feedbackServicesRef=useRef(feedbackServices);feedbackServicesRef.current=feedbackServices;
   const music=useMusic(generation,settings,player.clock);
   const cancelFollowingReturn=()=>{if(followReturnTimer.current!==null){clearTimeout(followReturnTimer.current);followReturnTimer.current=null;}};
   const scheduleFollowingReturn=()=>{cancelFollowingReturn();followReturnTimer.current=setTimeout(()=>{followReturnTimer.current=null;manualReading.current=false;setBrowsing(false);setSelectedSource('');},FOLLOW_RETURN_DELAY);};
@@ -412,13 +428,22 @@ export default function App(){
   };
   const saveNarrationFeedback=(selection:NarrationFeedbackSelection,kind:string,comment='',intendedStress:string|null=null)=>{
     void run(ru?'Сохраняем замечание':'Saving narration feedback',async()=>{
+      const feedbackOrigin=feedbackServicesRef.current.selection();
       const audioOffset=player.segment?.id===selection.segmentId?player.position:null;
-      const saved=await api<StressReport&{retake_queue?:{id:string;status:string;error?:string;targets?:number;queued?:number;character?:string|null};character_state?:{status:string;canonical_name?:string}}>('report_stress',{generation_id:selection.generationId,segment_id:selection.segmentId,source_id:selection.sourceId,
+      const saved=await api<StressReport&{retake_queue?:{id:string;status:string;error?:string;targets?:number;queued?:number;character?:string|null;family_status?:string};character_state?:{status:string;canonical_name?:string;family_status?:string}}>('report_stress',{generation_id:selection.generationId,segment_id:selection.segmentId,source_id:selection.sourceId,
         selected_text:selection.text,text_offset:selection.textOffset,audio_offset:audioOffset,kind,comment,intended_stress:intendedStress});
+      correctionAdoption.current.watch(saved,feedbackOrigin,true);
+      void correctionAdoption.current.receive([saved],feedbackServicesRef.current).catch(()=>undefined);
       setStressMenu(null);setStressMenuComment('');
       const propagated=(saved.retake_queue?.targets||0)>1;
       setNotice(saved.retake_queue?.status==='held'
         ?(ru?`Правка «${selection.text}» сохранена; повторная озвучка ожидает разбора.`:`Correction saved; the retake for “${selection.text}” needs attention.`)
+        :saved.retake_queue?.phase==='awaiting_render_completion'
+          ?(ru?'Правка сохранена и применится автоматически после завершения текущей озвучки. Повторять замечание не нужно.':'Correction saved. It will run automatically after the current render finishes; no need to report it again.')
+        :saved.character_state?.family_status==='unresolved'
+          ?(ru?'Правка сохранена для этого места; определение всех форм имени требует разбора.':'Correction saved for this occurrence; the name family needs review before applying it throughout the book.')
+        :saved.retake_queue?.status==='applied'
+          ?(ru?'Правка сохранена для следующих озвучек; новых фрагментов для замены нет.':'Correction saved for future generations; no additional passages need replacement.')
         :saved.retake_queue?(propagated
           ?(ru?`Ударение имени «${saved.retake_queue.character||selection.text}» сохранено для серии; ${saved.retake_queue.targets} фрагм. поставлено в очередь.`:`Series name stress saved; ${saved.retake_queue.targets} passages queued.`)
           :(ru?`Правка «${selection.text}» в очереди на повторную озвучку. Продолжайте слушать.`:`Correction queued for “${selection.text}”. Keep listening.`))
@@ -455,7 +480,14 @@ export default function App(){
   const heldTotal=generation?heldCount(generation):0;
   const castBlocked=health?.active&&health.active!==generation?.id?elsewhere:'';
   const openModal=(value:Modal,sourceId?:string)=>{setError('');if(value==='illustration'){const target=sourceId?readerIndex.sources.get(sourceId)?.block:selectedBlock?.kind==='paragraph'?selectedBlock:chapter?.blocks.find(block=>block.kind==='paragraph');if(!target||target.kind!=='paragraph'){setError(t('noParagraph'));return;}setSelectedSource(target.id);}if(value==='generate'){openGenerate(chapter?.id||'','all');return;}setModal(value);if(value==='settings')void refreshHealth().catch(()=>undefined);if(value==='generations')void refreshBook().catch(e=>setError(operationMessage(e,language)));if(value==='narration'&&generation)void refreshGeneration(generation.id).catch(e=>setError(operationMessage(e,language)));};
-  useEffect(()=>{if(modal!=='stressReports'||!book)return;let live=true;void api<StressReport[]>('stress_reports',{book_id:book.id}).then(rows=>{if(live)setStressReports(rows);}).catch(e=>{if(live)setError(operationMessage(e,language));});return()=>{live=false;};},[modal,book?.id]);
+  useEffect(()=>{let live=true;let pending=false;
+    const refresh=async()=>{if(pending)return;pending=true;try{
+      const ids=[...new Set([book?.id,...correctionAdoption.current.bookIds()].filter((id):id is string=>Boolean(id)))];
+      for(const id of ids){const rows=await api<StressReport[]>('stress_reports',{book_id:id});if(!live)return;
+        if(feedbackContext.current.book?.id===id)setStressReports(rows);
+        await correctionAdoption.current.receive(rows,feedbackServicesRef.current);}
+    }catch(e){if(live&&modal==='stressReports')setError(operationMessage(e,language));}finally{pending=false;}};
+    void refresh();const timer=window.setInterval(()=>void refresh(),4000);return()=>{live=false;window.clearInterval(timer);};},[book?.id]);
 
   const importRef=useRef(importFiles);importRef.current=importFiles;
   useEffect(()=>bindDropGuard(window),[]);
@@ -510,6 +542,7 @@ export default function App(){
       {pollError&&!error&&<div className="error-banner" role="alert"><AlertCircle size={17}/><span>{pollError}</span><button aria-label={t('dismissError')} onClick={()=>setPollErrors({health:'',generation:'',visuals:''})}><X size={16}/></button></div>}
       {error&&!modal&&<div className="error-banner" role="alert"><AlertCircle size={17}/><span>{error}</span><button aria-label={t('dismissError')} onClick={()=>setError('')}><X size={16}/></button></div>}</>}
       {notice&&!modal&&<div className="toast" role="status"><CheckCircle2 size={16}/>{notice}</div>}
+      {correctionOffer&&!modal&&<div className="toast" role="status"><CheckCircle2 size={16}/>{ru?'Исправленная озвучка готова.':'Corrected narration is ready.'}<Button variant="outline" size="sm" onClick={()=>void run(t('openingGeneration'),async()=>{const target=correctionOffer;await open(target.bookId,target.generationId);setCorrectionOffer(null);})}>{ru?'Открыть новую версию':'Open updated version'}</Button><button aria-label={t('close')} onClick={()=>setCorrectionOffer(null)}><X size={16}/></button></div>}
       {!listenerMode&&!runtimeLost&&<ExternalJobs language={language}/>}
       {!book?<div className="library-page">
         <div className="page-heading"><div><span className="eyebrow">{t('localLibrary')}</span><h1>{t('library')}</h1><p>{library.length?`${count(language,library.length,'books')} · ${t('savedOnComputer')}`:t('privacy')}</p></div><Button onClick={()=>fileInput.current?.click()}><Plus/>{t('openBook')}</Button></div>
@@ -544,10 +577,11 @@ export default function App(){
       <DialogContent key={modal||'closed'} closeLabel={t('close')} onCloseAutoFocus={event=>{event.preventDefault();const preferred=closeFocus.current?document.getElementById(closeFocus.current):null;closeFocus.current='';dialogFocus.restore(viewRef.current,()=>document.activeElement,preferred);}} className={cn(modal==='settings'&&'settings-dialog',(modal==='generations'||modal==='preparation'||modal==='narration')&&'wide-dialog')}>
         {modal==='preparation'&&book&&<BookPreparation book={book} language={settings?.language||'en'} onChapter={id=>{selectChapter(id);setModal(null);}}/>}
         {modal==='bookTools'&&<BookTools language={settings?.language||'en'} onAction={openModal}/>}
-        {modal==='stressReports'&&<><DialogHeader title={ru?'Замечания об озвучке':'Narration feedback'} description={ru?'Замечания сохраняются для той версии озвучки, которую вы слушали.':'Each report stays attached to the narration version you heard.'}/><div className="modal-scroll stress-reports">
+        {modal==='stressReports'&&<><DialogHeader title={ru?'Замечания об озвучке':'Narration feedback'} description={ru?'Правки ударения сохраняются для всех последующих озвучек. Для имён обновляются все падежные формы; исходное замечание и аудио остаются в истории.':'Stress corrections carry into future generations. Name corrections cover every case form; original reports and audio stay in history.'}/><div className="modal-scroll stress-reports">
           {stressReports.length?stressReports.map(report=><article key={report.id}><strong>«{report.selected_text}»</strong><small>{readerIndex.chapters.get(report.chapter_id)?.title||report.chapter_id} · {new Date(report.created).toLocaleString(language)}</small>
+            {report.retake_queue&&<p role={report.retake_queue.status==='held'?'alert':'status'}>{ru?'Повторная озвучка':'Correction audio'}: {report.retake_queue.phase==='awaiting_render_completion'?(ru?'ожидает завершения текущей озвучки; затем запустится автоматически':'waiting for current render; correction starts automatically afterwards'):({queued:ru?'в очереди':'queued',running:ru?'создаётся':'rendering',applied:ru?'опубликована':'published',held:ru?'остановлена — требуется исправление':'held — needs attention'} as Record<string,string>)[report.retake_queue.status]||report.retake_queue.status}{report.retake_queue.targets?` · ${report.retake_queue.applied||0}/${report.retake_queue.targets}`:''}{report.retake_queue.error&&` · ${report.retake_queue.error}`}</p>}
             {report.intended_stress&&<p>{ru?'Ожидаемое ударение':'Expected stress'}: <strong>{report.intended_stress}</strong></p>}<p>{preview(report.passage_text,180)}</p>{report.comment&&<p>{report.comment}</p>}<small>{report.kind||'stress'} · {ru?'Озвучка':'Generation'}: {book?.generations.find(g=>g.id===report.generation_id)?.name||report.generation_id} · {report.audio_offset===null?(ru?'время не зафиксировано':'time not captured'):`${report.audio_offset.toFixed(1)} s`}</small>
-            <div><Button variant="outline" size="sm" onClick={()=>{setModal(null);navigateSource(report.source_id);if(generation?.id===report.generation_id)player.select(report.segment_id,true,report.audio_offset||0);}}>{ru?'Открыть место':'Open passage'}</Button></div></article>):<p className="helper">{ru?'Замечаний пока нет. Выделите слово в тексте и нажмите правой кнопкой мыши.':'No reports yet. Select words in the book and right-click.'}</p>}
+            <div><Button variant="outline" size="sm" disabled={!report.source_id} onClick={()=>{setModal(null);navigateSource(report.source_id);if(generation?.id===report.generation_id)player.select(report.segment_id,true,report.audio_offset||0);}}>{ru?'Открыть место':'Open passage'}</Button></div></article>):<p className="helper">{ru?'Замечаний пока нет. Выделите слово в тексте и нажмите правой кнопкой мыши.':'No reports yet. Select words in the book and right-click.'}</p>}
         </div></>}
         {modal==='playback'&&<PlaybackSettings settings={settings} sleepAt={player.sleepAt} onSleep={player.setSleepAt} update={update} music={music.status} onRetryMusic={()=>void music.retry()} opening={Boolean(generation?.config.opening)} attribution={generation?.config.opening?.attribution||health?.music?.attribution||''}/>}
         {modal==='appearance'&&<><DialogHeader title={t('appearance')} description={ru?'Размер текста, тема и следование за озвучкой.':'Text size, theme, and following narration.'}/><div className="modal-scroll"><ReadingPreferences settings={settings} update={update} showHeading={false}/></div></>}

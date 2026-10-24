@@ -55,6 +55,25 @@ This section specifies required behavior. The documentation change does not
 implement a production toggle or certify that the existing runtime already
 enforces these defaults; implementation must be audited separately in development.
 
+## Stress preparation authority
+
+User decision, 2026-10-25: restore Silero homograph stress, cross-check with
+RUAccent, and resolve disagreements with pinned Claude Opus 5.5 at high effort.
+The blanket Luna dictionary-context stress overlay is disabled for new
+preparation. Luna still decides ambiguous е/ё; its conditional second check
+does not grant authority over homograph stress. In the public-demo path, the
+existing finite-verb Opus stress pass must preserve Luna's fixed е/ё spelling.
+Explicit source marks and durable listener corrections outrank automatic
+analysis. Apply the current human correction snapshot last, before phonetics.
+
+Preserve historical Luna decisions, raw requests and audio. A restoration uses
+new immutable inputs and exact retained pre-context text, verifies that replay
+reproduces the old contextual result, then applies current human corrections.
+Do not infer a baseline from word-only matches or overwrite a historical plan.
+Regenerate only units whose effective inputs change, plus explicitly reported
+audio requiring a fresh take. This does not enable post-processing or establish
+that the regenerated audio follows its stress marks.
+
 ## Pinned production speech checkpoint
 
 User decision, 2026-10-21: every new production render, chapter preview,
@@ -215,8 +234,42 @@ rewrite. Compare original and comma-free narration with the same reference,
 model, sampling settings and five matched seeds before drawing a conclusion.
 Late pronunciation instructions are recorded separately from the
 frozen cast and human corpus, with source, unit, original take and replacement
-hashes. Only the affected sentence is rendered again. Check its words and audio
-edges, preserve all other published PCM, and retain music and progressive playback.
+hashes. User decision, 2026-10-24: every stress/pronunciation note belongs to the
+shared local user correction profile, not to one generation. Development and
+production must both save/read it automatically and replay all applicable notes
+before new synthesis, including notes from superseded generations. Preserve raw
+notes and their history; the latest explicit instruction wins over automatic
+analysis. Freeze the applied correction evidence into synthesis/cache identity.
+The default profile is app-local user data, shared by the desktop runtime and
+development renderers (Windows uses
+`%LOCALAPPDATA%/app.rimskifikator.desktop/pronunciation/user-corrections.sqlite3`).
+`RIMSKY_CORRECTION_PROFILE` may explicitly
+select another profile, including an isolated profile for tests. Keep this file
+and its SQLite sidecars local and protected from workspace cache cleanup.
+
+A proper-noun stress correction updates the entire name family throughout the
+source book, including inflected forms and names not listed in the character
+cast. Derive the family from the source and morphology, with ambiguity guards
+against unrelated words. Automatically regenerate every affected available
+passage in the current book generation and apply the correction to later
+passages. Ordinary ambiguous-word corrections remain bound to their exact source
+context. Preserve historical audio, all unaffected PCM, music and progressive
+playback. A report from a stale generation must still update the shared rule and
+reach the current generation. Show actual queued/running/applied/held status;
+do not present a saved report as a completed repair.
+
+If an external renderer publishes a replacement generation, return its identity
+and affected source passages in the correction outcome. The player must adopt
+that replacement while the listener remains on the requesting book/version,
+preserving play/pause state and the source anchor. Reset a replaced passage's
+audio offset; retain an unaffected passage's offset. A later explicit book,
+version or reading navigation takes priority over automatic adoption. Keep the
+replacement accessible without requiring the listener to report the issue again.
+
+Explicit user corrections work with automatic post-processing disabled. They do
+not opt the book into blanket recognition or quality-retake loops. Any optional
+word/audio-edge checks follow the selected processing mode; production never
+changes application code, models or shared automatic rules in response to a note.
 An instruction specifying stress is not listener approval of a newly rendered
 take. The preview consumes `spoken-take-revisions.json` through
 `scripts/revise_higgs_spoken_take.py` so later chapter extensions retain the fix.

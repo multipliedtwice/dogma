@@ -258,6 +258,20 @@ def _base_match(character: dict, selected: str, intended: str) -> tuple[str, str
 
 def record_listener_stress(store, report: dict) -> dict:
     """Promote a stress report only when it names exactly one known character."""
+    selected = report['selected_text'].replace(ACUTE, '')
+    if not selected[:1].isupper():
+        return {'status': 'not_character', 'reason': 'ordinary_word_case', 'matches': 0}
+    offset, passage = report.get('text_offset'), report.get('passage_text', '')
+    if type(offset) is int and not re.search(r'[А-Яа-яЁё]', re.split(r'[.!?…]', passage[:offset])[-1]):
+        try:
+            from .proper_noun_stress import _morph
+            morph = _morph()
+            names = any({'Name', 'Surn', 'Patr', 'Geox'} & set(p.tag.grammemes)
+                        for p in morph.parse(selected.casefold()))
+            if morph.word_is_known(selected.casefold()) and not names:
+                return {'status': 'not_character', 'reason': 'sentence_initial_ordinary_word', 'matches': 0}
+        except ImportError:
+            return {'status': 'not_character', 'reason': 'family_resolution_unavailable', 'matches': 0}
     generation = store.generation(report['generation_id'])
     book = store.book(generation['book_id'])
     series, records = sync_generation(store, book, generation)
@@ -287,29 +301,31 @@ def record_listener_stress(store, report: dict) -> dict:
 
 
 def apply_pronunciations(store, book: dict, cast: list[dict], pronunciation: dict) -> dict:
-    """Overlay listener-reviewed series pronunciations onto a book's name analysis."""
-    _, records = sync_generation(store, book, {'cast': cast, 'analysis': {}}, pronunciation)
-    names = dict(pronunciation.get('names') or {})
+    """Overlay canonical human families; old series values are projections only."""
+    sync_generation(store, book, {'cast': cast, 'analysis': {}}, pronunciation)
+    from .listener_stress import snapshot
+    frozen=snapshot(store,book,cast)
+    authority=frozen['names']
+    names={key:row for key,row in (pronunciation.get('names') or {}).items() if row.get('source')!='series_listener'}
+    holds=[]
     for character in cast:
         if character.get('id') == 'narrator':
             continue
         primary, _ = split_display_name(character.get('name', ''))
-        candidates = [row for row in records if normalized(primary) in {
-            normalized(row.get('canonical_name', '')), *(normalized(a) for a in row.get('aliases') or [])}]
-        if len(candidates) != 1:
-            continue
-        state = candidates[0].get('state') or {}
-        if state.get('pronunciation_source') != 'listener':
-            continue
-        stressed = (state.get('pronunciations') or {}).get(normalized(primary))
-        if stressed:
+        spans=name_spans(primary,authority,implicit_single=True)
+        if spans:
+            stressed=primary
+            for start,end,marked in reversed(spans):stressed=stressed[:start]+marked+stressed[end:]
             previous = names.get(character['id'], {})
             names[character['id']] = {**previous, 'name': primary, 'stressed': stressed,
-                                      'source': 'series_listener', 'series_id': candidates[0]['series_id'],
-                                      'series_character_key': candidates[0]['character_key']}
+                                      'source': 'series_listener', 'series_id': identity(store,book)['id'],
+                                      'series_character_key':normalized(primary)}
+        elif ((pronunciation.get('names') or {}).get(character['id']) or {}).get('source')=='series_listener':
+            holds.append({'character_id':character['id'],'reason':'No validated canonical human family backs the retained series projection.'})
     from .spoken_terms import terms_for_book
     terms = terms_for_book(store, book)
-    return {**pronunciation, 'names': names, **({'terms': terms} if terms else {})}
+    return {**{key:value for key,value in pronunciation.items() if key!='listener_projection_holds'}, 'names': names,
+            **({'listener_projection_holds':holds} if holds else {}), **({'terms': terms} if terms else {})}
 
 
 def propagation_targets(generation: dict, character_state: dict) -> list[dict]:

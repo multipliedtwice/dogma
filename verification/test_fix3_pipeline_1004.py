@@ -264,6 +264,20 @@ class CastKind(Base):
         changed = jobs.cast_name_stress(done['id'], ivan['id'], 'Ива' + acute + 'н')
         row = changed['analysis']['pronunciation']['names'][ivan['id']]
         self.assertEqual(('Ива' + acute + 'н', 'listener', 'И' + acute + 'ван'), (row['stressed'], row['source'], row['model_stressed']))
+        from rimsky.listener_stress import snapshot,notes
+        from rimsky.series_characters import apply_pronunciations
+        book=self.store.book(changed['book_id'])
+        later=self.store.create_generation(book['id'],{})
+        inherited=apply_pronunciations(self.store,book,changed['cast'],{'names':{ivan['id']:{'name':'Иван','stressed':'И'+acute+'ван','source':'model'}}})
+        self.assertEqual('Ива'+acute+'н',inherited['names'][ivan['id']]['stressed'])
+        receipt=next(item['report'] for item in notes(self.store,book) if item['report'].get('feedback_source')=='cast_name_stress')
+        self.assertEqual(row['listener_review'],receipt['review_request'])
+        self.assertIsNone(receipt['audio_hash']);self.assertIsNone(receipt['text_offset']);self.assertEqual('',receipt['source_id'])
+        # The committed cast action can reconcile a missing profile write;
+        # model/source='model' rows never become human receipts.
+        self.store.correction_profile=self.root/'recovered-cast-profile.sqlite3'
+        recovered=snapshot(self.store,book)
+        self.assertEqual('Ива'+acute+'н',recovered['names']['иван'])
         with self.assertRaisesRegex(AppError, 'changes the letters'):
             jobs.cast_name_stress(done['id'], ivan['id'], 'Ива' + acute + 'нн')
         with self.assertRaisesRegex(AppError, 'no automatic name stress'):

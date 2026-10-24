@@ -733,6 +733,25 @@ export function createPlaybackController(initial: HTMLAudioElement, services: Se
       ensureAudio();
       prefetch();
     },
+    adoptCorrection: (nextBook:Book,nextGeneration:Generation,affectedSegmentIds:string[],_affectedSourceIds:string[]) => {
+      if(nextBook.id!==book?.id||nextGeneration.book_id!==book.id||!selected||previewing||openingActive)return false;
+      const anchor=listening();
+      if(!anchor)return false;
+      const target=nextGeneration.segments.find(item=>item.id===anchor.segment_id&&item.source_id===anchor.source_id)
+        ??nextGeneration.segments.find(item=>item.source_id===anchor.source_id&&item.start===anchor.start&&item.end===anchor.end);
+      if(!target||target.status!=='ready'||!target.audio_hash)return false;
+      const play=wantsPlay;
+      const changed=affectedSegmentIds.includes(anchor.segment_id||'')||affectedSegmentIds.includes(target.id)
+        ||target.audio_hash!==selected.audio_hash;
+      const offset=changed?0:anchor.offset;
+      update(nextBook,nextGeneration);
+      // update() can activate a different generation's intro even though the
+      // listener already finished this generation's opening before adoption.
+      if(openingActive)finishOpening(false);
+      select(target.id,play,offset);
+      void persist();
+      return true;
+    },
     update, select, preview, toggle, seek, skip, pause, persist, clearError, skipOpening: () => finishOpening(wantsPlay),
     configure: (settings: Settings) => { rate = settings.playback_rate; volume = settings.volume; audio.playbackRate = openingActive ? 1 : rate; audio.volume = volume; },
     dispose: () => {

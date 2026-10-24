@@ -71,7 +71,11 @@ class PhoneticIntegration(unittest.TestCase):
         unit={'id':'u','chapter_id':'c0001','source_id':'p','text':source,'mode':'narrator','voice':'narrator_baseline',
               'speaker':'narrator','mood':'neutral','spoken_number_policy':'raw-numbers-v1'}
         path=self.out/'context-assignment.json';freeze.immutable(path,{'units':[unit],'pronunciation':{
-            'policy':'stress-rare-v4','names':{},'common':[],'contextual_stress':block}})
+            'policy':'stress-rare-v4','names':{},'common':[],'contextual_stress':block,
+            'contextual_stress_policy':'experimental-luna-context-v4'}})
+        default_assignment=freeze.read(path)
+        default_assignment['pronunciation'].pop('contextual_stress_policy')
+        default_path=self.out/'default-assignment.json';freeze.immutable(default_path,default_assignment)
         pack={'files':{'model':'hash'},'speech':{'model':'model'},'voices':[{}]}
         def synthesis(pack,voice,text,*args):
             return {'backend':'higgs_audio_cpp','text':text,'prompt':text,'sampling':{'seed':1},'max_tokens':512,
@@ -82,13 +86,17 @@ class PhoneticIntegration(unittest.TestCase):
              patch('rimsky.auto_pronunciation.policy_options',return_value={}),\
              patch.object(trial,'synthesis_plan',side_effect=synthesis),patch.object(trial,'validate_voice_continuity'):
             context=trial.prepare(path,self.out/'context-plan',['c0001'])
+            default_context=trial.prepare(default_path,self.out/'default-plan',['c0001'])
         row=trial.read(context['path'])['units'][0];native=row['synthesis']
         self.assertEqual(row['text'],source);self.assertIn('Никаво́',native['text']);self.assertIn('стои́т',native['text'])
         self.assertNotIn('сто́ит',native['text']);self.assertEqual(trial.sequence_request('u',native)['text'],native['text'])
         self.assertTrue(native['contextual_stress']['applied'][0]['superseded_automatic_mark'])
         self.assertIn('стои́т',native['russian_phonetics']['prephonetic_source'])
-    def test_public_context_repairs_unmarked_stoit_and_protects_it_from_neighbor(self):
-        source='Здесь стоит вышеписанный человек.';selected=source.replace('вышеписанный','вышепи́санный')
+        default_native=trial.read(default_context['path'])['units'][0]['synthesis']
+        self.assertIn('сто́ит',default_native['text'])
+        self.assertNotIn('contextual_stress',default_native)
+    def test_public_default_preserves_baseline_without_luna_stress(self):
+        source='Здесь стоит вышеписанный человек.';selected=source.replace('стоит','стои́т')
         unit={'id':'u','chapter_id':'c','source_id':'p','start':0,'end':len(source),'text':source,'spoken':source}
         metadata=dict(zip(('provider','model','effort'),public.context_builder.PIN))|{
             'policy':contextual_stress.RULE,'requested_model':'gpt-6-luna','model_provenance':'explicit-cli-model-selection',
@@ -97,12 +105,13 @@ class PhoneticIntegration(unittest.TestCase):
         answer={'decisions':[{'id':'c0000','word':'стоит','stressed':'стои́т','basis':'A person is standing.'}]}
         with patch.object(public,'analyse',return_value={'unit':'u','auto':[],'context':[],'regular':[],'stats':{}}),\
              patch.object(public,'auto_pronunciation',return_value=(selected,copy.deepcopy(AUTO))),\
-             patch.object(public.context_builder,'call',side_effect=responder(answer,metadata)):
+             patch.object(public.context_builder,'call',side_effect=AssertionError('Luna stress is disabled')):
             result,details=public.prepare_rows([unit],{},[],{'overrides':[]},self.out/'stoit')
         row=result[0];self.assertEqual(row['text'],source);self.assertEqual(row['spoken'],source)
-        self.assertIn('стои́т вышеписанный',row['synthesis_text'])
+        self.assertEqual(selected,row['synthesis_text'])
         proof=row['pronunciation']['dictionary_context_stress']
-        self.assertEqual(proof['close_mark_guard']['dropped'][0]['dropped'],'вышепи́санный')
+        self.assertEqual(proof['status'],'disabled')
+        self.assertEqual(details['stress_authority'],'silero-ruaccent-opus-high')
     def test_freeze_keeps_strict_unrecorded_letter_gate_and_recomputes_record(self):
         after,record=self.envelope()
         freeze.validate_synthesis_pronunciation(TEXT,after,record)

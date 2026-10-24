@@ -136,6 +136,17 @@ def validate_revision(before,after,request,replacement_model_sha256=None):
             if b.get(k)!=pin['checkpoint'] or b.get('model_sha256')!=pin['model']['sha256']:
                 raise ValueError('Pronunciation revision changed another sound input: '+k)
             continue
+        if k=='russian_phonetics':
+            # Rebind the shared synthesis-only rule to the exact listener
+            # instruction. A stale pre-correction acute is not sound evidence.
+            from rimsky import russian_pronunciation as phonetics
+            native,records=phonetics.apply(request['native_text'])
+            expected={'rule':phonetics.RULE,'prephonetic_source':request['native_text'],
+                'records':records,'module_sha256':file_digest(Path(phonetics.__file__))}
+            if native!=b['text'] or b.get(k)!=expected:
+                raise ValueError('Pronunciation revision changed phonetic policy or source-bound evidence')
+            phonetics.validate(request['native_text'],native,records)
+            continue
         # The listener instruction replaces automatic stress provenance for the
         # corrected token.  Its exact marked text and immutable instruction are
         # already bound above; retaining the contradicted automatic mark would

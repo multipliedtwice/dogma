@@ -3,3 +3,5 @@ Pillow==11.3.0
 numpy==2.2.6
 soundfile==0.13.1
 certifi==2026.7.22
+pymorphy3==2.0.6
+pymorphy3-dicts-ru==2.4.417150.4580142

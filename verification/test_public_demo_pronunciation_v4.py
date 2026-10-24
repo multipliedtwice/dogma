@@ -54,11 +54,14 @@ class ContextV4(unittest.TestCase):
             return {'decisions':{i['id']:{'choice':i['word'].replace('узнает','узна́ет'),'basis':'Future meaning.'} for i in request['items']}}
         with patch('rimsky.auto_pronunciation.yo_witnesses',side_effect=self.witnesses),patch.object(m,'analyse',side_effect=analyse),\
              patch.object(m.builder,'call',side_effect=responder(luna,metadata)),\
-             patch.object(m.context_builder,'call',side_effect=responder(context_luna,{**metadata,'policy':m.contextual_stress.RULE})),\
-             patch.object(m,'context_adjudicate',side_effect=AssertionError('No third Opus contextual vote')),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
+             patch.object(m.context_builder,'call',side_effect=AssertionError('Luna must not select stress')),\
+             patch.object(m,'context_adjudicate',side_effect=adjudicate),patch('rimsky.auto_pronunciation._silero',side_effect=lambda t,*a,**k:t.replace('узнает','узнаёт')):
             prepared,details=m.prepare_rows(units,{},[],HOMOGRAPH,self.out)
         self.assertIn('узна́ет',prepared[0]['synthesis_text']);self.assertNotIn('узнаёт',prepared[0]['synthesis_text'])
         self.assertIn('узнаёт',prepared[1]['synthesis_text']);self.assertEqual(units,before);self.assertEqual(details['context_conflicts'],0)
+        self.assertEqual(details['stress_authority'],'silero-ruaccent-opus-high')
+        self.assertEqual(details['dictionary_context_policy'],'disabled')
+        self.assertFalse((self.out/'dictionary-context').exists())
         for unit in prepared:self.assertEqual(unit['pronunciation']['policy'],'stress-rare-v4');self.assertFalse(unit['pronunciation']['context_stress']['audio_approval'])
     def test_explicit_source_yo_and_stress_remain_authoritative(self):
         for text in ('Он узнаёт новости.','Он узна́ет завтра.'):
@@ -102,11 +105,18 @@ class ContextV4(unittest.TestCase):
         for usage in ({},{'claude-haiku-5-5':{}},{m.PIN[1]+'-other':{}}):
             with self.assertRaises(ValueError):m.validate_provider({**metadata,'model_usage':usage})
     def test_new_freeze_entrypoint_consumes_corrected_assignment_and_rejects_conflicts(self):
-        details={'policy':'stress-rare-v4','context_policy':m.RULE,'context_conflicts':0}
+        details={'policy':'stress-rare-v4','context_policy':m.RULE,'context_conflicts':0,
+                 'dictionary_context_policy':'disabled','stress_authority':'silero-ruaccent-opus-high'}
         m.immutable(self.out/'pronunciation/result.json',{'assignment':{'pronunciation':details,'units':[{'synthesis_text':'Он узна́ет.'}]}})
         m.immutable(self.out/'pronunciation/binding.json',{'implementation_sha256':m.file_digest(m.SELF),'dependencies':m.dependencies()})
         with patch.object(m.builder,'validate_frozen_answer'),patch.object(m.context_builder,'block'),patch.object(m.legacy,'freeze') as freeze:
             m.freeze(self.out);freeze.assert_called_once_with(self.out,None)
+        for field,value in (('dictionary_context_policy','luna'),('stress_authority','gpt-6-luna')):
+            changed=m.read(self.out/'pronunciation/result.json')
+            changed['assignment']['pronunciation'][field]=value
+            with patch.object(m,'read',side_effect=lambda path: changed if Path(path).name=='result.json' else m.legacy.read(path)),patch.object(m.legacy,'freeze') as freeze:
+                with self.assertRaises(ValueError):m.freeze(self.out)
+                freeze.assert_not_called()
         result=m.read(self.out/'pronunciation/result.json');result['assignment']['pronunciation']['context_conflicts']=1
         (self.out/'pronunciation/result.json').write_text(__import__('json').dumps(result),encoding='utf8')
         with patch.object(m.legacy,'freeze') as freeze:

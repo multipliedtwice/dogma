@@ -10,6 +10,8 @@ Keep these paths. They are current product state, protected human work, or the
 minimum reproducible production-model set:
 
 - all of `manual-labeling/`;
+- the app-local shared `pronunciation/user-corrections.sqlite3` profile and its
+  SQLite sidecars (including any explicit `RIMSKY_CORRECTION_PROFILE` location);
 - `training-work/character-rb2-full/`, `character-rb3-full/`, active book boards
   and their review drafts;
 - `training-work/book1-listening-app/` and

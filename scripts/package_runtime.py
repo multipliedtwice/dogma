@@ -27,7 +27,7 @@ def app_version(root:Path=ROOT)->str:
     return match.group(1)
 
 def build(kind:str,output:Path):
-    modes={'core':('server.py','rimsky-runtime',('lxml','PIL','numpy','soundfile','certifi')),'infer':('worker.py','rimsky-infer',('qwen_tts','qwen_asr','llama_cpp','torch','transformers','librosa','soundfile','numpy')),'align':('align_worker.py','rimsky-align',('qwen_asr','torch','transformers','soundfile','numpy'))}
+    modes={'core':('server.py','rimsky-runtime',('lxml','PIL','numpy','soundfile','certifi','pymorphy3','pymorphy3_dicts_ru')),'infer':('worker.py','rimsky-infer',('qwen_tts','qwen_asr','llama_cpp','torch','transformers','librosa','soundfile','numpy')),'align':('align_worker.py','rimsky-align',('qwen_asr','torch','transformers','soundfile','numpy'))}
     script,name,modules=modes[kind]
     missing=[m for m in ('PyInstaller',*modules) if importlib.util.find_spec(m) is None]
     if missing:

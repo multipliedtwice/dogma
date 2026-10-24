@@ -18,7 +18,7 @@ sys.path[:0] = [str(ROOT / 'runtime'), str(ROOT / 'scripts')]
 from rimsky.spoken_pronunciation import ACUTE, unmarked, validate_marks, yo_fold, yo_bound_differences
 from rimsky.respelling import validate_respelled_stress
 from rimsky.production_higgs_model import resolve_production_higgs_model
-from rimsky.util import AppError, file_digest, now, write_json
+from rimsky.util import AppError, digest, file_digest, now, write_json
 
 
 WORD = re.compile(r'[А-Яа-яЁё́]+(?:[-‐‑][А-Яа-яЁё́]+)*')
@@ -273,8 +273,229 @@ def replacement_environment():
     return {**os.environ, 'RIMSKY_HIGGS_MODEL': str(pinned.path)}
 
 
+def debug_source_state(folder,ready):
+    """Physical receipt coverage, publication completion and verified owners."""
+    import psutil
+    expected=ready.get('unit_count')
+    if type(expected) is not int or expected<1:raise AppError('Deferred source has no valid frozen unit count.')
+    receipts=list((folder/'units').glob('*.json'))
+    rows=[read(path) for path in receipts]
+    rendered=sum(row.get('status')=='rendered' for row in rows)
+    failures=[row.get('unit') for row in rows if row.get('status')!='rendered']
+    progress=read(folder/'progress.json') if (folder/'progress.json').exists() else {}
+    terminal=read(folder/'listener-repair-terminal.json') if (folder/'listener-repair-terminal.json').exists() else {}
+    complete=len(rows)==expected and rendered==expected and progress.get('status')=='complete'
+    repaired=read(folder/'repair.json') if (folder/'repair.json').exists() else {}
+    base=Path(repaired.get('base',folder)).resolve()
+    owners=[]
+    allowed={str((ROOT/'scripts'/name).resolve()).casefold():flag for name,flag in (
+        ('repair_debug_listener_stress.py','--generation'),('debug_higgs_one_shot.py','--output'),
+        ('supervise_debug_higgs_one_shot.py','--output'))}
+    for process in psutil.process_iter(['pid','create_time','cmdline']):
+        command=process.info.get('cmdline') or []
+        try:
+            scripts=[(argument,allowed.get(str(Path(argument).resolve()).casefold())) for argument in command if argument.endswith('.py')]
+            matched=False
+            for script,flag in scripts:
+                if flag and flag in command:
+                    target=Path(command[command.index(flag)+1]).resolve()
+                    expected_target=base if Path(script).name=='repair_debug_listener_stress.py' else folder.resolve()
+                    matched=target==expected_target
+                if matched:break
+            if matched:owners.append({'pid':process.pid,'create_time':process.create_time(),'command':command})
+        except (OSError,IndexError,psutil.Error):continue
+    paths=[*receipts,*(folder/'native').glob('*/native.log'),*(folder/'native').glob('*/physical-result.json')]
+    activity=max((path.stat().st_mtime for path in paths if path.exists()),default=0)
+    return {'complete':complete,'expected':expected,'rendered':rendered,'technical_failures':failures,
+        'publication_status':progress.get('status'),'terminal_status':terminal.get('status'),
+        'owners':owners,'activity_unix':activity}
+
+
+def wait_for_debug_source(folder,ready,item_path,*,poll_seconds=10,owner_grace_seconds=300,stall_seconds=1800):
+    """Wait for an owned render, then repair automatically without a new report.
+
+    There is no total audiobook duration cap. Missing ownership and absence of
+    real output movement have separate bounded failure deadlines.
+    """
+    began=time.monotonic();last_activity=None;last_movement=began;owner_missing=None
+    while True:
+        state=debug_source_state(folder,ready)
+        if state['complete']:return
+        item=read(item_path)
+        if state['terminal_status']=='held' or state['technical_failures'] and not state['owners']:
+            raise AppError('The source render failed before the queued listener correction could run.','listener_source_failed')
+        marker=(state['rendered'],state['activity_unix'])
+        if marker!=last_activity:last_activity=marker;last_movement=time.monotonic()
+        if state['owners']:owner_missing=None
+        elif owner_missing is None:owner_missing=time.monotonic()
+        if owner_missing is not None and time.monotonic()-owner_missing>=owner_grace_seconds:
+            raise AppError('The source render has no live verified owner; its saved listener correction is held.','listener_source_owner_missing')
+        if time.monotonic()-last_movement>=stall_seconds:
+            raise AppError('The source render stopped producing audio or native evidence; its listener correction is held.','listener_source_stalled')
+        item.update(status='queued',phase='awaiting_render_completion',updated=now(),
+            reason='Waiting for the current frozen render to finish; this correction will then run automatically.',
+            source_progress=state,wait_elapsed_seconds=round(time.monotonic()-began,2),error='')
+        write_json(item_path,item)
+        time.sleep(poll_seconds)
+
+
+def rebind_deferred_report(folder,data_dir,generation_id,item_path):
+    """Keep original evidence immutable while binding the now-published take."""
+    from rimsky.listener_stress import shared_profile,snapshot,notes
+    from rimsky.store import Store
+    item=read(item_path);origin=item.get('origin_report')
+    if not origin or item.get('origin_report_sha256')!=digest(origin):
+        raise AppError('Deferred correction has no valid immutable originating report.')
+    store=Store(data_dir,correction_profile=shared_profile())
+    try:
+        generation=store.generation(generation_id);book=store.book(generation['book_id'])
+        snapshot(store,book)
+        canonical=next((row['report'] for row in notes(store,book) if row['report']['id']==origin['id']),None)
+        if canonical is None or any(canonical.get(key)!=value for key,value in origin.items()):
+            raise AppError('Deferred correction does not match its saved human report.')
+        report=item['report'];source=report['source_id'];offset=report.get('text_offset')
+        blocks={b['id']:b['text'] for chapter in book['chapters'] for b in chapter['blocks']}
+        original_block=blocks.get(origin['source_id'])
+        if original_block!=origin['passage_text'] or type(origin.get('text_offset')) is not int or (
+                original_block[origin['text_offset']:origin['text_offset']+len(origin['selected_text'])]!=origin['selected_text']):
+            raise AppError('Deferred report source passage changed before publication.')
+        targets=[s for s in generation['segments'] if s['source_id']==source and type(offset) is int
+            and s['start']<=offset and offset+len(report['selected_text'])<=s['end']
+            and s.get('audio_hash') and s['status']=='ready']
+        if len(targets)!=1:raise AppError('Completed source has no exact published segment for the deferred correction.')
+        segment=targets[0]
+        item['report']={**report,'generation_id':generation_id,'segment_id':segment['id'],
+            'chapter_id':segment['chapter_id'],'audio_hash':segment['audio_hash'],
+            'spoken_text':segment['spoken'],'passage_text':blocks[source]}
+        item.update(phase='ready_for_correction',rebound_at=now(),
+            rebound_source_audio_hash=segment['audio_hash'],origin_verified_sha256=digest(origin),error='')
+        write_json(item_path,item)
+    finally:store.close()
+
+
+def wait_for_development_release(folder,item_path,*,poll_seconds=10):
+    """Honor an explicit development release handoff without dispatching old code.
+
+    Ordinary user correction jobs have no barrier. Development can attach one
+    while an immutable render finishes and its reviewed replacement is released.
+    """
+    while True:
+        item=read(item_path)
+        global_path=folder/'listener-stress-queue/development-dispatch-barrier.json'
+        global_barrier=read(global_path) if global_path.exists() else {}
+        if global_barrier.get('state')=='released':return
+        barrier=item.get('development_dispatch_barrier') or (global_barrier if global_barrier.get('state')=='awaiting_reviewed_release' else None)
+        if not barrier:return
+        release=folder/'listener-stress-queue/dispatch-release.json'
+        if release.exists():
+            decision=read(release)
+            if (decision.get('generation')!=folder.name
+                or not ((item.get('origin_report') or {}).get('id') in decision.get('report_ids',[])
+                    or decision.get('allow_future_canonical_reports') is True
+                    and bool(item.get('origin_report'))
+                    and item.get('origin_report_sha256')==digest(item['origin_report'])
+                    and item.get('origin_verified_sha256')==item.get('origin_report_sha256'))
+                or decision.get('helper_sha256')!=file_digest(ROOT/'scripts/repair_debug_listener_stress.py')
+                or decision.get('listener_module_sha256')!=file_digest(ROOT/'runtime/rimsky/listener_stress.py')):
+                raise AppError('The development correction release does not bind this saved report and reviewed implementation.')
+            item.update(dispatch_release_sha256=file_digest(release),phase='ready_for_correction',updated=now())
+            write_json(item_path,item)
+            return
+        item.update(status='queued',phase='awaiting_preparation_release',updated=now(),
+            reason='Saved correction is waiting for the reviewed preprocessing release; it will run automatically afterwards.',error='')
+        write_json(item_path,item)
+        time.sleep(poll_seconds)
+
+
+@contextlib.contextmanager
+def book_correction_lock(data_dir,item_path,poll_seconds=10):
+    """Serialize derived repairs for one book even when old tabs use old queues."""
+    item=read(item_path);book_id=(item.get('report') or {}).get('book_id')
+    if not book_id:raise AppError('Listener correction has no source book identity.')
+    lock_path=data_dir/'listener-stress-locks'/(digest(book_id)+'.lock')
+    handle=None
+    try:
+        while handle is None:
+            item=read(item_path)
+            if item.get('status') in ('applied','held'):
+                yield False
+                return
+            handle=_locked(lock_path,attempts=1)
+            if handle is None:
+                item.update(status='queued',phase='awaiting_book_correction',updated=now(),
+                    reason='Another saved correction for this book is being published; this request will follow automatically.')
+                write_json(item_path,item)
+                time.sleep(poll_seconds)
+        yield True
+    finally:_unlock(handle)
+
+
+def latest_delivered_debug_base(folder,data_dir,generation_id):
+    """Follow only successful delivery receipts; never choose a display name."""
+    from rimsky.store import Store
+    from rimsky.listener_stress_retake import _external_folder
+    store=Store(data_dir)
+    try:
+        book_id=store.generation(generation_id)['book_id'];visited={generation_id}
+        while True:
+            candidates=[]
+            for path in (folder/'listener-stress-queue').glob('*.json'):
+                row=read(path);result=row.get('result') or {}
+                identifier=row.get('published_generation_id') or result.get('published_generation_id')
+                if row.get('status')!='applied' or not identifier or identifier in visited:continue
+                generation=store.generation(identifier)
+                if generation['book_id']!=book_id:raise AppError('Listener delivery points to another source book.')
+                target=_external_folder(store,generation)
+                if target is None:raise AppError('Listener delivery has no bound external generation.')
+                ready=target/'ready.json'
+                if not ready.is_file() or read(target/'progress.json').get('status')!='complete':
+                    raise AppError('Listener delivery has not finished publishing its source.')
+                terminal=target/'listener-repair-terminal.json'
+                if terminal.exists() and read(terminal).get('status')!='applied':
+                    raise AppError('Listener delivery did not complete successfully.')
+                candidates.append((row.get('completed',''),row.get('updated',''),identifier,target))
+            if not candidates:return folder,generation_id
+            _,_,generation_id,folder=max(candidates,key=lambda value:value[:3]);visited.add(generation_id)
+    finally:store.close()
+
+
 def process(folder, data_dir, generation_id, item_path):
     item = read(item_path)
+    # A coalesced correction can publish several requests while this owner is
+    # working through an earlier scan. Never dispatch an already covered item.
+    if item.get('status') in ('applied','held'):return
+    ready=folder/'one-shot-ready.json'
+    if not ready.exists():ready=folder/'ready.json'
+    debug_ready=read(ready) if ready.exists() else {}
+    if ready.exists() and debug_ready.get('plans') and debug_ready.get('native_manifest') and (folder/'units').is_dir():
+        if (not debug_source_state(folder,debug_ready)['complete'] or item.get('phase')=='awaiting_render_completion'
+            or item.get('development_dispatch_barrier') or (folder/'listener-stress-queue/development-dispatch-barrier.json').exists()):
+            wait_for_debug_source(folder,debug_ready,item_path)
+            rebind_deferred_report(folder,data_dir,generation_id,item_path)
+            item=read(item_path)
+        wait_for_development_release(folder,item_path)
+        with book_correction_lock(data_dir,item_path) as acquired:
+            if not acquired:return
+            # Re-evaluate after the book lock: a sibling may have delivered a
+            # newer base while this request was waiting behind its render.
+            target,target_id=latest_delivered_debug_base(folder,data_dir,generation_id)
+            if target_id!=generation_id:rebind_deferred_report(target,data_dir,target_id,item_path)
+            item=read(item_path)
+            item.update(status='running',updated=now(),attempts=int(item.get('attempts',0))+1,
+                dispatch_source_generation_id=target_id,dispatch_source_folder=str(target))
+            write_json(item_path,item)
+            result_path=folder/'listener-stress-queue/results'/f"{item['id']}.json"
+            result_path.parent.mkdir(parents=True,exist_ok=True)
+            subprocess.run([sys.executable,'-X','utf8','-u',str(ROOT/'scripts/repair_debug_listener_stress.py'),
+                '--generation',str(target),'--data-dir',str(data_dir),'--generation-id',target_id,
+                '--queue-item',str(item_path),'--result',str(result_path)],cwd=ROOT,check=True)
+            result=read(result_path)
+            if result.get('status')!='applied':raise AppError('The one-shot listener correction was not published.')
+            item=read(item_path)
+            item.update(status='applied',updated=now(),completed=now(),error='',
+                result=result,result_sha256=file_digest(result_path),human_audio_approval=False)
+            write_json(item_path,item)
+        return
     if reuse_applied(folder, item_path, item):
         return
     item['seed_offset'] = next_seed_offset(folder, item_path, item)
@@ -324,6 +545,12 @@ def main():
     if lock is None:
         return
     try:
+        import psutil
+        self_process=psutil.Process(os.getpid())
+        write_json(folder/'listener-stress-queue/worker-state.json',{'pid':os.getpid(),
+            'create_time':self_process.create_time(),'command':self_process.cmdline(),'started':now(),
+            'dispatcher_sha256':file_digest(Path(__file__)),
+            'listener_module_sha256':file_digest(ROOT/'runtime/rimsky/listener_stress.py')})
         queue = folder / 'listener-stress-queue'
         # Re-scan after every batch. A correction can arrive while a take is
         # rendering; the existing owner must consume it even if the newly
@@ -353,6 +580,8 @@ def main():
                     item = read(path)
                     item.update(status='held', updated=now(), error=f'{type(error).__name__}: {error}',
                                 traceback=traceback.format_exc(limit=8), human_audio_approval=False)
+                    if getattr(error,'code','').startswith('listener_source_'):
+                        item.update(phase='awaiting_source_repair',deferred_hold_code=error.code)
                     write_json(path, item)
     finally:
         _unlock(lock)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import argparse,copy,json,math,os,re,shutil,subprocess,sys,time
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=next(p for p in Path(__file__).resolve().parents if (p/'runtime/rimsky/store.py').is_file())
 sys.path[:0]=[str(ROOT/'runtime'),str(ROOT/'scripts')]
 import render_public_demo_one_shot as basic
 from rimsky.util import file_digest,digest
@@ -13,6 +13,70 @@ UNCHECKED={'post_processing':'off','recognition_status':'not_checked','machine_v
 SELF=Path(__file__).resolve()
 MEDIA=ROOT/'training-work/character-rb2/full/clips/elirm-iv-mvp'
 PREFIX='/character-rb2/full/clips/elirm-iv-mvp/'
+DEFAULT_LISTENER_DATA=ROOT/'training-work/elirm-iv-higgs-mvp/production-listener-library'
+
+
+def listener_snapshot(book,data_dir=None,cast=None):
+    """Use the same user correction profile as the application, across generations."""
+    from rimsky.store import Store
+    from rimsky.listener_stress import snapshot,shared_profile
+    store=Store(Path(data_dir or DEFAULT_LISTENER_DATA),correction_profile=shared_profile())
+    try:
+        exists=store.db.execute('SELECT id FROM books WHERE id=?',(book['id'],)).fetchone()
+        return snapshot(store,store.book(book['id']) if exists else book,cast=cast)
+    finally:store.close()
+
+
+def listener_assignment(assignment,blocks,frozen):
+    sources={}
+    for unit in assignment['units']:
+        source=blocks.get(unit['source_id'])
+        if source is None or source[unit['start']:unit['end']]!=unit['text']:
+            raise ValueError('Listener preparation requires the exact source slice: '+unit['id'])
+        sources[unit['source_id']]=source
+    return {**assignment,'listener_stress_snapshot':frozen,'listener_stress_sources':sources}
+
+
+def listener_notes(book,data_dir=None):
+    from rimsky.store import Store
+    from rimsky.listener_stress import notes,shared_profile
+    store=Store(Path(data_dir or DEFAULT_LISTENER_DATA),correction_profile=shared_profile())
+    try:
+        exists=store.db.execute('SELECT id FROM books WHERE id=?',(book['id'],)).fetchone()
+        return notes(store,store.book(book['id']) if exists else book)
+    finally:store.close()
+
+
+def queued_listener_refresh(output,book,unit,evidence,data_dir=None):
+    """Only a durable canonical intent permits finishing stale frozen input."""
+    expected_gid=digest((book['id']+':'+output.name+':higgs_audio_tts_q8_external_preview').encode())[:24]
+    candidates=[]
+    for path in (output/'listener-stress-queue').glob('*.json'):
+        item=read(path)
+        if (item.get('status')=='queued' and item.get('phase')=='awaiting_render_completion'
+            and item.get('generation_id')==expected_gid and item.get('origin_report')
+            and (not item.get('pending_segment_ids') or unit['id'] in item['pending_segment_ids'])):
+            candidates.append(item)
+    if not candidates:return False
+    canonical={n['report']['id']:n['report'] for n in listener_notes(book,data_dir)};valid=set()
+    fields=('id','source_id','text_offset','selected_text','intended_stress','audio_hash','generation_id','kind','created')
+    for item in candidates:
+        origin=item['origin_report'];expected=canonical.get(origin.get('id'));source=origin.get('passage_text')
+        offset=origin.get('text_offset');word=origin.get('selected_text')
+        if (digest(origin)!=item.get('origin_report_sha256') or expected is None
+            or any(origin.get(k)!=expected.get(k) for k in fields) or expected.get('passage_text')!=source
+            or not isinstance(source,str) or type(offset)is not int or not isinstance(word,str)
+            or source[offset:offset+len(word)]!=word):continue
+        valid.add(origin['id'])
+    if not valid:return False
+    for edit in evidence.get('edits',[]):
+        witnesses=set()
+        for row in evidence.get('applications',[]):
+            if (row['start'],row['end'])!=(edit['start'],edit['end']):continue
+            if row.get('report_id'):witnesses.add(row['report_id'])
+            witnesses.update(e['report_id'] for e in row.get('family_evidence',[]) if e.get('report_id'))
+        if not witnesses.intersection(valid):return False
+    return bool(evidence.get('edits'))
 
 
 def canonical_assignments(generation,chapter):
@@ -50,7 +114,7 @@ def prepare_unit(original,number_policy,fixes):
                 'retained_listener_plan':bool(row.get('spoken_text_plan')),'human_approval':False}
 
 
-def prepare(source,output,chapters):
+def prepare(source,output,chapters,data_dir=None):
     if output.parent!=source.parent or output==source:raise ValueError('Fresh private sibling generation required')
     if (output/'ready.json').exists():
         ready=read(output/'ready.json')
@@ -87,10 +151,7 @@ def prepare(source,output,chapters):
         command=[sys.executable,'-X','utf8','-u',str(ROOT/'scripts'/script),'--generations',output.name,'--chapters',*chapters,'--output',str(output/'preparation'/folder)]
         with (output/(folder+'-preparation.log')).open('ab') as log:
             subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=5400,env={**os.environ,'PYTHONUTF8':'1','PYTHONIOENCODING':'utf-8','CUDA_VISIBLE_DEVICES':''},**basic.assets.HIDDEN)
-    import build_contextual_stress as context_builder
-    inputs=context_builder.private_inputs(output,chapters,output/'preparation/homograph/homograph.answer.json',output/'preparation/yo/yo.answer.json')
-    context_builder.prepare(inputs,output/'preparation/context')
-    return freeze(source,output,chapters)
+    return freeze(source,output,chapters,data_dir)
 
 
 def validate_adjudication(answer,kind='homograph'):
@@ -118,7 +179,7 @@ def validate_adjudication(answer,kind='homograph'):
             raise ValueError('Missing actual pronunciation CLI/model provenance')
 
 
-def freeze(source,output,chapters):
+def freeze(source,output,chapters,data_dir=None,contextual_policy='restored-silero-ruaccent-opus-v1'):
     import render_higgs_book_trial as trial
     import build_contextual_stress as context_builder
     from rimsky.yo_restoration import yo_block
@@ -126,13 +187,31 @@ def freeze(source,output,chapters):
     hs=read(hp);validate_adjudication(hs);validate_adjudication(read(yp),'yo')
     import build_yo_restoration as yo_builder
     yo_builder.validate_frozen_answer(yp)
-    cp=output/'preparation/context/answer.json';context_block=context_builder.block(cp)
+    cp=output/'preparation/context/answer.json'
+    if contextual_policy=='experimental-luna-context-v4':context_block=context_builder.block(cp)
+    elif contextual_policy=='restored-silero-ruaccent-opus-v1':context_block=None
+    else:raise ValueError('Unknown private contextual stress policy')
+    policy_path=output/'preparation/context-policy.json'
+    write(policy_path,{'policy':contextual_policy,'automatic_stress':'Silero + RUAccent with frozen Opus homograph adjudication',
+        'yo_policy':'existing independently checked Luna decisions retained','human_overrides':'final authoritative layer',
+        'luna_context_enabled':context_block is not None},immutable=True)
     yo=yo_block(yp);records=[];units=[]
+    book=read(output.parent/'source/book.json')
+    blocks={b['id']:b.get('text','') for c in book['chapters'] for b in c['blocks']}
+    listener_path=output/'listener-stress-snapshot.json'
+    if listener_path.exists():listener=read(listener_path)
+    else:
+        listener=listener_snapshot(book,data_dir)
+        write(listener_path,listener,immutable=True)
     for cid in chapters:
         for path in canonical_assignments(output,cid):
             assignment=read(path);spec=copy.deepcopy(assignment['pronunciation']);spec.update(policy='stress-rare-v4',
-                homograph_stress={'rule':hs['rule'],'answer_sha256':file_digest(hp),'overrides':hs['overrides']},yo_restoration=yo,contextual_stress=context_block)
-            frozen_path=path.with_name('one-shot-assignment.json');write(frozen_path,{**assignment,'pronunciation':spec},immutable=True)
+                homograph_stress={'rule':hs['rule'],'answer_sha256':file_digest(hp),'overrides':hs['overrides']},yo_restoration=yo,
+                contextual_stress_policy=contextual_policy)
+            spec.pop('contextual_stress',None)
+            if context_block:spec['contextual_stress']=context_block
+            frozen_path=path.with_name('one-shot-assignment.json')
+            write(frozen_path,listener_assignment({**assignment,'pronunciation':spec},blocks,listener),immutable=True)
             context=trial.prepare(frozen_path,path.parent/'one-shot-plan',[cid]);plan=read(context['path'])
             records.append({'assignment':frozen_path.relative_to(output).as_posix(),'sha256':file_digest(frozen_path),
                             'plan':(path.parent/'one-shot-plan/render-plan.json').relative_to(output).as_posix(),
@@ -156,7 +235,12 @@ def freeze(source,output,chapters):
     ready={'schema':1,'policy':POLICY,'source':str(source),'chapters':chapters,'unit_count':len(units),
            'source_sha256':file_digest(source.parent/'source/book.json'),'preparation_sha256':file_digest(output/'prepared-inputs.json'),
            'homograph_answer_sha256':file_digest(hp),'yo_answer_sha256':file_digest(yp),'plans':records,'native_manifest':native_manifest,
-           'context_answer_sha256':file_digest(cp),'context_builder_sha256':file_digest(Path(context_builder.__file__)),
+           'context_answer_sha256':file_digest(cp) if context_block else None,
+           'contextual_stress_policy':contextual_policy,'context_policy_sha256':file_digest(policy_path),
+           'context_builder_sha256':file_digest(Path(context_builder.__file__)),
+           'listener_stress_snapshot_sha256':file_digest(listener_path),
+           'listener_data_dir':str(Path(data_dir or DEFAULT_LISTENER_DATA).resolve()),
+           'listener_stress_module_sha256':file_digest(ROOT/'runtime/rimsky/listener_stress.py'),
            'implementation_sha256':file_digest(SELF),'generic_primitives_sha256':file_digest(Path(basic.__file__)),
            'trial_preparation_sha256':file_digest(Path(trial.__file__)),'music_volume_scale':.9,'music_files':music_files,**UNCHECKED}
     ready['manifest_sha256']=file_digest(output/'manifest.json')
@@ -175,14 +259,22 @@ def planned(output,ready):
     basic.checked(output/'manifest.json',ready['manifest_sha256'])
     basic.checked(Path(trial.__file__),ready['trial_preparation_sha256'])
     basic.checked(output/'prepared-inputs.json',ready['preparation_sha256'])
+    if ready.get('listener_stress_snapshot_sha256'):
+        basic.checked(output/'listener-stress-snapshot.json',ready['listener_stress_snapshot_sha256'])
+        basic.checked(ROOT/'runtime/rimsky/listener_stress.py',ready['listener_stress_module_sha256'])
     basic.checked(output/'preparation/homograph/homograph.answer.json',ready['homograph_answer_sha256'])
     basic.checked(output/'preparation/yo/yo.answer.json',ready['yo_answer_sha256'])
     import build_yo_restoration as yo_builder
     yo_builder.validate_frozen_answer(output/'preparation/yo/yo.answer.json')
     import build_contextual_stress as context_builder
     basic.checked(Path(context_builder.__file__),ready['context_builder_sha256'])
-    basic.checked(output/'preparation/context/answer.json',ready['context_answer_sha256'])
-    context_builder.block(output/'preparation/context/answer.json')
+    if ready.get('context_answer_sha256'):
+        basic.checked(output/'preparation/context/answer.json',ready['context_answer_sha256'])
+        context_builder.block(output/'preparation/context/answer.json')
+    else:
+        policy=read(basic.checked(output/'preparation/context-policy.json',ready['context_policy_sha256']))
+        if policy.get('policy')!='restored-silero-ruaccent-opus-v1' or policy.get('luna_context_enabled')is not False:
+            raise ValueError('Unpinned restored private stress policy')
     basic.checked(output.parent/'source/book.json',ready['source_sha256'])
     units=[]
     for record in ready['plans']:
@@ -249,6 +341,25 @@ def collect(output,session):
 
 def native_batch(output,ready,units,timeout):
     import render_higgs_book_trial as trial
+    if ready.get('listener_stress_snapshot_sha256'):
+        # A newer human note never licenses silently mutating frozen plans.
+        # Hold pending affected units for a fresh derived preparation instead.
+        from rimsky import listener_stress,russian_pronunciation
+        book=read(output.parent/'source/book.json');fresh=listener_snapshot(book,ready.get('listener_data_dir'))
+        blocks={b['id']:b.get('text','') for c in book['chapters'] for b in c['blocks']}
+        for unit in units:
+            plan=unit['synthesis']
+            if plan['backend']=='nonverbal_asset':continue
+            before=(plan.get('russian_phonetics') or {}).get('prephonetic_source',plan['text'])
+            corrected,evidence=listener_stress.apply(before,fresh,source_id=unit['source_id'],
+                source_text=blocks[unit['source_id']],source_start=unit['start'],source_end=unit['end'])
+            native,_=russian_pronunciation.apply(corrected)
+            if native!=plan['text']:
+                if queued_listener_refresh(output,book,unit,evidence,ready.get('listener_data_dir')):
+                    continue  # Its queued owner will publish the derived correction.
+                write(output/'listener-preparation-refresh-required.json',{'status':'held','unit':unit['id'],
+                    'snapshot_sha256':fresh['sha256'],'reason':'New human stress correction requires a derived frozen preparation',**UNCHECKED})
+                raise ValueError('New human correction requires preparation refresh: '+unit['id'])
     basic.assets.wait_for_audio_resources();pin,runner=basic.model_guard(ready['native_manifest'])
     requests=[]
     for unit in units:
@@ -408,7 +519,7 @@ def main():
     args=parser.parse_args();output=args.output.resolve()
     if not 1<=args.batch_size<=64 or not 60<=args.timeout<=7200:parser.error('Invalid native batch/timeout')
     with basic.exclusive(output):
-        if args.stage in ('prepare','all'):prepare(args.source_generation.resolve(),output,args.chapters)
+        if args.stage in ('prepare','all'):prepare(args.source_generation.resolve(),output,args.chapters,args.data_dir)
         if args.stage in ('render','all'):return render(output,args.data_dir.resolve() if args.data_dir else None,args.batch_size,args.timeout)
     return 0
 

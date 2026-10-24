@@ -129,6 +129,10 @@ def synthesis_text(text, pronunciation=None):
     """
     text,plan=phrase_stress(text)
     if not pronunciation or not pronunciation.get('policy'):
+        if pronunciation and pronunciation.get('listener_stress'):
+            from .listener_stress import apply
+            text,listener=apply(text,pronunciation['listener_stress'],**pronunciation.get('listener_source',{}))
+            plan={**plan,'listener_stress':listener}
         return text,plan
     from .auto_pronunciation import POLICY
     if pronunciation['policy']!=POLICY:
@@ -142,6 +146,12 @@ def synthesis_text(text, pronunciation=None):
                                     pronunciation.get('common',[]),pronunciation.get('terms'),False,
                                     pronunciation.get('respelling_sources'))
     final=_automatic(text,pronunciation)
+    if pronunciation.get('listener_stress'):
+        from .listener_stress import apply
+        # Exact source binding travels with each part. Human occurrences and
+        # families both win after phrase rules and every automatic guard.
+        final,listener=apply(final,pronunciation['listener_stress'],**pronunciation.get('listener_source',{}))
+        plan={**plan,'listener_stress':listener}
     if respelled:
         from .respelling import disclosure
         plan={**plan,'listener_respelling':disclosure(respelled)}

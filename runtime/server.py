@@ -149,9 +149,11 @@ IMMUTABLE_ASSETS=frozenset({'audio','music','playback','playback_hls','playback_
 
 
 class Application:
-    def __init__(self,data_dir,binaries,*,auto_resume=True):
+    def __init__(self,data_dir,binaries,*,auto_resume=True,correction_profile=None):
         resource=Path(os.environ.get('RIMSKY_RESOURCE_DIR',str(Path(__file__).parents[1]/'resources')))
-        self.store=Store(data_dir, recover_interrupted=True, resources=resource)
+        from rimsky.listener_stress import shared_profile
+        self.store=Store(data_dir, recover_interrupted=True, resources=resource,
+                         correction_profile=correction_profile or shared_profile())
         self.binaries=binaries
         record=self.store.root/'pack-verification.json'
         self.pack_verification_cache=read_verification_record(record)
@@ -180,6 +182,23 @@ class Application:
         if auto_resume:
             self.auto_resume=threading.Thread(target=self.resume_interrupted,daemon=True,name='rimsky-preparation-resume')
             self.auto_resume.start()
+        elif self.store.rows("SELECT id FROM listener_correction_jobs WHERE status IN ('queued','running') LIMIT 1"):
+            # --no-auto-resume concerns unsolicited preparation; a persisted
+            # explicit listener correction remains an owned repair request.
+            self.auto_resume=threading.Thread(target=self.jobs.resume_listener_corrections,daemon=True,name='rimsky-listener-correction-resume')
+            self.auto_resume.start()
+        self.listener_queue_monitor=threading.Thread(target=self.monitor_listener_queues,daemon=True,name='rimsky-explicit-listener-queue-owner')
+        self.listener_queue_monitor.start()
+
+    def monitor_listener_queues(self):
+        from rimsky.listener_stress_retake import resume_external_listener_queues
+        while not self.closing.is_set():
+            try:resume_external_listener_queues(self.store)
+            except Exception:
+                # Individual queue requests retain status/evidence on disk;
+                # retry owner adoption on the next bounded monitor cycle.
+                pass
+            if self.closing.wait(15):break
 
     def resume_interrupted(self):
         if self.relocation:
@@ -224,10 +243,30 @@ class Application:
         if op=='generation':
             return store.generation(data['id'])
         if op=='stress_reports':
-            return store.stress_reports(data['book_id'])
+            from rimsky.listener_stress import snapshot,notes,_book_key
+            from rimsky.listener_stress_retake import queue_status_index,report_queue_status
+            book=store.book(data['book_id'])
+            local=store.stress_reports(book['id'])
+            # Reconcile old local receipts before reading the common profile.
+            # Other volumes may share name rules, but their raw notes do not
+            # belong in this source book's feedback history.
+            shared=notes(store,book)
+            known={row['report']['id'] for row in shared}
+            if any(report['id'] not in known for report in local):
+                snapshot(store,book)
+                shared=notes(store,book)
+            merged={row['report']['id']:dict(row['report']) for row in shared if row['book_key']==_book_key(book)}
+            merged.update({report['id']:report for report in local})
+            reports=sorted(merged.values(),key=lambda report:report['created'],reverse=True)
+            queue_states=queue_status_index(store,book['id'])
+            local_generations={row['id'] for row in store.rows('SELECT id FROM generations WHERE book_id=?',(book['id'],))}
+            for report in reports:
+                status=report_queue_status(store,report,queue_states) if report['generation_id'] in local_generations else None
+                if status is not None:report['retake_queue']=status
+            return reports
         if op=='report_stress':
             report=store.report_stress(data['generation_id'],data['segment_id'],data['source_id'],data['selected_text'],data.get('text_offset'),data.get('audio_offset'),data.get('kind','stress'),data.get('comment',''),data.get('intended_stress'))
-            if report.get('kind')=='stress':
+            if report.get('kind')=='stress' and 'character_state' not in report:
                 try:
                     from rimsky.series_characters import record_listener_stress
                     report['character_state']=record_listener_stress(store,report)
@@ -238,6 +277,8 @@ class Application:
             try:
                 from rimsky.listener_stress_retake import enqueue_listener_stress_retake
                 queued=enqueue_listener_stress_retake(store,report)
+                if queued is None and report.get('kind')=='stress':
+                    queued=self.jobs.listener_stress(report)
                 if queued is not None:report['retake_queue']=queued
             except Exception as error:
                 # The human report is durable even when generation cannot start.
@@ -481,6 +522,7 @@ class Application:
 
     def close(self):
         self.closing.set()
+        if self.listener_queue_monitor is not threading.current_thread():self.listener_queue_monitor.join(timeout=8)
         self.playback_streams.shutdown()
         self.playback_hls.shutdown()
         self.jobs.shutdown()

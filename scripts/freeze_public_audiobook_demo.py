@@ -410,6 +410,11 @@ def freeze(folder, music_path=None):
         import build_yo_restoration as yo_builder,build_contextual_stress as context_builder
         yo_builder.validate_frozen_answer(folder/'pronunciation/yo-v4/yo.answer.json')
         context_builder.block(folder/'pronunciation/yo-v4/dictionary-context/answer.json')
+    elif assignment.get('pronunciation',{}).get('context_policy')=='public-demo-luna-yo-opus-stress-v4':
+        import build_yo_restoration as yo_builder
+        yo_builder.validate_frozen_answer(folder/'pronunciation/yo-v4/yo.answer.json')
+        if assignment['pronunciation'].get('dictionary_context_policy')!='disabled':
+            raise ValueError('Restored stress preparation cannot enable Luna contextual stress')
     for original, unit in zip(assigned['units'], assignment['units'], strict=True):
         if original['id'] != unit['id'] or original['text'] != unit['text']:
             raise ValueError('Pronunciation reordered or changed source units')

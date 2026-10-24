@@ -187,9 +187,12 @@ def render_key(pack, config, text, voice, delivery, language, take, controls=Non
     if is_higgs(pack):
         from .higgs_backend import synthesis_plan
         from .spoken_pronunciation import synthesis_text
-        text,_ = synthesis_text(text, config.get('_pronunciation'))
+        text,pronunciation = synthesis_text(text, config.get('_pronunciation'))
+        listener=pronunciation.get('listener_stress') or {}
+        binding={'policy':listener.get('policy'),'applications':listener.get('applications',[])}
         return digest({'schema': 5, 'language': language,
-                       'plan': synthesis_plan(pack, voice, text, delivery, controls, config.get('resolved_speech'), take)})
+                       'plan': synthesis_plan(pack, voice, text, delivery, controls, config.get('resolved_speech'), take),
+                       **({'listener_stress':binding} if binding['applications'] else {})})
     return digest({'schema': 3, 'pack': pack['_fingerprint'], 'device': config['device'], 'text': text, 'voice': synthesis_voice(pack, voice, delivery),
                    'delivery': delivery, 'language': language, 'qwen_tts': '0.1.1', 'take': take, **({'controls': controls} if controls else {})})
 
@@ -733,6 +736,100 @@ class Jobs:
         self.thread=None
         self.engine=None
         self.closed=False
+        self.listener_queue=[]
+
+    def listener_stress(self, report):
+        """Refresh current book audio after an explicit durable listener edit.
+
+        This is a requested correction, independent of optional automatic
+        recognition/retake mode. Historical generations are not rewritten.
+        """
+        from .listener_stress import snapshot, apply
+        with self.lock:
+            book=self.store.book(report['book_id'])
+            generations=self.store.generation_list(book['id'])
+            current_ids={generations[0]['id']} if generations else set()
+            if self.active:
+                active=self.store.generation(self.active)
+                if active['book_id']==book['id']:current_ids.add(self.active)
+            positions=self.store.rows('SELECT value FROM positions WHERE book_id=?',(book['id'],))
+            if positions:
+                with contextlib.suppress(ValueError,TypeError):
+                    current_ids.add(json.loads(positions[0]['value']).get('generation_id'))
+            count=0
+            for gid in current_ids- {None}:
+                generation=self.store.generation(gid)
+                if generation['config'].get('engine')=='higgs_audio_tts_q8_external_preview':continue
+                job_id=digest([report['id'],gid])[:24]
+                if self.store.rows('SELECT id FROM listener_correction_jobs WHERE id=?',(job_id,)):continue
+                frozen=snapshot(self.store,book,generation['cast'])
+                blocks={b['id']:b['text'] for c in book['chapters'] for b in c['blocks']}
+                targets=[]
+                for segment in generation['segments']:
+                    native,evidence=apply(segment['spoken'],frozen,source_id=segment['source_id'],
+                        source_text=blocks[segment['source_id']],source_start=segment['start'],source_end=segment['end'])
+                    previous=(segment.get('performance') or {}).get('listener_stress') or {}
+                    reported_family=(report.get('character_state') or {}).get('status')=='updated'
+                    from .name_stress import name_spans,ACUTE
+                    family_match=bool(name_spans(segment['spoken'].replace(ACUTE,''),
+                        (report.get('character_state') or {}).get('pronunciations') or {},implicit_single=True)) if reported_family else False
+                    explicit_target=family_match or (
+                        segment['source_id']==report['source_id'] and type(report.get('text_offset')) is int
+                        and segment['start']<=report['text_offset']<segment['end'])
+                    if explicit_target or evidence['edits'] and previous.get('sha256')!=evidence.get('sha256'):
+                        targets.append((segment,evidence))
+                if not targets:continue
+                analysis={**generation['analysis'],'pronunciation':{
+                    **generation['analysis'].get('pronunciation',{}),'listener_stress':frozen}}
+                takes=dict(analysis.get('takes') or {})
+                for segment,_ in targets:takes[segment['id']]=takes.get(segment['id'],0)+1
+                analysis['takes']=takes
+                with self.store.lock,self.store.db:
+                    self.store.db.execute('UPDATE generations SET analysis=?,updated=? WHERE id=?',
+                        (json.dumps(analysis,ensure_ascii=False),now(),gid))
+                    for segment,evidence in targets:
+                        performance={**(segment.get('performance') or {}),'listener_stress':evidence}
+                        self.store.db.execute("UPDATE segments SET status=CASE WHEN status='ready' THEN 'pending' ELSE status END,audio_hash=NULL,duration=0,cues='[]',performance=? WHERE generation_id=? AND id=?",
+                            (json.dumps(performance,ensure_ascii=False),gid,segment['id']))
+                    self.store.db.execute("UPDATE generations SET status=CASE WHEN status='ready' THEN 'paused' ELSE status END WHERE id=?",(gid,))
+                    self.store.db.execute('INSERT INTO listener_correction_jobs(id,report_id,book_id,generation_id,segment_ids,status,created,updated) VALUES(?,?,?,?,?,?,?,?)',
+                        (job_id,report['id'],book['id'],gid,json.dumps([s['id'] for s,_ in targets]),'queued',now(),now()))
+                count+=len(targets)
+                if gid not in self.listener_queue:self.listener_queue.append(gid)
+                if self.active==gid:self.stop.set()
+            if not self.active:self._start_listener_queue()
+            states=self.store.rows('SELECT status,error,segment_ids FROM listener_correction_jobs WHERE report_id=?',(report['id'],))
+            held=next((state for state in states if state['status']=='held'),None)
+            pending=next((state['status'] for state in states if state['status'] in ('queued','running','paused')),None)
+            return {'id':report['id'],'status':'held' if held else pending or ('queued' if count else 'applied'),
+                **({'error':held['error']} if held else {}),
+                'targets':count or sum(len(json.loads(state['segment_ids'])) for state in states),
+                'queued':count,'character':(report.get('character_state') or {}).get('canonical_name')}
+
+    def _start_listener_queue(self):
+        if self.closed or self.active:return
+        for row in self.store.rows("SELECT generation_id FROM listener_correction_jobs WHERE status IN ('queued','running') ORDER BY created,id"):
+            if row['generation_id'] not in self.listener_queue:self.listener_queue.append(row['generation_id'])
+        if not self.listener_queue:return
+        gid=self.listener_queue.pop(0)
+        try:
+            self.start(gid)
+            # start may return a legitimate cast-review hold instead of work.
+            if self.active==gid:
+                self.store.execute("UPDATE listener_correction_jobs SET status='running',updated=? WHERE generation_id=? AND status IN ('queued','running')",(now(),gid))
+            elif self.store.generation(gid)['status']!='ready':
+                self.store.execute("UPDATE listener_correction_jobs SET status='held',error=?,updated=? WHERE generation_id=? AND status IN ('queued','running')",
+                    ('The correction is waiting for narration preparation or cast review.',now(),gid))
+        except Exception as error:
+            self.store.status(gid,'failed',str(error))
+            self.store.execute("UPDATE listener_correction_jobs SET status='held',error=?,updated=? WHERE generation_id=? AND status IN ('queued','running')",(str(error),now(),gid))
+
+    def resume_listener_corrections(self):
+        """Explicit human repair intent survives a runtime restart independently."""
+        with self.lock:
+            self.store.execute("UPDATE listener_correction_jobs SET status='queued',updated=? WHERE status='running'",(now(),))
+            self._start_listener_queue()
+            return self.active
 
     def resume_interrupted(self):
         """Resume the one job that was active when the desktop runtime stopped.
@@ -741,6 +838,7 @@ class Jobs:
         leaves it set, as does a crash, so committed analysis and audio are reused
         on the next launch without installing an OS background service.
         """
+        if self.resume_listener_corrections():return self.store.generation(self.active)
         rows = self.store.rows(
             "SELECT id FROM generations WHERE resume_on_launch=1 AND status='paused' ORDER BY updated DESC,rowid DESC LIMIT 1"
         )
@@ -785,6 +883,7 @@ class Jobs:
             with self.store.lock, self.store.db:
                 self.store.db.execute('UPDATE generations SET resume_on_launch=0 WHERE resume_on_launch!=0')
                 self.store.db.execute('UPDATE generations SET resume_on_launch=1 WHERE id=?',(gid,))
+                self.store.db.execute("UPDATE listener_correction_jobs SET status='running',updated=?,error='' WHERE generation_id=? AND status IN ('held','paused','queued')",(now(),gid))
                 if generation['config'].get('device')!=device:
                     self.store.db.execute('UPDATE generations SET config=? WHERE id=?',(json.dumps({**generation['config'],'device':device},ensure_ascii=False),gid))
                 if approve:
@@ -858,6 +957,7 @@ class Jobs:
     def cast_name_stress(self, gid, character_id, stressed):
         """Listener override of one automatic name-stress guess, during cast review."""
         from .auto_pronunciation import validate_name_stress
+        import secrets
         def change(generation, pack):
             pronunciation = generation['analysis'].get('pronunciation') or {}
             current = pronunciation.get('names', {}).get(character_id)
@@ -868,12 +968,18 @@ class Jobs:
             except ValueError as error:
                 raise AppError(str(error)) from error
             row = {**current, 'stressed': stressed, 'source': 'listener',
+                   'listener_review':{'id':secrets.token_hex(12),'created':now(),'operation':'cast_name_stress',
+                       'generation_id':gid,'book_id':generation['book_id'],'character_id':character_id,
+                       'name':current['name'],'stressed':stressed},
                    **({'model_stressed': current.get('model_stressed', current['stressed'])} if current.get('source') == 'model' else {})}
             names = {**pronunciation['names'], character_id: row}
             return generation['cast'], {**generation['analysis'], 'pronunciation': {**pronunciation, 'names': names}}, {}
         updated = self._review(gid, change)
+        from .listener_stress import record_cast_review
+        book=self.store.book(updated['book_id'])
+        record_cast_review(self.store,book,updated['analysis']['pronunciation']['names'][character_id]['listener_review'])
         from .series_characters import sync_generation
-        sync_generation(self.store, self.store.book(updated['book_id']), updated,
+        sync_generation(self.store, book, updated,
                         updated['analysis'].get('pronunciation') or {})
         return updated
 
@@ -983,6 +1089,8 @@ class Jobs:
 
     def pause(self,gid):
         with self.lock:
+            self.store.execute("UPDATE listener_correction_jobs SET status='paused',updated=? WHERE generation_id=? AND status IN ('queued','running')",(now(),gid))
+            self.listener_queue=[item for item in self.listener_queue if item!=gid]
             self.store.execute('UPDATE generations SET resume_on_launch=0 WHERE id=?',(gid,))
             if self.active==gid:
                 self.stop.set()
@@ -1170,8 +1278,12 @@ class Jobs:
                             "UPDATE generations SET status=?,error=?,updated=?,resume_on_launch=CASE WHEN ?='paused' THEN resume_on_launch ELSE 0 END WHERE id=?",
                             (status, message[:4000], now(), status, gid),
                         )
+                        correction_status='applied' if status=='ready' else 'queued' if status=='paused' else 'held'
+                        self.store.db.execute("UPDATE listener_correction_jobs SET status=?,error=?,updated=? WHERE generation_id=? AND status IN ('queued','running')",
+                            (correction_status,message[:4000],now(),gid))
         if not self.closed:
             self.store.collect_audio()
+            with self.lock:self._start_listener_queue()
 
     def _pack_paths(self, config):
         yield config['pack_path']
@@ -1747,7 +1859,7 @@ class Jobs:
                 voice=next(v for v in request['pack']['voices'] if v['id']==request['voice_id'])
                 from .recovery_decoding import execution_pack
                 effective=execution_pack(request['pack'],result.get('automatic_retake',{}).get('decoding_profile'),native)
-                key=render_key(effective,config,native,voice,request['delivery'],request['language'],selected_take,request.get('controls'))
+                key=render_key(effective,{**config,'_pronunciation':request.get('_pronunciation',config.get('_pronunciation'))},native,voice,request['delivery'],request['language'],selected_take,request.get('controls'))
             destination=self.store.root/'audio'/f'{key}.wav'
             self._publish_audio(candidate,destination,immutable=is_higgs(request['pack']))
             # Durable accepted metadata precedes the database selection record.
@@ -1771,8 +1883,14 @@ class Jobs:
         if higgs:
             config = {**config, '_speech_language': language}
         current = self.store.generation(gid)
+        if higgs:
+            from .listener_stress import snapshot
+            frozen_listener=snapshot(self.store,book,current['cast'])
+            pronunciation={**current['analysis'].get('pronunciation',{}),'listener_stress':frozen_listener}
+            config={**config,'_pronunciation':pronunciation}
+            source_blocks={b['id']:b['text'] for c in book['chapters'] for b in c['blocks']}
         if higgs and current['analysis'].get('pronunciation'):
-            config = {**config, '_pronunciation': current['analysis']['pronunciation']}
+            config = {**config, '_pronunciation': pronunciation}
         accepted_chapters={}
         if gated:
             from .chapter_gate import music_released,require,generation_binding
@@ -1825,6 +1943,18 @@ class Jobs:
             if parts is None:
                 self._hold(gid, segment, MIXED_EDIT_NOTICE)
                 continue
+            if higgs:
+                from .listener_stress import apply
+                corrected=[]
+                for part in parts:
+                    native,evidence=apply(part['text'],frozen_listener,source_id=segment['source_id'],
+                        source_text=source_blocks[segment['source_id']],
+                        source_start=part.get('start',segment['start']),source_end=part.get('end',segment['end']))
+                    binding={'source_id':segment['source_id'],'source_text':source_blocks[segment['source_id']],
+                        'source_start':part.get('start',segment['start']),'source_end':part.get('end',segment['end'])}
+                    corrected.append({**part,'text':native,'_listener_stress':evidence,
+                        '_pronunciation':{**config['_pronunciation'],'listener_source':binding}})
+                parts=corrected
             take = takes.get(segment['id'], 0)
             plans, controls, part_takes = [], {}, {}
             try:
@@ -1844,7 +1974,7 @@ class Jobs:
                         if automatic.get('spoken_text_plan'):
                             from .spoken_edits import apply_spoken_edit
                             from .spoken_pronunciation import synthesis_text
-                            baseline,_=synthesis_text(part['text'],config.get('_pronunciation'))
+                            baseline,_=synthesis_text(part['text'],part.get('_pronunciation',config.get('_pronunciation')))
                             bound=(automatic.get('original_text_sha256')==digest(part['text'])
                                 and automatic.get('pack_fingerprint')==pack['_fingerprint']
                                 and automatic.get('voice_id')==voice['id']
@@ -1867,7 +1997,7 @@ class Jobs:
                     from .recovery_decoding import execution_pack
                     effective_pack=execution_pack(pack,decoding_profile,part['text']) if higgs else pack
                     plans.append((part, voice, delivery, spoken, channel_warning,
-                                  render_key(effective_pack, config, part['text'], voice, delivery, language, actual_take, controls[index])))
+                                  render_key(effective_pack, {**config,'_pronunciation':part.get('_pronunciation',config.get('_pronunciation'))}, part['text'], voice, delivery, language, actual_take, controls[index])))
                     part_takes[index]=actual_take
             except (GenerationCapError, SpeechHoldError) as error:
                 if isinstance(error, SpeechHoldError):
@@ -1907,7 +2037,7 @@ class Jobs:
                             actual_controls=controls[index]
                             piece,found,selected_key,native,selected_take = self._candidate_audio(gid, segment, {'pack': pack, 'device': config['device'], 'voice_id': voice['id'], 'text': part['text'],
                                                                     '_source_text':part.get('_source_text',part['text']),
-                                                                    **({'_pronunciation':config['_pronunciation']} if config.get('_pronunciation') else {}),
+                                                                    **({'_pronunciation':part.get('_pronunciation',config['_pronunciation'])} if config.get('_pronunciation') else {}),
                                                                     '_decoding_profile':part.get('_decoding_profile'),
                                                                     **({'_spoken_repair':part['_spoken_repair']} if part.get('_spoken_repair') else {}),
                                                                     **({'resolved_speech': config['resolved_speech'], 'take': actual_take} if higgs else {}),
@@ -2148,7 +2278,7 @@ class Jobs:
                 if 'synthesis_parts' not in result and audit.get('audio_sha256')!=result['sha256']:return False
                 continue
             from .spoken_pronunciation import synthesis_text
-            native_text,_=synthesis_text(part['text'],config.get('_pronunciation'))
+            native_text,pronunciation=synthesis_text(part['text'],part.get('_pronunciation',config.get('_pronunciation')))
             from .word_verification import verified
             if not verified(native_text,audit,audit.get('audio_sha256'),verifier,config.get('_speech_language')):
                 return False
@@ -2159,7 +2289,10 @@ class Jobs:
             saved_plan = {k: v for k, v in synthesis.items() if k != 'plan_sha256'}
             if synthesis.get('plan_sha256') != digest(saved_plan):
                 return False
-            if key != digest({'schema': 5, 'language': config.get('_speech_language'), 'plan': saved_plan}):
+            listener=pronunciation.get('listener_stress') or {}
+            binding={'policy':listener.get('policy'),'applications':listener.get('applications',[])}
+            if key != digest({'schema': 5, 'language': config.get('_speech_language'), 'plan': saved_plan,
+                    **({'listener_stress':binding} if binding['applications'] else {})}):
                 # Language is stored by the caller below; do not reuse a plan
                 # under an unknown or changed language conditioning.
                 return False

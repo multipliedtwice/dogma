@@ -16,6 +16,25 @@ from rimsky.speech_quality import transcript_check
 from rimsky.spoken_pronunciation import phrase_stress
 
 class SpokenRevisionTests(unittest.TestCase):
+    def test_listener_stress_rebinds_only_exact_shared_phonetic_receipt(self):
+        from rimsky import russian_pronunciation as phonetics
+        with tempfile.TemporaryDirectory() as work:
+            wav=Path(work)/'take.wav';sf.write(wav,np.concatenate([np.zeros(2000),np.full(2000,.03),np.zeros(2000)]),24000)
+            spoken='Болит';native='Боли́т';sha=file_digest(wav)
+            def receipt(source):
+                result,records=phonetics.apply(source)
+                return {'rule':phonetics.RULE,'prephonetic_source':source,'records':records,'module_sha256':file_digest(Path(phonetics.__file__))}
+            old={'id':'line','spoken':spoken,'synthesis':{'text':'Бо́лит','prompt':'Бо́лит','effects_policy':'disabled',
+                'russian_phonetics':receipt('Бо́лит')}}
+            new=copy.deepcopy(old);new['synthesis'].update(text=native,prompt=native,russian_phonetics=receipt(native))
+            def candidate():
+                key=digest(new['synthesis'])
+                return {'unit':new,'path':str(wav),'receipt':{'key':key,'audio_sha256':sha},
+                    'word_check':{**transcript_check(spoken,spoken,sha,'asr'),'synthesis_key':key}}
+            validate_revision({'unit':old},candidate(),{'native_text':native})
+            for change in ({'prephonetic_source':'Бо́лит'},{'module_sha256':'0'*64},{'rule':'arbitrary'},{'records':[{'arbitrary':True}]}):
+                new['synthesis']['russian_phonetics']={**receipt(native),**change}
+                with self.assertRaisesRegex(ValueError,'phonetic'):validate_revision({'unit':old},candidate(),{'native_text':native})
     def test_revision_retries_keep_wording_and_record_failed_attempt(self):
         import subprocess
         with tempfile.TemporaryDirectory() as work:

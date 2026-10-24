@@ -289,13 +289,20 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
             suppressed={'policy':'suppress-automatic-v1','marked_text':before,'kept':sorted(keep)}
         stripped=None
         contextual=None
-        if spec and spec.get('contextual_stress'):
+        if spec and spec.get('contextual_stress') and spec.get('contextual_stress_policy')=='experimental-luna-context-v4':
             from rimsky import contextual_stress
             protected={(r['word'].casefold().replace('ё','е'),r['index']) for r in spec.get('homograph_stress',{}).get('overrides',[])
                        if r['sha256']==digest(context_source.encode('utf8'))}
             protected|={(r['word'].casefold().replace('ё','е'),r['index']) for r in (automatic or {}).get('homograph_overrides',{}).get('applied',[])}
             native_spoken,contextual=contextual_stress.apply(context_source,native_spoken,spec['contextual_stress'],names,spec.get('common',[]),protected)
             contextual['module_sha256']=file_digest(Path(contextual_stress.__file__))
+        listener=None
+        if assignment.get('listener_stress_snapshot'):
+            from rimsky import listener_stress
+            native_spoken,listener=listener_stress.apply(native_spoken,assignment['listener_stress_snapshot'],
+                source_id=unit.get('source_id'),source_text=assignment.get('listener_stress_sources',{}).get(unit.get('source_id')),
+                source_start=unit.get('start',0),source_end=unit.get('end'))
+            listener['module_sha256']=file_digest(Path(listener_stress.__file__))
         phonetic=None
         if unit['id'] not in frozen_units or frozen_units[unit['id']]['synthesis'].get('russian_phonetics'):
             from rimsky import russian_pronunciation as phonetics
@@ -332,6 +339,7 @@ def prepare(assignment_path,output,chapters,limit=0,reuse_folder=None,reuse_soun
         if pronunciation:synthesis['phrase_pronunciation']=pronunciation
         if automatic:synthesis['automatic_pronunciation']=automatic
         if contextual:synthesis['contextual_stress']=contextual
+        if listener and (listener.get('edits') or listener.get('applications')):synthesis['listener_stress']=listener
         if phonetic:synthesis['russian_phonetics']=phonetic
         if respelled:
             from rimsky.respelling import disclosure

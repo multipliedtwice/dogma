@@ -105,6 +105,8 @@ export function usePlayback(book: Book | null, generation: Generation | null, se
     return () => clearInterval(timer);
   }, [sleepAt]);
   return {...state, clock, sleepAt, setSleepAt,
+    adoptCorrection: (nextBook:Book,nextGeneration:Generation,affectedSegmentIds:string[],affectedSourceIds:string[]) =>
+      controller.current?.adoptCorrection(nextBook,nextGeneration,affectedSegmentIds,affectedSourceIds)??false,
     toggle: () => controller.current?.toggle(),
     select: (id: string, play = true, time = 0) => controller.current?.select(id, play, time),
     preview: (id: string) => controller.current?.preview(id),
