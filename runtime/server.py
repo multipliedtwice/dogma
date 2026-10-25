@@ -463,7 +463,9 @@ class Application:
         with contextlib.ExitStack() as resources:
             with self.store.lock:
                 opening = opening_reference(self.store, asset_id)
-                if not opening and not self.store.rows("SELECT id FROM segments WHERE audio_hash=? AND status='ready' LIMIT 1", (asset_id,)):
+                if not opening and not self.store.rows("""SELECT id FROM segments WHERE audio_hash=? AND status='ready'
+                    UNION ALL SELECT segment_id FROM audiobook_replacements
+                    WHERE json_extract(payload,'$.audio_hash')=? AND json_extract(payload,'$.status')='ready' LIMIT 1""", (asset_id,asset_id)):
                     raise AppError('Completed audio not found.')
                 source, metadata = resources.enter_context(open_audio_pair(path))
             if opening:

@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from test_core import FB2, complete_audio, pack_fixture, write_wave
 from rimsky.integrity import accepted_audio, read_audio
 from rimsky.store import Store
-from rimsky.util import atomic_replace, write_json
+from rimsky.util import atomic_replace, write_json, digest, file_digest
 import server
 from server import Application, handler_for, parse_range
 
@@ -56,6 +56,7 @@ class AudioHttpCache(unittest.TestCase):
             'pack_name': pack['name'], 'device': 'cpu', 'align_words': False,
         })
         complete_audio(self.store, generation)
+        self.generation=self.store.generation(generation['id'])
         self.key = self.store.generation(generation['id'])['segments'][0]['audio_hash']
         self.path = self.store.root / 'audio' / f'{self.key}.wav'
         self.expected = self.path.read_bytes()
@@ -123,6 +124,26 @@ class AudioHttpCache(unittest.TestCase):
             self.get({'Range': f'bytes={size}-'})
         self.assertEqual(416, raised.exception.code)
         self.assertEqual(f'bytes */{size}', raised.exception.headers['Content-Range'])
+
+    def test_pending_replacement_keeps_authenticated_direct_wav_playable_until_commit(self):
+        old=self.generation['segments'][0]
+        pending=self.store.revise(self.generation['id'],[{'id':old['id'],'retake':True}])
+        self.assertFalse(self.store.rows("SELECT id FROM segments WHERE audio_hash=? AND status='ready'",(self.key,)))
+        with self.get()as response:self.assertEqual(self.expected,response.read())
+        with self.get({'Range':'bytes=4-19'})as response:
+            self.assertEqual(206,response.status);self.assertEqual(self.expected[4:20],response.read())
+        with self.assertRaises(HTTPError)as unauthorized:
+            urlopen(f'http://127.0.0.1:{self.http.server_port}/asset?kind=audio&id={self.key}',timeout=5)
+        self.assertEqual(401,unauthorized.exception.code)
+        replacement=next(s for s in pending['segments']if s['id']==old['id'])
+        key=digest(['direct-wav-replacement',old['id']]);path=self.store.audio_path(key)
+        metadata=write_wave(path,seconds=.2);metadata['sha256']=file_digest(path)
+        write_json(path.with_suffix('.json'),metadata)
+        self.store.publish_current_parts(pending['id'],[{**replacement,'status':'ready','audio_hash':key,'duration':.2}])
+        self.assertTrue(self.path.exists(),'Retired bytes are still present before collection, but no longer authorized.')
+        with self.assertRaises(HTTPError)as retired:self.get()
+        self.assertEqual(404,retired.exception.code)
+        with self.get(ident=key)as response:self.assertEqual(path.read_bytes(),response.read())
 
     def test_integrity_runs_once_per_unchanged_file_and_again_after_a_change(self):
         server.VERIFIED_AUDIO.items.clear()
