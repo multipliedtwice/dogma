@@ -65,6 +65,18 @@ class ValidatorTests(unittest.TestCase):
 
 
 class NameInflectionTests(unittest.TestCase):
+    def test_short_invented_names_do_not_create_one_letter_stem_families(self):
+        from rimsky.name_stress import build,dictionary_name_forms
+        self.assertEqual((),dictionary_name_forms('Эо'))
+        self.assertNotIn('ее',build({'alias':'Эо'}))
+        self.assertEqual([],name_spans('Её ответ. её ответ.',{'alias':'Э'+A+'о'}))
+        self.assertEqual([(0,2,'Э'+A+'о')],name_spans('Эо',{'alias':'Э'+A+'о'}))
+
+    def test_short_dictionary_names_keep_verified_inflections(self):
+        from rimsky.name_stress import dictionary_name_forms
+        self.assertIn('ии',dictionary_name_forms('Ия'))
+        self.assertEqual([(0,2,'И'+A+'и')],name_spans('Ии',{'name':'И'+A+'я'}))
+
     def test_names_do_not_match_inside_unicode_identifiers(self):
         lexicon={'alexander':'Алекса'+A+'ндр'}
         for text in ('xАлександр','Александр2','_Александр','Александр_',

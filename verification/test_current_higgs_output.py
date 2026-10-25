@@ -87,6 +87,7 @@ class CurrentOutputTests(unittest.TestCase):
         c.write(c.current_manifest(self.data, self.book_id), self.view)
         self.new_unit = copy.deepcopy(self.parts['u0']['unit'])
         self.new_unit['synthesis'].update(text='Пе́рвый.', prompt='Пе́рвый.')
+        self.new_unit['prepared_spoken'] = 'Пе́рвый.'
         self.raw = self.root / 'job/assets/raw.wav'
         wav(self.raw, [101, 102, 103, 104])
         self.receipt = {'status': 'rendered', 'session': 'physical', 'request_sha256': 'request',
@@ -108,6 +109,7 @@ class CurrentOutputTests(unittest.TestCase):
         self.assertEqual(old, result['segments'][1])
         self.assertEqual(1, len(set((self.data / 'audio').glob('*.wav')) - files))
         self.assertEqual(self.compact, view['parts']['u0']['native'])
+        self.assertEqual(self.new_unit['prepared_spoken'], result['segments'][0]['spoken'])
         clip = self.data / 'audio' / (result['segments'][0]['audio_hash'] + '.wav')
         with wave.open(str(clip)) as stream:
             self.assertEqual(9, stream.getnframes())
@@ -115,6 +117,22 @@ class CurrentOutputTests(unittest.TestCase):
         self.assertEqual(b'\0' * 4, body[:4])
         self.assertEqual(b'\0' * 6, body[-6:])
         self.assertEqual('complete', c.read(c._intent_path(self.data, self.book_id))['status'])
+    def test_fresh_pronunciation_replaces_played_reader_text_keeps_reusable_baseline(self):
+        from rimsky import russian_pronunciation as phonetics
+        self.new_unit.pop('prepared_spoken')
+        self.new_unit['spoken'] = self.new_unit['text']
+        prepared = self.new_unit['synthesis']['text']
+        native, records = phonetics.apply(prepared)
+        self.new_unit['synthesis'].update(text=native, prompt=native,
+            russian_phonetics={'rule': phonetics.RULE, 'prephonetic_source': prepared, 'records': records})
+        self.receipt['synthesis_sha256'] = digest(self.new_unit['synthesis'])
+        unchanged = self.store.generation('g')['segments'][1]
+        result, view = self.publish()
+        self.assertEqual(prepared, result['segments'][0]['spoken'])
+        self.assertNotEqual(self.new_unit['spoken'], result['segments'][0]['spoken'])
+        self.assertEqual(self.new_unit['spoken'], view['parts']['u0']['unit']['spoken'])
+        self.assertEqual(self.new_unit['synthesis'], result['segments'][0]['performance']['synthesis_snapshot'])
+        self.assertEqual(unchanged, result['segments'][1])
     def test_same_id_different_source_and_internal_layout_are_rejected(self):
         for key, value in (('source_id', 'other'), ('start', 1), ('text', 'Changed.')):
             with self.subTest(key=key):

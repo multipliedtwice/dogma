@@ -396,6 +396,35 @@ def _load(store, data_dir, book_id):
     return value
 
 
+def prepared_spoken(unit):
+    """Recover reader text from the exact final synthesis pronunciation proof.
+
+    A unit's ``spoken`` may be the reusable number-expanded baseline. Final
+    automatic and human marks belong to the prephonetic source, while the
+    closed pronoun spellings remain model input only.
+    """
+    synthesis = unit['synthesis']
+    native = synthesis.get('text')
+    if not isinstance(native, str) or not native.strip():
+        raise ValueError('Replacement has no bound native text')
+    phonetic = synthesis.get('russian_phonetics')
+    if phonetic is not None:
+        from rimsky import russian_pronunciation as phonetics
+        if (not isinstance(phonetic, dict) or phonetic.get('rule') != phonetics.RULE
+                or not isinstance(phonetic.get('prephonetic_source'), str)
+                or not isinstance(phonetic.get('records'), list)):
+            raise ValueError('Replacement lacks its exact prephonetic reader binding')
+        spoken = phonetic['prephonetic_source']
+        phonetics.validate(spoken, native, phonetic['records'])
+        if 'prepared_spoken' in unit and unit['prepared_spoken'] != spoken:
+            raise ValueError('Replacement reader text contradicts its phonetic proof')
+        return spoken
+    spoken = unit.get('prepared_spoken', unit.get('spoken', unit.get('text')))
+    if not isinstance(spoken, str) or spoken != native:
+        raise ValueError('Replacement reader text is not bound to its native input')
+    return spoken
+
+
 def replacement_segment(data_dir, old, part, unit, receipt, raw_path):
     """Write one replacement clip, retaining its source-owned structural pauses."""
     if receipt['status'] != 'rendered' or receipt['synthesis_sha256'] != digest(unit['synthesis']):
@@ -407,6 +436,7 @@ def replacement_segment(data_dir, old, part, unit, receipt, raw_path):
         raise ValueError('Replacement changed its retained source binding')
     if unit.get('render_parts') or unit['synthesis'].get('render_parts') or old['performance'].get('render_parts'):
         raise ValueError('A part with an internal pause layout requires its layout-aware renderer')
+    spoken = prepared_spoken(unit)
     with wave.open(str(raw_path)) as stream:
         if (stream.getframerate(), stream.getnchannels(), stream.getsampwidth()) != (24000, 1, 2):
             raise ValueError('Invalid replacement speech format')
@@ -428,7 +458,8 @@ def replacement_segment(data_dir, old, part, unit, receipt, raw_path):
                                      'raw_audio_sha256': receipt['audio_sha256'], 'request_sha256': receipt['request_sha256']}
     # Word timestamps belong to the previous take. Recognition is off here;
     # leave this replacement unaligned rather than reusing old timing.
-    segment.update(audio_hash=audio_hash, duration=duration, status='ready', performance=performance, cues=[])
+    segment.update(audio_hash=audio_hash, duration=duration, status='ready', spoken=spoken,
+                   performance=performance, cues=[])
     raw_path = Path(raw_path).resolve()
     if raw_path.parent.name == 'assets':
         physical_root = raw_path.parent.parent

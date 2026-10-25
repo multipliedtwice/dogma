@@ -33,7 +33,10 @@ def parse(stressed: str) -> tuple[str, int]:
 def _stems(word: str):
     """Stems a declined form can attach endings to: Белар, Маришк(а), Гуль(ь)."""
     yield word
-    if word[-1].casefold() in 'аяоейь':
+    # A one-letter residue cannot establish an invented noun paradigm. Such
+    # guesses also collide with closed-class words after е/э/ё normalization.
+    # Genuine short dictionary names retain their exact lexeme below.
+    if len(word) > 2 and word[-1].casefold() in 'аяоейь':
         yield word[:-1]
 
 
