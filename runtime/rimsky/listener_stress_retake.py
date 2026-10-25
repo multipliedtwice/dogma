@@ -25,14 +25,25 @@ _WORKERS = {}
 
 
 def _origin(report):
-    return {key:report.get(key) for key in ('id','book_id','generation_id','segment_id','chapter_id','source_id',
+    origin={key:report.get(key) for key in ('id','book_id','generation_id','segment_id','chapter_id','source_id',
         'selected_text','text_offset','audio_offset','audio_hash','passage_text','spoken_text','created','kind','comment','intended_stress','synthesis_snapshot')}
+    # Preserve heard identity on new reports without changing historical hashes.
+    origin.update({key:report[key]for key in ('heard_binding','heard_revision')if key in report})
+    return origin
 
 
 def _debug_pending(folder):
     ready=folder/'ready.json'
     if not ready.is_file():return False
     document=json.loads(ready.read_text('utf8'))
+    if document.get('policy')=='current-book-output-v1':
+        manifest=json.loads((folder/'current-output.json').read_text('utf8'))
+        if manifest.get('sha256')!=digest({key:value for key,value in manifest.items()if key!='sha256'}):
+            raise AppError('The current audiobook manifest changed before its correction was queued.')
+        order=manifest.get('unit_order',[]);parts=manifest.get('parts',{})
+        if len(order)!=document.get('unit_count')or len(set(order))!=len(order)or set(order)!=set(parts):return True
+        intent=folder/'publication-intent.json'
+        return intent.is_file()and json.loads(intent.read_text('utf8')).get('status')=='pending'
     expected=document.get('unit_count')
     if type(expected) is not int or expected<1:return False
     if sum(1 for _ in (folder/'units').glob('*.json'))<expected:return True
@@ -258,8 +269,9 @@ def enqueue_listener_stress_retake(store, report):
     if report.get('kind')!='stress' or not report.get('intended_stress'):return None
     if not hasattr(store,'generation_list'):
         return _enqueue_generation(store,report)
+    current=store.current_generation(report['book_id'])if hasattr(store,'current_generation')else None
     generations=store.generation_list(report['book_id'])
-    candidates=[row['id'] for row in generations[:1]]
+    candidates=[current['id']]if current else [row['id'] for row in generations[:1]]
     # A saved listening position can belong to an immutable historical version.
     # Its heard take remains the report's origin, not a second render target.
     receipts=[]

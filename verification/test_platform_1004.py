@@ -110,7 +110,7 @@ class StartupHandshake(unittest.TestCase):
     def test_newer_library_is_reported_in_the_handshake(self):
         with tempfile.TemporaryDirectory() as temporary:
             database = sqlite3.connect(Path(temporary) / 'library.sqlite3')
-            database.execute('PRAGMA user_version=5')
+            database.execute('PRAGMA user_version=6')
             database.close()
             result = self.run_server('--data-dir', temporary)
         self.assertEqual('This library was created by a newer application. Its data was not changed.', self.handshake_error(result))

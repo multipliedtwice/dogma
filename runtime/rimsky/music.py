@@ -682,6 +682,28 @@ def finish(audio, kind):
     return shaped.astype('float32')
 
 
+def imported_cue_timing(rows, segments):
+    """Position imported chapter endings against the captured playable speech."""
+    imported = {row['chapter_id'] for row in rows if row['kind'] == 'chapter_mix'}
+    starts, ends = {}, {}
+    for segment in sorted(segments, key=lambda row: row['ordinal']):
+        chapter = segment['chapter_id']
+        starts[segment['id']] = ends.get(chapter, 0.)
+        ends[chapter] = starts[segment['id']] + float(segment.get('duration') or 0)
+    result = []
+    for row in rows:
+        cue = dict(row)
+        chapter = cue['chapter_id']
+        anchor = starts.get(cue['anchor_segment_id'])
+        if chapter in imported and chapter in ends and anchor is not None:
+            if cue['kind'] == 'ending':
+                cue['start'] = ends[chapter] - anchor
+            elif cue['kind'] == 'chapter_mix':
+                cue['duration'] = min(cue['duration'], max(0., ends[chapter] - anchor - cue['start']))
+        result.append(cue)
+    return result
+
+
 class MusicJobs:
     """Background music generation for completed generations."""
 
@@ -1043,16 +1065,18 @@ class MusicJobs:
             return False
 
     def collect(self):
-        referenced = {r['audio_key'] for r in self.store.rows('SELECT audio_key FROM music_cues WHERE audio_key IS NOT NULL')}
-        for path in self.folder.glob('*'):
-            if path.is_file() and re.fullmatch(r'[a-f0-9]{64}', path.stem) and path.stem not in referenced:
-                with contextlib.suppress(OSError):
-                    path.unlink()
+        with self.store.lock,self.store.transaction():
+            referenced = {r['audio_key'] for r in self.store.rows("SELECT music_cues.audio_key FROM music_cues JOIN generations ON generations.id=music_cues.generation_id WHERE music_cues.audio_key IS NOT NULL AND generations.status!='retired'")}
+            referenced.update(self.store.active_audio_leases())
+            for path in self.folder.glob('*'):
+                if path.is_file() and re.fullmatch(r'[a-f0-9]{64}', path.stem) and path.stem not in referenced:
+                    with contextlib.suppress(OSError):
+                        path.unlink()
 
     def _released(self, gid):
         """Released scenes and take ids for a generation; music waits for chapter acceptance."""
         from .chapter_gate import music_released
-        generation = self.store.generation(gid)
+        generation = self.store.playback_generation(gid)
         scenes = self.store.rows('SELECT * FROM music_scenes WHERE generation_id=? ORDER BY ordinal', (gid,))
         special = self.store.rows(
             "SELECT id,kind,chapter_id FROM music_cues WHERE generation_id=? AND kind IN ('ending','chapter_mix')", (gid,))
@@ -1074,7 +1098,7 @@ class MusicJobs:
             column = 'bed' if kind == 'bed' else 'ambience'
             chapters = dict.fromkeys(row['chapter_id'] for row in self.store.rows(
                 f'SELECT chapter_id FROM music_scenes WHERE generation_id=? AND {column}=? ORDER BY ordinal', (gid, rest.split(':')[0])))
-        generation = self.store.generation(gid)
+        generation = self.store.playback_generation(gid)
         return any(music_released(generation, chapter, self.store.root) for chapter in chapters)
 
     @contextlib.contextmanager
@@ -1095,12 +1119,13 @@ class MusicJobs:
         require_id(gid)
         cues = self.store.rows('''SELECT id,kind,chapter_id,anchor_segment_id,start,mood,style,status,audio_key,duration,error
                                   FROM music_cues WHERE generation_id=? ORDER BY kind='ending',kind,id''', (gid,))
+        segments=self.store.playback_generation(gid)['segments']
+        cues=imported_cue_timing(cues,segments)
         scenes, released, takes = self._released(gid)
         cues = [{**c, 'status': 'pending', 'audio_key': None, 'error': 'Waiting for chapter acceptance.'}
                 if c['status'] == 'ready' and c['id'] not in takes else c for c in cues]
         direction = (self.directions.get(gid) or (None, None))[1]
         from .narration_transitions import segment_windows,POLICY
-        segments=self.store.generation(gid)['segments']
         transitions=segment_windows(segments)
         starts={};position=0.
         for segment in segments:starts[segment['id']]=position;position+=float(segment.get('duration') or 0)
@@ -1138,7 +1163,7 @@ class MusicJobs:
         settings = self.store.settings()
         if settings['music'] is not True or not settings['music_volume']:
             return []
-        rows = self.store.rows('SELECT * FROM music_cues WHERE generation_id=?', (gid,))
+        rows = imported_cue_timing(self.store.rows('SELECT * FROM music_cues WHERE generation_id=?', (gid,)),segments)
         if not rows or any(r['status'] != 'ready' or not self._intact(r['audio_key']) for r in rows):
             return []
         scenes, released, _ = self._released(gid)

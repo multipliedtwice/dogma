@@ -467,15 +467,19 @@ def current_book_debug_base(folder, data_dir, generation_id):
     store=Store(data_dir)
     try:
         book_id=store.generation(generation_id)['book_id']
-        current=store.generation_list(book_id)
-        if not current:return folder,generation_id
-        identifier=current[0]['id']
-        generation=store.generation(identifier)
+        generation=store.current_generation(book_id)
+        if generation is None:return folder,generation_id
+        identifier=generation['id']
         target=_external_folder(store,generation)
         if target is None:return folder,generation_id
         ready=target/'ready.json'
         if not ready.is_file():return folder,generation_id
         frozen=read(ready)
+        if frozen.get('policy')=='current-book-output-v1':
+            from current_higgs_output import load
+            view=load(store,data_dir,book_id)
+            if view is None or view['generation_id']!=identifier:raise AppError('Current book output is not published.')
+            return target,identifier
         if not frozen.get('plans') or not frozen.get('native_manifest'):return folder,generation_id
         return target,identifier
     finally:store.close()
@@ -511,6 +515,28 @@ def _process_locked(folder, data_dir, generation_id, item_path):
     ready=folder/'one-shot-ready.json'
     if not ready.exists():ready=folder/'ready.json'
     debug_ready=read(ready) if ready.exists() else {}
+    if debug_ready.get('policy')=='current-book-output-v1':
+        # The compact current book has no old unit tree or chapter copies.
+        # Its helper commits only successful parts into the existing Store ID.
+        item.update(status='running',updated=now(),attempts=int(item.get('attempts',0))+1,
+            dispatch_source_generation_id=generation_id,dispatch_source_folder=str(folder))
+        write_json(item_path,item)
+        result_path=folder/'listener-stress-queue/results'/f"{item['id']}.json"
+        result_path.parent.mkdir(parents=True,exist_ok=True)
+        process_result=subprocess.run([sys.executable,'-X','utf8','-u',str(ROOT/'scripts/repair_debug_listener_stress.py'),
+            '--generation',str(folder),'--data-dir',str(data_dir),'--generation-id',generation_id,
+            '--queue-item',str(item_path),'--result',str(result_path)],cwd=ROOT,check=False)
+        result=read(result_path)
+        if (getattr(process_result,'returncode',0) or result.get('status')!='applied'
+                or result.get('published_generation_id')!=generation_id):
+            raise AppError('The current book correction was not published to its existing output: '
+                           + str(result.get('error') or result.get('failures') or result.get('status')))
+        item=read(item_path)
+        item.update(status='applied',phase='delivered',updated=now(),completed=now(),error='',
+            result=result,result_sha256=file_digest(result_path),published_generation_id=generation_id,
+            revision=result.get('revision'),human_audio_approval=False)
+        write_json(item_path,item)
+        return
     if ready.exists() and debug_ready.get('plans') and debug_ready.get('native_manifest') and (folder/'units').is_dir():
         if (not debug_source_state(folder,debug_ready)['complete'] or item.get('phase')=='awaiting_render_completion'
             or item.get('development_dispatch_barrier') or (folder/'listener-stress-queue/development-dispatch-barrier.json').exists()):

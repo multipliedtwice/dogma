@@ -1282,6 +1282,7 @@ class Jobs:
                         self.store.db.execute("UPDATE listener_correction_jobs SET status=?,error=?,updated=? WHERE generation_id=? AND status IN ('queued','running')",
                             (correction_status,message[:4000],now(),gid))
         if not self.closed:
+            self.store.complete_replacements(gid)
             self.store.collect_audio()
             with self.lock:self._start_listener_queue()
 
@@ -2080,7 +2081,11 @@ class Jobs:
             warning = append_warning(base, fallback, reference, *(plan[4] for plan in plans), capability_notice,
                                      notice, result.get('warning', ''))
             with self.store.lock:
-                with self.store.db:
+                with self.store.transaction():
+                    self._check()
+                    latest=self.store.db.execute('SELECT analysis FROM generations WHERE id=?',(gid,)).fetchone()
+                    if (json.loads(latest['analysis']).get('takes')or{}).get(segment['id'],0)!=take:
+                        raise AppError('A newer correction replaced this pending audio request. Resume the current audiobook.')
                     if result.get('reset_cues'):
                         self.store.db.execute("UPDATE segments SET duration=?,cues='[]' WHERE audio_hash=?",
                                               (result['duration'],key))
@@ -2096,6 +2101,7 @@ class Jobs:
                     elif (segment.get('performance') or {}).get('render_parts'):
                         self.store.db.execute('UPDATE segments SET performance=? WHERE generation_id=? AND id=?',
                             (json.dumps({k:v for k,v in segment['performance'].items() if k!='render_parts'},ensure_ascii=False),gid,segment['id']))
+                    self.store.complete_replacements(gid)
                 if result.get('reset_cues'):
                     write_json(meta, {**result, 'reset_cues': False})
             self._check()

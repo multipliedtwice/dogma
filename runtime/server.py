@@ -236,12 +236,14 @@ class Application:
     def dispatch(self,op,data):
         self.require_open()
         store=self.store
+        def playable(result):
+            return store.playback_generation(result['id'])if isinstance(result,dict)and 'segments'in result and 'book_id'in result else result
         if op=='library':
             return store.library()
         if op=='book':
             return store.book(data['id'])
         if op=='generation':
-            return store.generation(data['id'])
+            return store.playback_generation(data['id'])
         if op=='stress_reports':
             from rimsky.listener_stress import snapshot,notes,_book_key
             from rimsky.listener_stress_retake import queue_status_index,report_queue_status
@@ -265,7 +267,7 @@ class Application:
                 if status is not None:report['retake_queue']=status
             return reports
         if op=='report_stress':
-            report=store.report_stress(data['generation_id'],data['segment_id'],data['source_id'],data['selected_text'],data.get('text_offset'),data.get('audio_offset'),data.get('kind','stress'),data.get('comment',''),data.get('intended_stress'))
+            report=store.report_stress(data['generation_id'],data['segment_id'],data['source_id'],data['selected_text'],data.get('text_offset'),data.get('audio_offset'),data.get('kind','stress'),data.get('comment',''),data.get('intended_stress'),data.get('audio_hash'),data.get('audio_revision'))
             if report.get('kind')=='stress' and 'character_state' not in report:
                 try:
                     from rimsky.series_characters import record_listener_stress
@@ -286,7 +288,7 @@ class Application:
                 report['retake_queue']={'id':report['id'],'status':'held','error':str(error)}
             return report
         if op=='generation_poll':
-            return store.generation_poll(data['id'], data.get('revision'))
+            return store.playback_generation_poll(data['id'], data.get('revision'))
         if op=='external_jobs':
             from rimsky.external_progress import external_jobs
             return {'jobs':external_jobs(Path(__file__).resolve().parents[1],ttl=20.0)}
@@ -366,15 +368,15 @@ class Application:
                     'character_analysis':provider,'speaker_tie_breaker':current['speaker_tie_breaker'],'unresolved_policy':current['unresolved_policy'],
                     'pinned_at':datetime.now(timezone.utc).isoformat(timespec='microseconds')}
             generation=store.create_generation(data['book_id'],config,data.get('name',''),data.get('chapters'))
-            return self.jobs.start(generation['id'])
+            return playable(self.jobs.start(generation['id']))
         if op=='repair_audio':
-            return self.jobs.repair(data['id'])
+            return playable(self.jobs.repair(data['id']))
         if op=='resume':
-            return self.jobs.start(data['id'])
+            return playable(self.jobs.start(data['id']))
         if op=='pause':
             return self.jobs.pause(data['id'])
         if op=='start_narration':
-            return self.jobs.start_narration(data['id'])
+            return playable(self.jobs.start_narration(data['id']))
         if op=='cast_rename':
             return self.jobs.cast_rename(data['id'],data['character_id'],data['name'])
         if op=='cast_merge':
@@ -390,7 +392,7 @@ class Application:
         if op=='pack_voices':
             return self.jobs.pack_voices(data['id'])
         if op=='revise':
-            return self.jobs.revise(data['id'],data['changes'],data.get('name',''))
+            return playable(self.jobs.revise(data['id'],data['changes'],data.get('name','')))
         if op=='rename_generation':
             store.generation(data['id'])
             store.execute('UPDATE generations SET name=? WHERE id=?',(bounded_text(data['name']),data['id']))

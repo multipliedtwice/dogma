@@ -2,6 +2,56 @@
 
 Product decisions confirmed by the user on 2026-10-14.
 
+## One current audiobook output
+
+User decision, 2026-10-25: each book has one current audiobook. Generating again,
+correcting pronunciation or extending a chapter updates that output progressively.
+The listener uses the same book page and output identity, without choosing a
+generation number, hash or version. Older listening links resolve to the current
+book output. Changing the selected chapter scope must not discard other available
+chapters from that book.
+
+Stage only the replacement work. Existing audio remains the current playable
+output until a replacement passes basic integrity checks and the selected
+processing mode's checks. Commit each replacement's audio reference, timing,
+spoken text and synthesis receipt together. Do not attach new pronunciation or
+speaker metadata to old audio. A failed or pending replacement leaves the last
+playable part available and exposes the update's real status separately. A stale
+worker cannot overwrite a newer accepted correction or completed replacement.
+
+Playback follows source anchors. Preserve an unaffected passage's offset and
+play/pause state; reset the offset when the active passage itself is replaced.
+Internal per-part revisions, content hashes and HTTP cache validators prevent
+stale bytes and inconsistent range requests. These identifiers do not create
+separate user-facing audiobook versions. A page already open follows current
+updates automatically. Exports snapshot the currently playable parts, disclose
+pending replacements and retain only the asset references needed while exporting.
+Explicitly saved user files outside managed output storage are not cleanup targets.
+
+Keep durable raw human corrections and compact render receipts: source identity
+and range, actual spoken input, model/reference and request hashes, sampling
+settings, output hash and the applicable human instruction. A report from an old
+tab retains the hash and receipt of the audio actually heard; never silently bind
+it to a newer take at the same output identity. Missing heard-audio evidence is
+reported as unknown. Retaining a note does not require keeping its old audio
+forever or inventing listening approval for a replacement.
+
+Keep one managed current copy of each required asset. Reuse unchanged parts;
+do not copy a whole audiobook, preparation tree or native-audio ancestry for one
+correction. After an atomic commit, reclaim superseded generated audio, obsolete
+assembled prefixes and finished job scratch when no current output, active job
+or export references them. Keep only compact operational/provenance history by
+default. Explicitly retained diagnostic cases may keep scoped evidence separately.
+Source books, correction profiles, human labels, reviewed training audio and
+models remain protected. Migration of existing output must check references,
+active processes, protected archives and hard links before scoped removal, and
+report actual reclaimed space rather than summing duplicate hard-link sizes.
+
+This decision supersedes older requirements in this specification to preserve
+whole immutable generations or every historical audio take. Exact synthesis
+cache keys, authoritative human instructions and approved model pins remain
+required. A temporary job identifier or input snapshot is not a second audiobook.
+
 ## One-shot production and development feedback
 
 User decision, 2026-10-23: production targets the best possible first render
@@ -44,7 +94,8 @@ approval. Turn supported conclusions into reusable regression cases, then
 measure first-take correctness and rendering cost on both the retained cases and
 unseen material with automatic retakes disabled. Ship validated improvements
 through a normal versioned release; freeze their inputs and policy in synthesis
-and cache keys. Never silently rewrite an existing generation.
+and cache keys. Apply released improvements to requested replacement parts in the
+current audiobook, with the changed input and actual output recorded together.
 
 This decision supersedes earlier unconditional automatic-verification and
 recovery wording. The strict recognition and retake contracts below apply only
@@ -66,7 +117,7 @@ existing finite-verb Opus stress pass must preserve Luna's fixed е/ё spelling.
 Explicit source marks and durable listener corrections outrank automatic
 analysis. Apply the current human correction snapshot last, before phonetics.
 
-Preserve historical Luna decisions, raw requests and audio. A restoration uses
+Preserve historical Luna decisions and compact raw-request/output receipts. A restoration uses
 new immutable inputs and exact retained pre-context text, verifies that replay
 reproduces the old contextual result, then applies current human corrections.
 Do not infer a baseline from word-only matches or overwrite a historical plan.
@@ -253,7 +304,7 @@ cast. Derive the family from the source and morphology, with ambiguity guards
 against unrelated words. Automatically regenerate every affected available
 passage in the current book generation and apply the correction to later
 passages. Ordinary ambiguous-word corrections remain bound to their exact source
-context. Preserve historical audio, all unaffected PCM, music and progressive
+context. Preserve raw human notes, all unaffected current PCM, music and progressive
 playback. A report from a stale generation must still update the shared rule and
 reach the current generation. Show actual queued/running/applied/held status;
 do not present a saved report as a completed repair.
@@ -261,7 +312,7 @@ do not present a saved report as a completed repair.
 User clarification, 2026-10-25: a proper-name choice belongs to the character's
 series, across every volume and regeneration in both development and production.
 The latest explicit human choice replaces earlier choices, including accidental
-ones. Original notes and audio remain historical evidence. Reopening an old
+ones. Original notes and compact heard-audio receipts remain historical evidence. Reopening an old
 volume, replaying an old queue item or importing old preparation must never make
 its superseded choice authoritative again; equal timestamps follow save order.
 Use an established, uniquely matching series family to resolve an ambiguous name
@@ -273,12 +324,12 @@ heard-note provenance distinct from derived family propagation; do not fabricate
 listening evidence for the other mentions. Future rendering in any series volume
 uses the latest choice. Context-only ordinary-word notes remain occurrence-bound.
 
-If an external renderer publishes a replacement generation, return its identity
-and affected source passages in the correction outcome. The player must adopt
-that replacement while the listener remains on the requesting book/version,
+If an external renderer publishes a replacement part, return the current output
+identity, revision and affected source passages in the correction outcome. The player must adopt
+that update while the listener remains on the requesting book,
 preserving play/pause state and the source anchor. Reset a replaced passage's
-audio offset; retain an unaffected passage's offset. A later explicit book,
-version or reading navigation takes priority over automatic adoption. Keep the
+audio offset; retain an unaffected passage's offset. Explicit book or reading
+navigation takes priority over automatic adoption. Keep the
 replacement accessible without requiring the listener to report the issue again.
 
 Explicit user corrections work with automatic post-processing disabled. They do
@@ -381,9 +432,10 @@ reprioritize work after seeking. For the current listening preview, publish
 the first 5–10 minutes, then extend it each additional 5–10 minutes.
 
 Publish completed audio prefixes/chunks atomically, with their actual check
-status under the generation's selected processing mode. Asset URLs include
-their version/hash; an existing version never changes underneath a player.
-Updates preserve the current chapter, absolute playback position and paused or
+status under the selected processing mode. Current output has one stable book URL;
+per-part revision/hash cache markers remain internal. Publish replacement bytes
+atomically and validate HTTP ranges against the corresponding asset revision.
+Updates preserve the current chapter, source anchor and paused or
 playing state. Reaching the current buffer end waits for more audio, rather
 than falsely reporting that the chapter or book is finished.
 

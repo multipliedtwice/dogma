@@ -1,5 +1,28 @@
 # Project working instructions
 
+## One current audiobook output (user decision, 2026-10-25)
+
+- Keep one current output per book. Regeneration updates that output progressively;
+  do not create another user-visible generation, listening link or complete audio
+  directory for each correction. Existing links resolve to the current book output.
+- Keep an existing part playable until its replacement passes the selected mode's
+  integrity checks, then publish the new part and its actual metadata atomically.
+  Failed replacements leave the existing audio available with an honest pending
+  or failed update status. Preserve unaffected parts and source-based playback.
+- Internal content hashes, per-part revisions and frozen job inputs still prevent
+  stale caches and stale-worker commits. They are implementation details, not
+  audiobook versions the listener must choose between.
+- Retain durable human notes and compact source/model/request/hash receipts.
+  Do not retain complete earlier audio outputs or copy whole ancestry trees merely
+  for provenance. Reclaim superseded managed audio and temporary job output once
+  current playback, active jobs and exports no longer reference them.
+- Source books, manual-labeling/, human corrections, reviewed training media and
+  model files remain protected. Existing-data cleanup requires a scoped dependency,
+  active-process and protected-archive check; never delete training-work/ wholesale.
+- This decision supersedes earlier requirements below to retain whole immutable
+  generations, all earlier audio attempts or user-facing version URLs. Immutable
+  synthesis keys, model pins and raw human instructions remain required.
+
 ## Production speech engine decision: fine-tuned Higgs
 
 - Production checkpoint decision, 2026-10-21: the only checkpoint allowed for
@@ -35,7 +58,8 @@
 - Playback is progressive. Publish the first 5–10 minutes as soon as available,
   then extend chapter assets every additional 5–10 minutes without requiring
   all chapters to finish. Preserve the listener's position and playback state,
-  use immutable chunk/version URLs, and disclose pending evaluation checks.
+  use internal per-part cache revisions behind one stable book URL, and disclose
+  pending evaluation checks.
   See docs/CORE_NARRATION_SPEC.md for the acceptance and buffering contract.
 - Current implementation order is:
   1. integrate custom fine-tuned Higgs into production generation;

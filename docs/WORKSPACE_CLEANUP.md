@@ -1,8 +1,24 @@
 # Workspace cleanup inventory
 
-Last audited: 2026-10-21. Sizes are logical sizes and can overstate reclaimed
+Current-output migration audited: 2026-10-25; other candidates last audited
+2026-10-21. Sizes are logical sizes and can overstate reclaimed
 disk space where files are hard-linked. This document identifies cleanup
 targets; it does not authorize blanket deletion of `training-work/`.
+
+User decision, 2026-10-25: retain one current audiobook output per book and
+replace regenerated parts progressively. Earlier full audio outputs are no
+longer permanent archives. Preserve human notes and compact source/request/model/
+output receipts, migrate the currently playable output to a self-contained
+working set, then reclaim obsolete generated media that no current output,
+active job or export needs. A raw stress report retains its heard-audio hash;
+it does not by itself require keeping an entire earlier audiobook.
+
+The retained paths below describe the pre-migration dependency inventory.
+Retire old generated-output paths only after their current source, render and
+listener dependencies have been migrated and verified. Human labeling archives,
+source books, correction profiles, reviewed training media and production models
+remain protected regardless of the output retention policy. Record scoped
+removals and actual reclaimed physical space under `training-work/cleanup-reports/`.
 
 ## Canonical working set
 
@@ -16,7 +32,10 @@ minimum reproducible production-model set:
   and their review drafts;
 - `training-work/book1-listening-app/` and
   `training-work/elirm-iv-higgs-mvp/production-listener-library/`;
-- `training-work/elirm-iv-higgs-mvp/audio-palette-stress-scale-v1-ch123-oneshot/`;
+- `training-work/elirm-iv-higgs-mvp/source/` and its original book input;
+- `training-work/elirm-iv-higgs-mvp/current-book-96c636410090662b89c2b38a53a795f4/`
+  — the current book manifest, controls and compact render receipts; playable
+  parts live once in `production-listener-library/audio/`;
 - `training-work/higgs-production/models/custom-voice-plus-stress-scale-v1-q8_0.gguf`
   and its provenance, plus `custom-voice-plus-stress-scale-v1-native/`;
 - `training-work/higgs-stress-pilot/runs/production-scale-continuation-v1/`,
@@ -28,6 +47,29 @@ minimum reproducible production-model set:
 
 The production-model source of truth is `resources/production-higgs-model.json`.
 No directory name or modification time may override that manifest.
+
+## Completed current-output migration
+
+On 2026-10-25 the existing 2,024-part audiobook was adopted without copying or
+regenerating audio. The current manifest was verified with access to all twelve
+obsolete output roots forbidden. Those twelve roots were then removed after
+their 29,692 non-audio files were archived and individually verified. The archive
+is `training-work/cleanup-reports/superseded-elirm-book-output-receipts-20261025.zip`;
+its member manifest records original paths, sizes and SHA-256 checksums.
+
+The scoped removal reclaimed 10,515,156,288 hardlink-aware file bytes after the
+251,291,851-byte receipt archive. Eleven previous library outputs were compacted
+to receipts, and unreferenced audio/music plus obsolete playback caches were
+collected. Source text, raw listener notes and all 2,022 distinct current speech
+assets remained unchanged. Exact inventories and measured free-space changes
+are in `training-work/cleanup-reports/`. Protected labeling, source books, voice
+references, model files and user correction profiles were not cleanup targets.
+
+Existing bare listening links resolve to the current book. Successful future
+corrections discard their temporary generated WAVs after current publication;
+failed work retains diagnostic evidence. Playback caches keep the current
+requested layout and active readers/jobs, with a thirty-minute grace interval
+for obsolete layouts.
 
 ## Safe cleanup candidates
 
@@ -69,10 +111,10 @@ check before removing their audio or weights.
   `custom-voice-plus-stress-v1-q8_0.gguf`;
 - `training-work/higgs-production/models/base/` — 8.681 GiB upstream rebuild
   input, removable only if re-download is acceptable;
-- old preview and experiment generations under
-  `training-work/elirm-iv-higgs-mvp/` — 12.414 GiB logical. Retain compact
-  manifests and listener evidence; do not blanket-delete
-  `audio-palette-v3-ch123/`;
+- any remaining unregistered preview and experiment output under
+  `training-work/elirm-iv-higgs-mvp/`. The twelve registered output trees listed
+  in the completed migration audit have already been removed; re-audit other
+  experiments individually before treating them as unused;
 - old stress-pilot candidate pools and adapters: `yo-cpt-ru-candidates-8h-v1/`,
   `yo-cpt-ru-candidates-8h-v2/`, `yo-cpt-ru-consensus-5h-v2/`,
   `runs/stress-smoke-v2/` and `runs/stress-two-epoch-v2/` — about 4 GiB logical;
@@ -82,11 +124,10 @@ check before removing their audio or weights.
   still declared fallback/evaluation infrastructure and some scripts reference
   them, so remove only after that product decision and those references change.
 
-`audio-palette-v4yo-ch123-oneshot/` is 1.131 GiB and was rendered with obsolete
-model SHA `3093a099...`, not the pinned production SHA `78f09d20...`. Keep it
-temporarily as immutable listener/debug evidence; never present it as output of
-the current production checkpoint, and archive or remove it after its reports
-and useful state have been migrated.
+The former `audio-palette-v4yo-ch123-oneshot/` used obsolete model SHA
+`3093a099...`, rather than production SHA `78f09d20...`. Its non-audio records
+are included in the completed migration archive; its generated audio was removed.
+Never attribute those historical records to the current production checkpoint.
 
 ## Never infer junk from age
 

@@ -15,11 +15,13 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 
 from .audio_source import open_audio_pair, open_shared_read
 from .export import capture_audio, run_encoder
 from .integrity import accepted_audio
 from .packs import resolve_binary
+from .playback_cache import collect as collect_cache, reading as cache_reading
 from .util import AppError, atomic_write, digest, file_digest, require_id
 
 CHUNK_SECONDS = 300
@@ -73,6 +75,8 @@ class PlaybackStreams:
         self.closing = threading.Event()
         self.queue, self.queued, self.contexts, self.desired = [], set(), {}, {}
         self.active = None
+        self.cache_readers = {}
+        self.cache_collected_at = 0.
         self.recipe = None
         self.thread = threading.Thread(target=self._worker, name='dogma-playback-compression', daemon=True)
         self.thread.start()
@@ -143,7 +147,7 @@ class PlaybackStreams:
         return layers, end
 
     def _plan(self, gid, music, volume):
-        generation = self.store.generation(gid)
+        generation = self.store.playback_generation(gid)
         recipe = self._recipe()
         snapshot = self.music.status(gid) if music and volume else {}
         holds, chunks = [], []
@@ -154,7 +158,13 @@ class PlaybackStreams:
         chapters = list(dict.fromkeys(s['chapter_id'] for s in generation['segments']))
         published = []
         for path in self.folder.glob('*.json'):
-            record = _read(path)
+            try:
+                record = _read(path)
+            except AppError:
+                # A superseded record may have been collected after glob().
+                if not path.exists():
+                    continue
+                raise
             spec = record.get('spec') or {}
             if (record.get('status') == 'ready' and spec.get('recipe') == recipe
                     and spec.get('music') == music and spec.get('music_volume') == volume
@@ -300,9 +310,17 @@ class PlaybackStreams:
                 if self._record(chunk['key']) is None:
                     self.queue.append({'generation_id': generation_id, 'map_key': plan['key'], **chunk})
                     self.queued.add(chunk['key'])
+            _write(self.folder / 'maps' / (plan['key'] + '.json'), {'generation_id': generation_id, 'music': music, 'music_volume': float(music_volume), 'key': plan['key'], 'chunks': [c['key'] for c in plan['chunks']]})
             self.condition.notify_all()
-        _write(self.folder / 'maps' / (plan['key'] + '.json'), {'generation_id': generation_id, 'music': music, 'music_volume': float(music_volume), 'key': plan['key'], 'chunks': [c['key'] for c in plan['chunks']]})
+        if time.monotonic() - self.cache_collected_at > 300:
+            self.prune_cache()
         return self._public(plan)
+
+    def prune_cache(self, *, execute=True, grace_seconds=1800):
+        result = collect_cache(self, execute=execute, grace_seconds=grace_seconds)
+        if execute:
+            self.cache_collected_at = time.monotonic()
+        return result
 
     def _public(self, plan):
         chunks, errors = [], []
@@ -363,6 +381,10 @@ class PlaybackStreams:
                                 self.queued.add(key)
 
     def _build(self, task, stop):
+        with self.store.audio_lease(p['audio_hash'] for p in task['spec']['parts']):
+            self._build_leased(task, stop)
+
+    def _build_leased(self, task, stop):
         spec, key = task['spec'], task['key']
         with tempfile.TemporaryDirectory(prefix='encode-', dir=self.folder) as temporary:
             folder = Path(temporary)
@@ -489,7 +511,7 @@ class PlaybackStreams:
                 break
         if not authorized:
             raise AppError('Continuous playback audio is no longer referenced by the current saved source.')
-        with open_shared_read(self.folder / (key + '.mp3')) as source:
+        with cache_reading(self, key), open_shared_read(self.folder / (key + '.mp3')) as source:
             if os.fstat(source.fileno()).st_size != record['bytes'] or hashlib.file_digest(source, 'sha256').hexdigest() != record['audio_sha256']:
                 raise AppError('Continuous playback audio checksum mismatch.')
             source.seek(0)

@@ -458,6 +458,11 @@ def native_batch(output,ready,units,timeout):
 
 
 def publish(output,ready,cid,units,data_dir=None):
+    if data_dir is not None:
+        from current_higgs_output import publish_completed
+        source_book=read(output.parent/'source/book.json')
+        current=publish_completed(data_dir,output,units,source_book['id'],chapter_id=cid)
+        if current is not None:return current
     import numpy as np,soundfile as sf
     from higgs_published_timeline import pin_timeline
     selected=[]

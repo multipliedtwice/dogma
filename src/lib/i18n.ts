@@ -7,11 +7,11 @@ const messages={
   previousChapter:['Previous chapter','Предыдущая глава'],nextChapter:['Next chapter','Следующая глава'],back15:['Back 15 seconds','Назад на 15 секунд'],forward15:['Forward 15 seconds','Вперёд на 15 секунд'],sleepActive:['Sleep timer is active','Таймер сна включён'],
 
   library:['Library','Библиотека'],openBook:['Open book','Открыть книгу'],settings:['Settings','Настройки'],local:['On your computer','На вашем компьютере'],
-  search:['Search your library','Поиск в библиотеке'],books:['books','книг'],chapters:['Chapters','Главы'],bookmarks:['Bookmarks','Закладки'],generations:['Generations','Озвучки'],
+  search:['Search your library','Поиск в библиотеке'],books:['books','книг'],chapters:['Chapters','Главы'],bookmarks:['Bookmarks','Закладки'],generations:['Audiobook','Аудиокнига'],
   read:['Read','Читать'],illustrated:['Illustrated','Иллюстрации'],study:['Study','Изучать'],export:['Export','Экспорт'],prepare:['Prepare audiobook','Озвучить книгу'],
   continue:['Continue','Продолжить'],play:['Play','Слушать'],pause:['Pause','Пауза'],resume:['Resume preparation','Продолжить озвучку'],ready:['Ready','Готово'],
   paused:['Paused','Приостановлено'],failed:['Needs attention','Нужна проверка'],pending:['Not generated','Не озвучено'],queued:['Queued','В очереди'],analyzing:['Reading characters','Анализ персонажей'],casting:['Assigning voices','Назначение голосов'],rendering:['Generating audio','Создание аудио'],aligning:['Aligning words','Синхронизация слов'],review:['Cast review','Проверка ролей'],held:['Held for review','Ожидает проверки'],
-  delete:['Delete','Удалить'],cancel:['Cancel','Отмена'],save:['Save','Сохранить'],rename:['Rename','Переименовать'],newGeneration:['New generation','Новая озвучка'],
+  delete:['Delete','Удалить'],cancel:['Cancel','Отмена'],save:['Save','Сохранить'],rename:['Rename','Переименовать'],newGeneration:['Prepare or update audio','Подготовить или обновить аудио'],
   narration:['Characters & narration','Персонажи и озвучка'],appearance:['Appearance','Оформление'],light:['Light','Светлая'],dark:['Dark','Тёмная'],sepia:['Sepia','Сепия'],
   emptyTitle:['Your next audiobook starts with a book.','Ваша следующая аудиокнига начинается с книги.'],
   emptyText:['Open an EPUB or FB2. Keep the text, give characters their own voices, and listen at your pace.','Откройте EPUB или FB2. Читайте оригинал, слушайте голоса персонажей и сохраняйте аудио.'],

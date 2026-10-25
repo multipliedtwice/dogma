@@ -34,6 +34,13 @@ class FakeStore:
 
 
 class ListenerStressRetakeTest(unittest.TestCase):
+    def test_queue_origin_preserves_explicit_heard_identity_without_rehashing_legacy_fields(self):
+        from rimsky.listener_stress_retake import _origin
+        old={'id':'report','audio_hash':'a'*64}
+        legacy=_origin(old)
+        self.assertNotIn('heard_revision',legacy)
+        self.assertEqual(_origin({**old,'heard_binding':'retired_receipt','heard_revision':12}),
+                         {**legacy,'heard_binding':'retired_receipt','heard_revision':12})
     def test_retake_uses_current_pin_not_the_heard_model_override(self):
         pinned = ROOT / 'current-production.gguf'
         with patch.dict('process_listener_stress_queue.os.environ', {'RIMSKY_HIGGS_MODEL': 'heard-old.gguf'}), \

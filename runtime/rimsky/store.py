@@ -66,7 +66,7 @@ CREATE TRIGGER IF NOT EXISTS book_visual_version_insert AFTER INSERT ON books BE
 CREATE TRIGGER IF NOT EXISTS visual_version_insert AFTER INSERT ON visuals BEGIN UPDATE book_visual_versions SET revision=revision+1 WHERE id=NEW.book_id; END;
 CREATE TRIGGER IF NOT EXISTS visual_version_update AFTER UPDATE ON visuals BEGIN UPDATE book_visual_versions SET revision=revision+1 WHERE id=NEW.book_id; END;
 CREATE TRIGGER IF NOT EXISTS visual_version_delete AFTER DELETE ON visuals BEGIN UPDATE book_visual_versions SET revision=revision+1 WHERE id=OLD.book_id; END;
-PRAGMA user_version=4;
+PRAGMA user_version=5;
 '''
 DEFAULTS = {'pack_path': '', 'device': 'auto', 'theme': 'light', 'font_size': 20, 'line_height': 1.9, 'language': 'en', 'playback_rate': 1.0, 'volume': 0.85, 'follow': True, 'online_images': False, 'image_model': 'gpt-image-1', 'align_words': False, 'character_analysis': 'auto', 'speaker_tie_breaker': 'none', 'unresolved_policy': 'hold_flagged_segments', 'cast_review': True, 'music': True, 'music_volume': 1.0, 'music_pack_path': '', 'online_recommendations': False, 'recommendation_genres': []}
 POLLED_ANALYSIS = ('complete', 'casting_warnings', 'casting_notices', 'progress', 'degraded', 'approved', 'narrator_voices',
@@ -248,7 +248,7 @@ class Store:
         try:
             with self.lock:
                 version = self.db.execute('PRAGMA user_version').fetchone()[0]
-                if version > 4:
+                if version > 5:
                     raise AppError('This library was created by a newer application. Its data was not changed.')
                 self.db.executescript(SCHEMA)
                 report_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(stress_reports)')}
@@ -260,9 +260,14 @@ class Store:
                     self.db.execute("ALTER TABLE stress_reports ADD COLUMN intended_stress TEXT")
                 if 'synthesis_snapshot' not in report_columns:
                     self.db.execute("ALTER TABLE stress_reports ADD COLUMN synthesis_snapshot TEXT")
+                if 'heard_binding' not in report_columns:
+                    self.db.execute("ALTER TABLE stress_reports ADD COLUMN heard_binding TEXT NOT NULL DEFAULT 'legacy_unknown'")
+                if 'heard_revision' not in report_columns:self.db.execute('ALTER TABLE stress_reports ADD COLUMN heard_revision INTEGER')
                 segment_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(segments)')}
                 if 'performance' not in segment_columns:
                     self.db.execute("ALTER TABLE segments ADD COLUMN performance TEXT NOT NULL DEFAULT '{}'")
+                from .current_audiobook import install
+                install(self.db)
                 generation_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(generations)')}
                 if 'resume_on_launch' not in generation_columns:
                     self.db.execute('ALTER TABLE generations ADD COLUMN resume_on_launch INTEGER NOT NULL DEFAULT 0')
@@ -323,6 +328,15 @@ class Store:
         with self.lock:
             return [dict(x) for x in self.db.execute(query, parameters).fetchall()]
 
+    @contextlib.contextmanager
+    def transaction(self):
+        """Participate in the caller's transaction without committing it early."""
+        if self.db.in_transaction:yield
+        else:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                yield
+
     def audio_path(self, audio_hash):
         if not isinstance(audio_hash, str) or not re.fullmatch('[a-f0-9]{64}', audio_hash):
             raise AppError('Invalid saved audio hash.')
@@ -371,6 +385,7 @@ class Store:
             manifest = json.loads(book.pop('manifest'))
             book.update(chapter_count=len(visible_chapters(manifest)), characters=manifest['characters'], cover=manifest.get('cover'), format=manifest['format'])
             book['generations'] = self.generation_list(book['id'])
+            book['current_generation_id'] = self.current_generation_id(book['id'])
             position = self.rows('SELECT value FROM positions WHERE book_id=?', (book['id'],))
             book['position'] = json.loads(position[0]['value']) if position else None
             reading = self.rows('SELECT value FROM reading_positions WHERE book_id=?', (book['id'],))
@@ -393,6 +408,7 @@ class Store:
             if 'preparation' not in book or len(book['chapters']) != original_chapter_count:
                 book['preparation'] = preparation_report(book)
             book['generations'] = self.generation_list(book_id)
+            book['current_generation_id'] = self.current_generation_id(book_id)
             book['bookmarks'] = self.rows('SELECT * FROM bookmarks WHERE book_id=? ORDER BY created', (book_id,))
             book['visuals'] = self.visuals(book_id)
             book['visual_revision'] = self.rows('SELECT revision FROM book_visual_versions WHERE id=?', (book_id,))[0]['revision']
@@ -424,7 +440,7 @@ class Store:
         return self.book(book_id)
 
     def generation_list(self, book_id):
-        items = self.rows('SELECT id,book_id,name,created,updated,status,error,parent_id,config FROM generations WHERE book_id=? ORDER BY created DESC,rowid DESC', (book_id,))
+        items = self.rows("SELECT id,book_id,name,created,updated,status,error,parent_id,config FROM generations WHERE book_id=? AND status!='retired' ORDER BY created DESC,rowid DESC", (book_id,))
         for item in items:
             item['config'] = json.loads(item['config'])
             item['progress'] = self.rows("SELECT count(*) total,coalesce(sum(status='ready'),0) ready,coalesce(sum(status='review'),0) held,coalesce(sum(duration),0) duration FROM segments WHERE generation_id=?", (item['id'],))[0]
@@ -457,12 +473,145 @@ class Store:
             item['revision'] = self.rows('SELECT revision FROM generation_versions WHERE id=?', (generation_id,))[0]['revision']
             return item
 
-    def report_stress(self, generation_id, segment_id, source_id, selected_text, text_offset=None, audio_offset=None, kind='stress', comment='', intended_stress=None):
-        generation = self.generation(generation_id)
+    def current_generation_id(self, book_id):
+        rows=self.rows('SELECT generation_id FROM current_audiobooks WHERE book_id=?',(book_id,))
+        if rows:return rows[0]['generation_id']
+        rows=self.rows("SELECT id FROM generations WHERE book_id=? AND status!='retired' ORDER BY created DESC,rowid DESC LIMIT 1",(book_id,))
+        return rows[0]['id']if rows else None
+
+    def current_generation(self, book_id):
+        self._book_manifest(book_id)
+        identifier=self.current_generation_id(book_id)
+        return self.generation(identifier)if identifier else None
+
+    def set_current_generation(self, book_id, generation_id):
+        with self.lock,self.transaction():
+            generation=self.generation(generation_id)
+            if generation['book_id']!=book_id:raise AppError('The audiobook belongs to a different book.')
+            if generation['analysis'].get('retired'):raise AppError('A retired output cannot replace the current audiobook.')
+            self.db.execute('INSERT INTO current_audiobooks(book_id,generation_id) VALUES(?,?) ON CONFLICT(book_id) DO UPDATE SET generation_id=excluded.generation_id',(book_id,generation_id))
+        return self.generation(generation_id)
+
+    def playback_generation(self, generation_id):
+        from .current_audiobook import playable
+        with self.lock:
+            item=self.generation(generation_id)
+            if item['analysis'].get('retired'):
+                current=self.current_generation_id(item['book_id'])
+                if current and current!=generation_id:
+                    return {**self.playback_generation(current),'replaces_generation_id':generation_id}
+            working=item['segments']
+            item['preparation_progress']={'total':len(working),'ready':sum(row['status']=='ready'for row in working),
+                                          'held':sum(row['status']=='review'for row in working)}
+            item['segments']=playable(self,generation_id,working)
+            item['pending_replacements']=sum('replacement_status'in row for row in item['segments'])
+            return item
+
+    def playback_generation_poll(self, generation_id, revision=None):
+        # Replacement topology can split one previous part into several new ones.
+        # Send a coherent full view when any requested revision changed.
+        with self.lock:
+            metadata=self.rows('SELECT status FROM generations WHERE id=?',(require_id(generation_id),))
+            if metadata and metadata[0]['status']=='retired':
+                current=self.playback_generation(generation_id)
+                return {'id':current['id'],'revision':current['revision'],'generation':current,'full':True,'removed_segment_ids':[]}
+            result=self.generation_poll(generation_id,revision)
+            if result['generation'] is not None:
+                view=self.playback_generation(generation_id)
+                view['analysis']=result['generation']['analysis']
+                result.update(generation=view,full=True,removed_segment_ids=[])
+            return result
+
+    def complete_replacements(self, generation_id):
+        from .current_audiobook import release_completed
+        with self.lock,self.transaction():return release_completed(self,generation_id)
+
+    def retire_previous_outputs(self, book_id):
+        """Compact old output rows; actual file collection is a separate step."""
+        from .current_audiobook import archive_part,previous_parts
+        with self.lock,self.transaction():
+            current=self.current_generation_id(book_id)
+            if not current:raise AppError('Choose the current audiobook before retiring previous outputs.')
+            previous=[g for g in self.generation_list(book_id)if g['id']!=current]
+            if any(g['status']in ACTIVE for g in previous):raise AppError('An earlier audiobook is still active.')
+            previous_ids={g['id']for g in previous}
+            if any(row['generation_id']in previous_ids for row in self.rows("SELECT generation_id FROM listener_correction_jobs WHERE status IN ('queued','running','retrying')")):
+                raise AppError('A correction for an earlier output is still active.')
+            retired=[]
+            for saved in previous:
+                generation=self.generation(saved['id'])
+                if generation['analysis'].get('retired'):continue
+                for part in [*generation['segments'],*previous_parts(self,saved['id'])]:archive_part(self,saved['id'],part)
+                self.db.execute('DELETE FROM segments WHERE generation_id=?',(saved['id'],))
+                self.db.execute('DELETE FROM audiobook_replacements WHERE generation_id=?',(saved['id'],))
+                compact={'retired':True,'current_generation_id':current,'previous_analysis_sha256':digest(generation['analysis']),
+                         'previous_cast_sha256':digest(generation['cast']),'takes':generation['analysis'].get('takes',{}),'retired_at':now()}
+                self.db.execute("UPDATE generations SET status='retired',analysis=?,cast='[]',resume_on_launch=0 WHERE id=?",(json.dumps(compact),saved['id']))
+                retired.append(saved['id'])
+            return {'current_generation_id':current,'retired_generation_ids':retired}
+
+    def audio_lease(self,hashes):
+        from .current_audiobook import audio_lease
+        return audio_lease(self,hashes)
+
+    def active_audio_leases(self):
+        from .current_audiobook import active_leases
+        with self.lock,self.transaction():return active_leases(self)
+
+    def publish_current_parts(self, generation_id, parts, *, expected_revision=None, metadata=None):
+        """Validate and atomically adopt ready parts under an optimistic revision."""
+        from .current_audiobook import FIELDS
+        from .integrity import accepted_audio
+        if not isinstance(parts,list)or not parts:raise AppError('Supply ready audiobook parts.')
+        with self.lock,self.transaction():
+            generation=self.generation(generation_id)
+            if expected_revision is not None and generation['revision']!=expected_revision:
+                raise AppError('The audiobook changed before these parts could be published. Refresh the current revision.')
+            book=self._book_manifest(generation['book_id'])
+            blocks={b['id']:b for c in book['chapters']for b in c['blocks']}
+            chapters={b['id']:c['id']for c in book['chapters']for b in c['blocks']}
+            seen=set();built=[]
+            for part in parts:
+                if (not isinstance(part,dict)or set(part)-set(FIELDS)or part.get('id')in seen
+                    or not isinstance(part.get('id'),str)or not re.fullmatch(r'[A-Za-z0-9_-]{1,300}',part['id'])
+                    or part.get('generation_id',generation_id)!=generation_id):
+                    raise AppError('Invalid or duplicate audiobook part.')
+                seen.add(part['id']);row={**part,'generation_id':generation_id}
+                block=blocks.get(row.get('source_id'))
+                if (not block or type(row.get('start'))is not int or type(row.get('end'))is not int
+                    or not 0<=row['start']<row['end']<=len(block['text'])
+                    or block['text'][row['start']:row['end']]!=row.get('text')or row.get('status')!='ready'
+                    or row.get('chapter_id')!=chapters[row['source_id']]or type(row.get('ordinal'))is not int):
+                    raise AppError('A published audio part must match its exact source range.')
+                info=accepted_audio(self.audio_path(row.get('audio_hash')))
+                if abs(info['duration']-row.get('duration',-1))>1/info['sample_rate']:
+                    raise AppError('A published audio part has inconsistent duration.')
+                for key in ('cues','performance'):
+                    if not isinstance(row.get(key),str):row[key]=json.dumps(row.get(key,[]if key=='cues'else{}),ensure_ascii=False)
+                built.append(tuple(row[key]for key in FIELDS))
+            if metadata is not None and (not isinstance(metadata,dict)or set(metadata)-{'status','config','analysis','name','cast','error'}):
+                raise AppError('Invalid current audiobook metadata.')
+            columns=','.join(FIELDS);updates=','.join(f'{key}=excluded.{key}'for key in FIELDS if key not in ('generation_id','id'))
+            self.db.executemany(f'INSERT INTO segments({columns}) VALUES({",".join("?"for _ in FIELDS)}) ON CONFLICT(generation_id,id) DO UPDATE SET {updates}',built)
+            for key,value in (metadata or {}).items():
+                if key in ('config','analysis','cast'):value=json.dumps(value,ensure_ascii=False)
+                self.db.execute(f'UPDATE generations SET {key}=? WHERE id=?',(value,generation_id))
+            self.db.execute('UPDATE generations SET updated=? WHERE id=?',(now(),generation_id))
+            self.complete_replacements(generation_id)
+            self.set_current_generation(generation['book_id'],generation_id)
+            return self.generation(generation_id)
+
+    def report_stress(self, generation_id, segment_id, source_id, selected_text, text_offset=None, audio_offset=None, kind='stress', comment='', intended_stress=None, audio_hash=None, audio_revision=None):
+        from .current_audiobook import heard_part
+        generation = self.playback_generation(generation_id)
         segment = next((s for s in generation['segments'] if s['id'] == segment_id), None)
+        if audio_revision is not None and(type(audio_revision)is not int or audio_revision<1):raise AppError('Invalid heard audio revision.')
+        if audio_hash is not None:
+            require_id(audio_hash)
+            segment=heard_part(self,generation_id,segment_id,audio_hash)
         if not segment or segment['source_id'] != source_id:
             raise AppError('Selected passage does not match this narration segment.')
-        if segment['status'] != 'ready' or not segment['audio_hash']:
+        if segment.get('status','ready') != 'ready' or not segment['audio_hash']:
             raise AppError('Generate this narration passage before reporting its stress.')
         book = self.book(generation['book_id'])
         chapter = next((c for c in book['chapters'] if c['id'] == segment['chapter_id']), None)
@@ -507,12 +656,16 @@ class Store:
         report = {'id': uid(), 'book_id': generation['book_id'], 'generation_id': generation_id,
                   'segment_id': segment_id, 'chapter_id': segment['chapter_id'], 'source_id': source_id,
                   'selected_text': selected_text, 'text_offset': text_offset, 'audio_offset': audio_offset,
-                  'audio_hash': segment['audio_hash'], 'passage_text': block['text'],
-                  'spoken_text': segment['spoken'], 'created': now(), 'kind': kind, 'comment': comment,
+                  'audio_hash': audio_hash, 'passage_text': block['text'],
+                  'spoken_text': segment['spoken']if audio_hash else '', 'created': now(), 'kind': kind, 'comment': comment,
                   'intended_stress': intended_stress,
-                  'synthesis_snapshot': (segment.get('performance') or {}).get('synthesis_snapshot')}
+                  'synthesis_snapshot': (segment.get('performance') or {}).get('synthesis_snapshot')if audio_hash else None,
+                  'heard_binding':'current'if audio_hash and segment.get('status')=='ready'else 'retired_receipt'if audio_hash else 'unknown',
+                  'heard_revision':audio_revision}
         with self.lock, self.db:
-            self.db.execute('INSERT INTO stress_reports (id,book_id,generation_id,segment_id,chapter_id,source_id,selected_text,text_offset,audio_offset,audio_hash,passage_text,spoken_text,created,kind,comment,intended_stress,synthesis_snapshot) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (*list(report.values())[:-1], json.dumps(report['synthesis_snapshot'], ensure_ascii=False) if report['synthesis_snapshot'] is not None else None))
+            columns=('id','book_id','generation_id','segment_id','chapter_id','source_id','selected_text','text_offset','audio_offset','audio_hash','passage_text','spoken_text','created','kind','comment','intended_stress','synthesis_snapshot','heard_binding','heard_revision')
+            values=[json.dumps(report[key],ensure_ascii=False)if key=='synthesis_snapshot'and report[key]is not None else report[key]for key in columns]
+            self.db.execute(f'INSERT INTO stress_reports ({",".join(columns)}) VALUES({",".join("?"for _ in columns)})',values)
         if kind == 'stress':
             from .series_characters import record_listener_stress
             try:
@@ -534,6 +687,10 @@ class Store:
         reports = self.rows('SELECT * FROM stress_reports WHERE book_id=? ORDER BY created DESC,rowid DESC', (book_id,))
         for report in reports:
             report['synthesis_snapshot'] = json.loads(report['synthesis_snapshot']) if report.get('synthesis_snapshot') else None
+            # ALTER TABLE defaults are schema metadata, not new human evidence.
+            # Preserve the exact pre-migration raw journal shape on replay.
+            if report.get('heard_binding')=='legacy_unknown'and report.get('heard_revision')is None:
+                report.pop('heard_binding');report.pop('heard_revision')
         return reports
 
     def visuals(self, book_id):
@@ -583,18 +740,41 @@ class Store:
         selected = chapter_selection(book, chapters)
         if not any(narratable(b) for c in book['chapters'] if c['id'] in selected for b in c['blocks']):
             raise AppError('The selected chapters contain no narratable text.')
-        generation_id = uid()
+        original=self.current_generation(book_id)
+        if original and original['status']in ACTIVE:raise AppError('Pause the audiobook before regenerating it.')
+        generation_id = original['id']if original else uid()
         from .opening import attach_opening
-        config = {**config, 'chapters': selected, 'schema': 1}
-        used = {item['name'] for item in book['generations']}
-        title = bounded_text(name or next(label for label in (f'Generation {number}' for number in itertools.count(len(book['generations']) + 1)) if label not in used))
+        previous=dict(original['config'])if original else {}
+        from .current_audiobook import previous_parts
+        retained=[*original['segments'],*previous_parts(self,original['id'])]if original else []
+        combined=set(selected)|{s['chapter_id']for s in retained if s.get('audio_hash')}
+        config = {**previous,**config, 'chapters': [c['id']for c in book['chapters']if c['id']in combined], 'schema': 1}
+        config.pop('engine',None);config.pop('external_music',None)
+        title = bounded_text(name or (original['name']if original else book['title']))
         with self.lock, self.db:
-            config['opening'] = attach_opening(self, book)
-            self.db.execute('INSERT INTO generations(id,book_id,name,created,updated,status,config) VALUES(?,?,?,?,?,?,?)', (generation_id, book_id, title, now(), now(), 'paused', json.dumps(config, ensure_ascii=False)))
-            for source in speech_sources(book, selected):
+            config['opening'] = previous.get('opening')or attach_opening(self, book)
+            reusable=bool(original and original['analysis'].get('complete')and previous.get('pack_fingerprint')==config.get('pack_fingerprint')
+                          and previous.get('engine')!='higgs_audio_tts_q8_external_preview')
+            analysis=dict(original['analysis'])if reusable else {}
+            if original:
+                takes=self.takes(book_id);targets=[s for s in original['segments']if s['chapter_id']in selected]
+                analysis['takes']={**analysis.get('takes',{}),**{s['id']:takes.get(s['id'],0)+1 for s in targets}}
+                self.db.execute('UPDATE generations SET name=?,updated=?,status=?,config=?,analysis=?,cast=?,error=?,resume_on_launch=0 WHERE id=?',
+                    (title,now(),'paused',json.dumps(config,ensure_ascii=False),json.dumps(analysis,ensure_ascii=False),
+                     json.dumps(original['cast']if reusable else [],ensure_ascii=False),'',generation_id))
+                self.db.executemany("UPDATE segments SET status='pending',audio_hash=NULL,duration=0,cues='[]',warning='' WHERE generation_id=? AND id=?",
+                    [(generation_id,s['id'])for s in targets])
+                if not reusable:self.db.execute('DELETE FROM segments WHERE generation_id=?',(generation_id,))
+            else:
+                self.db.execute('INSERT INTO generations(id,book_id,name,created,updated,status,config) VALUES(?,?,?,?,?,?,?)', (generation_id, book_id, title, now(), now(), 'paused', json.dumps(config, ensure_ascii=False)))
+            sources=speech_sources(book,selected if reusable else config['chapters'])
+            known={s['source_id']for s in self._generation_segments(generation_id)}
+            for source in sources:
+                if source['source_id']in known:continue
                 self.db.execute('INSERT INTO segments(generation_id,id,ordinal,chapter_id,source_id,start,end,text,spoken) VALUES(?,?,?,?,?,?,?,?,?)',
                                 (generation_id, source['id'], source['ordinal'] * 100 + 1, source['chapter_id'], source['source_id'],
                                  source['start'], source['end'], source['text'], source['text']))
+            self.set_current_generation(book_id,generation_id)
         return self.generation(generation_id)
 
     def status(self, generation_id, status, error=''):
@@ -828,7 +1008,7 @@ class Store:
                 holds.append((hold_warning(warning, notice), sid))
             elif sid in held_before and sid not in backend:
                 releases.append((hold_warning(warning), sid))
-        new_id = uid()
+        new_id = generation_id
         status = 'review' if analysis.get('approved') is False else 'paused'
         config = dict(original['config'])
         if 'opening' in config:
@@ -839,8 +1019,8 @@ class Store:
             if 'opening' not in config:
                 from .opening import attach_opening
                 config['opening'] = attach_opening(self, self._book_manifest(original['book_id']))
-            self.db.execute('INSERT INTO generations(id,book_id,name,created,updated,status,config,cast,analysis,parent_id) VALUES(?,?,?,?,?,?,?,?,?,?)', (new_id, original['book_id'], bounded_text(name or revision_name(original['name'])), now(), now(), status, json.dumps(config), json.dumps(original['cast']), json.dumps(analysis, ensure_ascii=False), generation_id))
-            self.db.execute(f'INSERT INTO segments(generation_id,{columns}) SELECT ?,{columns} FROM segments WHERE generation_id=?', (new_id, generation_id))
+            self.db.execute('UPDATE generations SET updated=?,status=?,config=?,analysis=?,error=? WHERE id=?',
+                (now(),status,json.dumps(config),json.dumps(analysis,ensure_ascii=False),'',new_id))
             self.db.executemany("UPDATE segments SET spoken=?,speaker=?,delivery=?,status='pending',audio_hash=NULL,duration=0,cues='[]',warning='' WHERE generation_id=? AND id=?",
                                 [(spoken, speaker, delivery, new_id, segment_id) for spoken, speaker, delivery, segment_id in edits])
             self.db.executemany('UPDATE segments SET performance=? WHERE generation_id=? AND id=?',
@@ -848,6 +1028,7 @@ class Store:
             self.db.executemany("UPDATE segments SET status='review',warning=? WHERE generation_id=? AND id=?", [(warning, new_id, sid) for warning, sid in holds])
             self.db.executemany("UPDATE segments SET status='pending',audio_hash=NULL,duration=0,cues='[]',warning=? WHERE generation_id=? AND id=?",
                                 [(warning, new_id, sid) for warning, sid in releases])
+            self.set_current_generation(original['book_id'],new_id)
         return self.generation(new_id)
 
     def takes(self, book_id):
@@ -924,13 +1105,18 @@ class Store:
         return warnings
 
     def collect_audio(self):
-        with self.lock:
+        with self.lock,self.transaction():
             if self.rows("SELECT id FROM generations WHERE status IN ('queued','analyzing','casting','rendering','aligning') LIMIT 1"):
                 return ['Audio cleanup was deferred because preparation is active. Completed narration is kept.']
             used = {r['audio_hash'] for r in self.rows('SELECT DISTINCT audio_hash FROM segments WHERE audio_hash IS NOT NULL')}
-            used.update(r['audio_hash'] for r in self.rows('SELECT DISTINCT audio_hash FROM stress_reports WHERE audio_hash IS NOT NULL'))
+            from .current_audiobook import previous_parts
+            for row in self.rows('SELECT id FROM generations'):
+                for part in previous_parts(self,row['id']):
+                    used.add(part['audio_hash'])
+                    used.update(part.get('performance',{}).get('render_parts')or[])
+            used.update(self.active_audio_leases())
             from .opening import opening_hashes
-            for row in self.rows('SELECT config FROM generations'):
+            for row in self.rows("SELECT config FROM generations WHERE status!='retired'"):
                 used.update(opening_hashes({'config': json.loads(row['config'])}))
             for row in self.rows("SELECT performance FROM segments WHERE audio_hash IS NOT NULL AND instr(performance,'render_parts')>0"):
                 parts = json.loads(row['performance']).get('render_parts')

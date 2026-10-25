@@ -122,9 +122,29 @@ class ListeningProxyTest(unittest.TestCase):
         with opener.open(self.request(proxy.PRODUCTION_PAGE)) as response:
             self.assertEqual(response.read(),b'<html>production</html>')
             self.assertIn('listener=1',response.url)
-            self.assertIn('book='+'a'*32,response.url);self.assertIn('generation='+'b'*24,response.url)
+            self.assertIn('book='+'a'*32,response.url);self.assertNotIn('generation=',response.url)
         with urllib.request.urlopen(self.request(proxy.PRODUCTION_PAGE+'assets/app.js')) as response:self.assertEqual(response.read(),b'production asset')
         self.assertTrue(any(method=='GET' and path=='/' for method,path,_,_ in self.runtime.received))
+
+    def test_old_pinned_bookmark_opens_the_current_book_without_version_query(self):
+        with urllib.request.urlopen(self.request(proxy.PRODUCTION_PAGE+'?book='+'a'*32+'&generation='+'d'*24)) as response:
+            self.assertEqual(response.read(),b'<html>production</html>')
+            self.assertIn('book='+'a'*32,response.url)
+            self.assertNotIn('generation=',response.url)
+            self.assertIn('listener=1',response.url)
+
+    def test_book_only_link_enters_hosted_listener_mode_without_a_session_token(self):
+        with urllib.request.urlopen(self.request(proxy.PRODUCTION_PAGE+'?book='+'a'*32)) as response:
+            self.assertEqual(response.read(),b'<html>production</html>')
+            self.assertIn('listener=1',response.url)
+            self.assertNotIn('generation=',response.url)
+
+    def test_launch_time_generation_does_not_reappear_in_current_url(self):
+        self.server.listener_book_id='a'*32
+        self.server.listener_generation_id='d'*24
+        with urllib.request.urlopen(self.request(proxy.PRODUCTION_PAGE)) as response:
+            self.assertIn('book='+'a'*32,response.url)
+            self.assertNotIn('generation=',response.url)
 
     def test_runtime_credentials_are_server_side_for_assets_and_api(self):
         with urllib.request.urlopen(self.request(proxy.PRODUCTION_PAGE+'asset?kind=audio&id='+'c'*64)) as response:self.assertEqual(response.read(),b'audio')

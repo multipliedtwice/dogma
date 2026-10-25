@@ -7,11 +7,11 @@ import unittest
 import numpy as np
 import soundfile as sf
 
-from test_core import FB2, complete_audio
+from test_core import FB2, complete_audio, write_wave
 from rimsky.playback_streams import PlaybackStreams
 from rimsky.export import run_encoder
 from rimsky.store import Store
-from rimsky.util import AppError, file_digest
+from rimsky.util import AppError, file_digest, digest
 
 
 class _Music:
@@ -60,14 +60,25 @@ class PlaybackStreamTests(unittest.TestCase):
         self.assertTrue(manifest['holds'])
         self.assertTrue(all(c['status'] == 'pending' for c in manifest['chunks']))
 
-    def test_changed_source_invalidates_old_asset_authorization(self):
+    def test_replacement_keeps_old_playable_until_ready_then_invalidates_old_asset(self):
         manifest = self.wait()
         chunk = manifest['chunks'][0]
         first = chunk['parts'][0]['segment_id']
         self.store.execute("UPDATE segments SET status='review' WHERE generation_id=? AND id=?", (self.generation['id'], first))
         fresh = self.streams.request(self.generation['id'])
+        self.assertEqual(manifest['key'], fresh['key'])
+        with self.streams.open(chunk['key']) as audio:
+            self.assertGreater(len(audio.read()), 100)
+        replacement = digest({'old': chunk['parts'][0]['audio_hash'], 'replacement': True})
+        path = self.store.audio_path(replacement)
+        info = write_wave(path, seconds=2)
+        info['sha256'] = file_digest(path)
+        path.with_suffix('.json').write_text(json.dumps(info), encoding='utf-8')
+        self.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=? WHERE generation_id=? AND id=?",
+                           (replacement, info['duration'], self.generation['id'], first))
+        self.store.complete_replacements(self.generation['id'])
+        fresh = self.streams.request(self.generation['id'])
         self.assertNotEqual(manifest['key'], fresh['key'])
-        self.assertTrue(any(h['id'] == first for h in fresh['holds']))
         with self.assertRaises(AppError):
             with self.streams.open(chunk['key']):
                 pass
@@ -97,6 +108,8 @@ class PlaybackStreamTests(unittest.TestCase):
         first_chapter = original[0]['chapter_id']
         for segment in original[2:]:
             self.store.execute("UPDATE segments SET status='pending',duration=0 WHERE generation_id=? AND id=?", (self.generation['id'], segment['id']))
+        # This fixture models a first render, with no previously published tail.
+        self.store.execute('DELETE FROM audiobook_replacements')
         first = self.wait()
         chunk = first['chunks'][0]
         self.assertEqual(2, len(chunk['parts']))

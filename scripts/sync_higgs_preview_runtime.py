@@ -383,6 +383,20 @@ def sync_preview(*, workspace: Path, source: Path, prepared_book: Path, generati
     source_sha = file_digest(source)
     if prepared.get('source_hash') != source_sha or prepared.get('id') != source_sha[:32]:
         raise ValueError('Prepared book is not bound to the exact original source file')
+    # Once adopted, the Store owns current part publication. Re-running an old
+    # watcher must neither recreate a historical generation nor select it again.
+    from current_higgs_output import current_manifest, load, output_root
+    if current_manifest(data_dir, prepared['id']).exists():
+        store = Store(data_dir)
+        try:
+            view = load(store, data_dir, prepared['id'])
+            if generation_dir != output_root(data_dir, prepared['id']):
+                raise ValueError('This book uses current output; obsolete chapter sync is disabled')
+            return {'generation_id': view['generation_id'], 'revision': view['store_revision'],
+                    'generation': generation_dir.name, 'current': True, 'copied_audio': 0,
+                    'segments': len(view['parts'])}
+        finally:
+            store.close()
     progress = read_json(generation_dir / 'progress.json')
     generation_name = progress.get('generation')
     if generation_name != generation_dir.name:

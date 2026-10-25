@@ -17,6 +17,7 @@ from .audio_source import open_audio_pair, open_shared_read
 from .export import capture_audio, run_encoder
 from .integrity import accepted_audio, validate_coverage
 from .playback_streams import PlaybackStreams, _read, _write
+from .playback_cache import reading as cache_reading
 from .util import AppError, digest, file_digest, require_id
 
 
@@ -33,7 +34,7 @@ class PlaybackHLS(PlaybackStreams):
 
     def _plan(self, gid, music, volume):
         plan = super()._plan(gid, music, volume)
-        generation = self.store.generation(gid)
+        generation = self.store.playback_generation(gid)
         book = self.store._book_manifest(generation['book_id'])
         active = generation['status'] in ('queued', 'analyzing', 'casting', 'rendering', 'aligning')
         for chapter_id in dict.fromkeys(c['spec']['chapter_id'] for c in plan['chunks']):
@@ -72,6 +73,10 @@ class PlaybackHLS(PlaybackStreams):
         return value
 
     def _build(self, task, stop):
+        with self.store.audio_lease(p['audio_hash'] for p in task['spec']['parts']):
+            self._build_leased(task, stop)
+
+    def _build_leased(self, task, stop):
         spec, key = task['spec'], task['key']
         with tempfile.TemporaryDirectory(prefix='encode-', dir=self.folder) as temporary:
             folder = Path(temporary)
@@ -204,7 +209,7 @@ class PlaybackHLS(PlaybackStreams):
         info = record['files'].get(name)
         if not isinstance(info, dict):
             raise AppError('HLS fragment metadata is missing.')
-        with open_shared_read(self.folder / key / name) as source:
+        with cache_reading(self, key), open_shared_read(self.folder / key / name) as source:
             if os.fstat(source.fileno()).st_size != info['bytes'] or hashlib.file_digest(source, 'sha256').hexdigest() != info['sha256']:
                 raise AppError('Immutable HLS asset checksum mismatch.')
             source.seek(0)

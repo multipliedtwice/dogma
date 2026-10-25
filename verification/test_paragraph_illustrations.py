@@ -347,7 +347,7 @@ class LibraryMigration(unittest.TestCase):
         from rimsky.store import Store
         for _ in range(2):
             store=Store(self.old)
-            self.assertEqual(4,store.db.execute('PRAGMA user_version').fetchone()[0])
+            self.assertEqual(5,store.db.execute('PRAGMA user_version').fetchone()[0])
             for table,rows in self.original.items():self.assertEqual(rows,store.rows('SELECT * FROM '+table),table)
             gid=self.original['generations'][0]['id'];self.assertEqual(1,store.generation_poll(gid)['revision'])
             store.db.close()
@@ -362,7 +362,7 @@ class LibraryMigration(unittest.TestCase):
         with patch('rimsky.store.sqlite3.connect',side_effect=lambda *args,**kwargs:connect(*args,**kwargs,factory=Failure)):
             with self.assertRaisesRegex(sqlite3.OperationalError,'DDL failure'):Store(self.old)
         db=connect(self.old/'library.sqlite3');self.assertEqual(1,db.execute('PRAGMA user_version').fetchone()[0]);self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='illustration_runs'").fetchone());db.close()
-        store=Store(self.old);self.assertEqual(4,store.db.execute('PRAGMA user_version').fetchone()[0]);store.db.close()
+        store=Store(self.old);self.assertEqual(5,store.db.execute('PRAGMA user_version').fetchone()[0]);store.db.close()
 
     def test_imported_rotated_jpeg_preserves_its_visible_orientation(self):
         from rimsky.books import image_asset

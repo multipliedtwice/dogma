@@ -1,12 +1,14 @@
 import type {Book, Chapter, DeletionResult, Generation, GenerationSummary, Segment} from './types';
 
 export function acceptGenerationRefresh(current: Generation | null, next: Generation): Generation | null {
-  return current?.id === next.id && current.book_id === next.book_id && (next.revision ?? 0) >= (current.revision ?? 0) ? next : current;
+  const alias=current&&next.replaces_generation_id===current.id&&next.book_id===current.book_id;
+  return alias||current?.id === next.id && current.book_id === next.book_id && (next.revision ?? 0) >= (current.revision ?? 0) ? next : current;
 }
 
 const polledAnalysis = new Set(['complete', 'casting_warnings', 'casting_notices', 'progress', 'degraded', 'approved', 'narrator_voices']);
 export function acceptGenerationPoll(current: Generation | null, next: Generation, full: boolean, removed: string[]): Generation | null {
   if (!current || acceptGenerationRefresh(current, next) !== next) return current;
+  if(current.id!==next.id)return next;
   const analysis = {...Object.fromEntries(Object.entries(current.analysis ?? {}).filter(([key]) => !polledAnalysis.has(key))), ...next.analysis};
   if (full) return {...next, analysis};
   const changed = new Map(next.segments.map(segment => [segment.id, segment]));
@@ -38,12 +40,14 @@ export function visibleChapters(chapters: Chapter[], query: string) {
 }
 
 export function generationHistory(book: Book, current: Generation | null): GenerationSummary[] {
-  return book.generations.map(saved => {
+  const selected=current?.book_id===book.id&&book.generations.some(saved=>saved.id===current.id)?current.id:undefined;
+  const id=book.current_generation_id??selected??book.generations[0]?.id;
+  return book.generations.filter(saved=>saved.id===id).map(saved => {
     if (current?.id !== saved.id || current.book_id !== book.id) return saved;
     const ready = current.segments.filter(segment => segment.status === 'ready');
     return {...saved, name: current.name, status: current.status, error: current.error,
       updated: current.updated, config: current.config,
-      progress: {total: current.segments.length, ready: ready.length,
+      progress: {total: current.preparation_progress?.total??current.segments.length, ready: current.preparation_progress?.ready??ready.length,
         duration: ready.reduce((total, segment) => total + segment.duration, 0)}};
   });
 }
@@ -68,8 +72,8 @@ export function deletionNotice(result: DeletionResult, label: 'Book' | 'Generati
     : `${label} removed from the library. Copies exported outside the app are unchanged.`;
 }
 
-export function defaultGeneration(book: Pick<Book, 'generations' | 'position'>): GenerationSummary | undefined {
-  return book.generations.find(saved => saved.id === book.position?.generation_id) ?? book.generations[0];
+export function defaultGeneration(book: Pick<Book, 'generations' | 'position' | 'current_generation_id'>): GenerationSummary | undefined {
+  return book.generations.find(saved=>saved.id===book.current_generation_id)??book.generations.find(saved => saved.id === book.position?.generation_id) ?? book.generations[0];
 }
 
 export function repairOutcome(pending: string, generation: Pick<Generation, 'id' | 'status'> | null): 'wait' | 'clear' | 'drop' {

@@ -331,6 +331,18 @@ test('hosted listener accepts gateway-injected metadata at the bare stable URL',
   });
 });
 
+test('hosted listener accepts a book-only link and leaves current audio selection to the book pointer',()=>{
+  const api=load('src/lib/api.ts');const book='a'.repeat(32);
+  assert.deepEqual(api.hostedListenerConfig({href:`https://listen.example/current/?listener=1&book=${book}`,pathname:'/current/',search:`?listener=1&book=${book}`},{querySelector:()=>null}).target,{bookId:book,generationId:''});
+});
+
+test('another part replacement preserves the currently playing part offset',async()=>{
+  const h=harness();const d=data([segment('s1'),segment('s2')]);
+  h.controller.update(d.book,d.generation);await settle();h.controller.select('s1',false,1.25);await settle();
+  const loads=h.loads.filter(key=>key==='hash-s1').length;h.controller.update(d.book,{...d.generation,segments:[d.generation.segments[0],segment('s2','ready',{audio_hash:'new-other-part'})]});await settle();
+  assert.equal(h.audio.currentTime,1.25);assert.equal(h.loads.filter(key=>key==='hash-s1').length,loads);h.controller.dispose();
+});
+
 test('pending selection is saved and restored before its audio exists', async () => {
   const h = harness(); const d = data([segment('s1'), segment('s2', 'pending', {source_id: 'p2'})]);
   h.controller.update(d.book, d.generation); await settle();
@@ -639,15 +651,15 @@ test('chapter search preserves canonical numbers and trims the query', () => {
   assert.equal(visibleChapters(chapters, '').length, 3); assert.deepEqual(visibleChapters(chapters, 'missing'), []);
 });
 
-test('generation history shows the live selected generation without changing saved snapshots', () => {
+test('audiobook panel shows only the current output with its live progress', () => {
   const {generationHistory} = load('src/lib/readerSelection.ts');
   const saved = {id: 'g1', book_id: 'b1', status: 'paused', name: 'Earlier name', progress: {total: 2, ready: 0, duration: 0}};
   const other = {...saved, id: 'g2'}; const book = {id: 'b1', generations: [other, saved]};
   const current = {...saved, status: 'rendering', name: 'New name', error: '', segments: [segment(), segment('s2', 'pending')]};
   const result = generationHistory(book, current);
-  assert.equal(result[0], other); assert.equal(result[1].status, 'rendering');
-  assert.deepEqual(result[1].progress, {total: 2, ready: 1, duration: 2});
-  assert.equal(result[1].name, 'New name'); assert.equal(saved.status, 'paused');
+  assert.equal(result.length,1);assert.equal(result[0].status, 'rendering');
+  assert.deepEqual(result[0].progress, {total: 2, ready: 1, duration: 2});
+  assert.equal(result[0].name, 'New name'); assert.equal(saved.status, 'paused');
   assert.equal(saved.progress.ready, 0);
 });
 

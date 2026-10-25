@@ -12,7 +12,7 @@ sys.path[:0]=[str(ROOT/'runtime'),str(ROOT/'verification'),str(ROOT/'scripts')]
 from rimsky.listener_stress import apply,snapshot,POLICY
 from rimsky.jobs import Jobs
 from rimsky.store import Store
-from rimsky.util import digest
+from rimsky.util import digest, uid, now
 from test_series_character_state import fb2
 
 
@@ -46,7 +46,21 @@ class ListenerStressPersistenceTest(unittest.TestCase):
         generation=self.store.generation(self.generation['id'])
         segment=next(s for s in generation['segments'] if word in s['text'])
         return self.store.report_stress(generation['id'],segment['id'],segment['source_id'],word,
-            segment['start']+segment['text'].index(word),intended_stress=intended)
+            segment['start']+segment['text'].index(word),intended_stress=intended,audio_hash=segment['audio_hash'])
+
+    def legacy_current(self, config):
+        """Seed an actual pre-migration history row; new renders reuse one ID."""
+        old=self.store.rows('SELECT * FROM generations WHERE id=?',(self.generation['id'],))[0]
+        identifier=uid()
+        row={**old,'id':identifier,'parent_id':old['id'],'created':now(),'updated':now(),
+             'status':'paused','analysis':'{}','config':json.dumps({**json.loads(old['config']),**config})}
+        with self.store.lock,self.store.transaction():
+            self.store.db.execute(f'INSERT INTO generations({",".join(row)}) VALUES({",".join("?"for _ in row)})',tuple(row.values()))
+            for segment in self.store.rows('SELECT * FROM segments WHERE generation_id=?',(old['id'],)):
+                part={**segment,'generation_id':identifier,'status':'pending','audio_hash':None,'duration':0,'cues':'[]'}
+                self.store.db.execute(f'INSERT INTO segments({",".join(part)}) VALUES({",".join("?"for _ in part)})',tuple(part.values()))
+            self.store.set_current_generation(self.book['id'],identifier)
+        return self.store.generation(identifier)
 
     def test_direct_store_report_promotes_family_and_fresh_generation_consumes_it(self):
         report=self.note()
@@ -58,7 +72,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
         native,evidence=apply('Ма́ришка увидела Мари́шку и Ма́ришкой.',frozen)
         self.assertEqual('Мари́шка увидела Мари́шку и Мари́шкой.',native)
         self.assertEqual(2,len(evidence['edits']))
-        self.assertNotEqual(new['id'],report['generation_id'])
+        self.assertEqual(new['id'],report['generation_id'])
         self.assertEqual(1,len(self.store.stress_reports(self.book['id'])))
 
     def test_later_family_correction_wins_older_occurrence_across_all_inflections(self):
@@ -90,7 +104,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
     def test_runtime_invalidation_targets_current_generation_not_old_history(self):
         report=self.note()
         old=self.store.generation(self.generation['id'])
-        current=self.store.create_generation(self.book['id'],{})
+        current=self.legacy_current({})
         self.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('b'*64,current['id']))
         self.store.execute("UPDATE generations SET status='ready',analysis=? WHERE id=?",(json.dumps({'complete':True}),current['id']))
         jobs=object.__new__(Jobs)
@@ -190,7 +204,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
     def test_stale_tab_report_queues_current_external_generation(self):
         from rimsky.listener_stress_retake import enqueue_listener_stress_retake
         report=self.note()
-        current=self.store.create_generation(self.book['id'],{'engine':'higgs_audio_tts_q8_external_preview'})
+        current=self.legacy_current({'engine':'higgs_audio_tts_q8_external_preview'})
         folder=self.store.root.parent/'fresh-external'
         folder.mkdir()
         (folder/'manifest.json').write_text('{}')
@@ -209,7 +223,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
     def test_unpublished_current_external_target_keeps_durable_refresh_hold(self):
         from rimsky.listener_stress_retake import enqueue_listener_stress_retake,report_queue_status
         report=self.note()
-        current=self.store.create_generation(self.book['id'],{'engine':'higgs_audio_tts_q8_external_preview'})
+        current=self.legacy_current({'engine':'higgs_audio_tts_q8_external_preview'})
         folder=self.store.root.parent/'pending-external';folder.mkdir()
         (folder/'manifest.json').write_text('{}')
         (folder/'progress.json').write_text(json.dumps({'generation':folder.name}))
@@ -232,7 +246,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
         from process_listener_stress_queue import current_book_debug_base
         report=self.note()
         old=self.generation['id']
-        current=self.store.create_generation(self.book['id'],{'engine':ENGINE})
+        current=self.legacy_current({'engine':ENGINE})
         folders={}
         for gid,name in ((old,'legacy-heard'),(current['id'],'current-debug')):
             folder=self.store.root.parent/name;folder.mkdir();folders[gid]=folder
@@ -313,7 +327,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
     def test_unpublished_current_external_target_defers_automatically_when_frozen(self):
         from rimsky.listener_stress_retake import enqueue_listener_stress_retake
         report=self.note()
-        current=self.store.create_generation(self.book['id'],{'engine':'higgs_audio_tts_q8_external_preview'})
+        current=self.legacy_current({'engine':'higgs_audio_tts_q8_external_preview'})
         folder=self.store.root.parent/'rendering-external';folder.mkdir();(folder/'units').mkdir()
         (folder/'manifest.json').write_text('{}')
         (folder/'ready.json').write_text(json.dumps({'unit_count':2,'plans':[{}],'native_manifest':{'model':'pinned'}}))
@@ -354,7 +368,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
         from rimsky.listener_stress_retake import _origin
         from process_listener_stress_queue import rebind_deferred_report
         report=self.note();origin=_origin(report)
-        current=self.store.create_generation(self.book['id'],{})
+        current=self.legacy_current({})
         self.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('f'*64,current['id']))
         target=next(s for s in self.store.generation(current['id'])['segments'] if s['source_id']==report['source_id'])
         path=Path(self.temp.name)/'deferred-item.json'
@@ -442,7 +456,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
         from rimsky.listener_stress_retake import ENGINE
         root=self.store.root.parent;old=root/'old';latest=root/'latest'
         old.mkdir();latest.mkdir();(old/'listener-stress-queue').mkdir()
-        current=self.store.create_generation(self.book['id'],{})
+        current=self.legacy_current({})
         self.store.execute('UPDATE generations SET config=?,analysis=? WHERE id=?',
             (json.dumps({'engine':ENGINE}),json.dumps({'external_preview':{'generation':'latest'}}),current['id']))
         (latest/'manifest.json').write_text('{}');(latest/'ready.json').write_text('{}')
@@ -570,15 +584,15 @@ class ListenerStressPersistenceTest(unittest.TestCase):
             first.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('d'*64,generation['id']))
             segment=next(s for s in first.store.generation(generation['id'])['segments'] if 'Маришкой' in s['text'])
             arguments=(generation['id'],segment['id'],segment['source_id'],'Маришкой',segment['start']+segment['text'].index('Маришкой'))
-            old=first.store.report_stress(*arguments,intended_stress='Ма́ришкой')
-            latest=first.store.report_stress(*arguments,intended_stress='Мари́шкой')
+            old=first.store.report_stress(*arguments,intended_stress='Ма́ришкой',audio_hash='d'*64)
+            latest=first.store.report_stress(*arguments,intended_stress='Мари́шкой',audio_hash='d'*64)
             # Same series, a different source book: its raw note must stay out.
             other=first.store.import_data(fb2('Shared V',5,'Она говорила с Маришкой.'),'next.fb2')
             other_generation=first.store.create_generation(other['id'],{})
             first.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('e'*64,other_generation['id']))
             other_segment=next(s for s in first.store.generation(other_generation['id'])['segments'] if 'Маришкой' in s['text'])
             other_report=first.store.report_stress(other_generation['id'],other_segment['id'],other_segment['source_id'],'Маришкой',
-                other_segment['start']+other_segment['text'].index('Маришкой'),intended_stress='Мари́шкой')
+                other_segment['start']+other_segment['text'].index('Маришкой'),intended_stress='Мари́шкой',audio_hash='e'*64)
             imported=second.store.import_data(payload,'another-filename.fb2')
             self.assertEqual([],second.store.stress_reports(imported['id']))
             visible=second.dispatch('stress_reports',{'book_id':imported['id']})

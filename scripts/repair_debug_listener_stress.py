@@ -858,6 +858,9 @@ def require_pending_coverage(output,config):
 
 
 def run(args):
+    from current_higgs_repair import run_if_current
+    current_result=run_if_current(args,sys.modules[__name__])
+    if current_result is not None:return current_result
     base=args.generation.resolve();item={**read(args.queue_item),'_queue_item_path':str(args.queue_item.resolve())}
     output,config,ready,original,effective,blocks,frozen,notes=configure(base,args.data_dir,args.generation_id,item)
     with d.basic.exclusive(output):

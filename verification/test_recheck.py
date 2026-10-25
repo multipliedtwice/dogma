@@ -45,6 +45,11 @@ class Recheck(unittest.TestCase):
     def export(self, generation, format='srt', chapters=None):
         return build_export(self.store, generation['id'], format, chapters, self.root)
 
+    def discard_fixture_fallback(self, generation):
+        # These corruption/initial-coverage fixtures have no previous playable
+        # output. Real pending replacements deliberately retain that output.
+        self.store.execute('DELETE FROM audiobook_replacements WHERE generation_id=?',(generation['id'],))
+
     def pack(self):
         return pack_fixture(self.root/'pack')
 
@@ -66,6 +71,7 @@ class Recheck(unittest.TestCase):
         generation = self.complete()
         self.store.execute('DELETE FROM segments WHERE generation_id=? AND id=?',
                            (generation['id'], generation['segments'][1]['id']))
+        self.discard_fixture_fallback(generation)
         with self.assertRaisesRegex(AppError, 'every expected source'):
             self.export(generation)
         self.assertEqual([], list((self.store.root/'exports').iterdir()))
@@ -81,6 +87,7 @@ class Recheck(unittest.TestCase):
         generation = self.complete()
         self.store.execute("UPDATE segments SET text='changed' WHERE generation_id=? AND id=?",
                            (generation['id'], generation['segments'][0]['id']))
+        self.discard_fixture_fallback(generation)
         with self.assertRaises(AppError):
             self.export(generation)
 
@@ -88,6 +95,7 @@ class Recheck(unittest.TestCase):
         generation = self.complete()
         self.store.execute("UPDATE segments SET status='pending' WHERE generation_id=? AND chapter_id=?",
                            (generation['id'], self.book['chapters'][1]['id']))
+        self.discard_fixture_fallback(generation)
         result = self.export(generation, chapters=[self.book['chapters'][0]['id']])
         self.assertTrue((self.store.root/'exports'/result['file']).is_file())
         with self.assertRaises(AppError):
@@ -134,9 +142,10 @@ class Recheck(unittest.TestCase):
     def test_export_uses_measured_audio_not_database_duration(self):
         generation = self.complete()
         self.store.execute('UPDATE segments SET duration=50 WHERE generation_id=?', (generation['id'],))
+        self.discard_fixture_fallback(generation)
         result = self.export(generation)
         text = (self.store.root/'exports'/result['file']).read_text('utf-8')
-        self.assertIn('00:00:00,600', text)
+        self.assertIn('00:00:08,600', text)
         self.assertNotIn('00:00:50,', text)
 
     def test_caption_text_is_literal_not_markup(self):
@@ -204,11 +213,11 @@ class Recheck(unittest.TestCase):
         folder = self.root/'future'
         folder.mkdir()
         with closing(sqlite3.connect(folder/'library.sqlite3')) as connection:
-            connection.execute('PRAGMA user_version=5')
+            connection.execute('PRAGMA user_version=6')
         with self.assertRaises(AppError):
             Store(folder)
         with closing(sqlite3.connect(folder/'library.sqlite3')) as connection:
-            self.assertEqual(5, connection.execute('PRAGMA user_version').fetchone()[0])
+            self.assertEqual(6, connection.execute('PRAGMA user_version').fetchone()[0])
             self.assertEqual([], connection.execute('SELECT name FROM sqlite_master').fetchall())
 
     def test_inline_breaks_keep_word_boundaries(self):
@@ -248,6 +257,7 @@ class Recheck(unittest.TestCase):
         generation = self.complete()
         self.store.execute('UPDATE segments SET cues=? WHERE generation_id=?',
             (json.dumps([{'text': 'invented', 'start': 0, 'end': .05}]), generation['id']))
+        self.discard_fixture_fallback(generation)
         result = self.export(generation)
         content = (self.store.root/'exports'/result['file']).read_text('utf-8')
         self.assertNotIn('invented', content)

@@ -20,7 +20,7 @@ export function hostedListenerConfig(
   const enabled=query.get('listener')==='1'||meta('rimsky-runtime-mode')==='hosted-listener';
   const bookId=query.get('book')||meta('rimsky-book-id');
   const generationId=query.get('generation')||meta('rimsky-generation-id');
-  const target=BOOK_ID.test(bookId)&&GENERATION_ID.test(generationId)?{bookId,generationId}:null;
+  const target=BOOK_ID.test(bookId)&&(!generationId||GENERATION_ID.test(generationId))?{bookId,generationId}:null;
   return {enabled,base:enabled?new URL('./',here.href).href:'',target};
 }
 

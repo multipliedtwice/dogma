@@ -179,11 +179,12 @@ export function preparationStatus(language: Language, generation: Pick<Generatio
   return preparing(generation) ? label : `${label} · ${ready}/${total}`;
 }
 
-export function preparationPercent(generation: Pick<Generation, 'status' | 'analysis' | 'segments'>): number {
+export function preparationPercent(generation: Pick<Generation, 'status' | 'analysis' | 'segments' | 'preparation_progress'>): number {
   const stage = stageProgress(generation);
   if (stage) return 100 * Math.min(stage.done, stage.total) / stage.total;
-  const ready = generation.segments.filter(segment => segment.status === 'ready').length;
-  return generation.segments.length ? 100 * ready / generation.segments.length : 0;
+  const ready = generation.preparation_progress?.ready ?? generation.segments.filter(segment => segment.status === 'ready').length;
+  const total = generation.preparation_progress?.total ?? generation.segments.length;
+  return total ? 100 * ready / total : 0;
 }
 
 const HOLD_REASONS: Record<string, Pair> = {

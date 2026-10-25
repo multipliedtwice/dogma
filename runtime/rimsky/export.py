@@ -389,13 +389,31 @@ def normalize_opening(source, destination, rate, ffmpeg, stop=None):
 
 
 def build_export(store,gid,format,chapters,binaries: Path,stop=None,guard=nullcontext,music=None):
+    from .opening import opening_hashes
+    with store.lock,store.transaction():
+        selected=store.generation(gid)
+        current=store.current_generation(selected['book_id'])
+        gid=current['id']if current else gid
+        snapshot=store.playback_generation(gid)
+        hashes={s['audio_hash']for s in snapshot['segments']if s['audio_hash']}
+        hashes.update(opening_hashes(snapshot))
+        layers=music(snapshot['segments'])if music else []
+        hashes.update(Path(row['path']).stem for row in layers)
+        lease=store.audio_lease(hashes)
+        lease.__enter__()
+    try:
+        return _build_export(store,gid,format,chapters,binaries,stop,guard,(lambda _:layers)if music else None,snapshot)
+    finally:lease.__exit__(None,None,None)
+
+
+def _build_export(store,gid,format,chapters,binaries: Path,stop,guard,music,snapshot):
     from .opening import select_opening, verify_opening_audio
     check_export_stop(stop)
     with tempfile.TemporaryDirectory(dir=store.root/'work') as work:
         folder = Path(work)
         with guard():
             with store.lock:
-                generation = store.generation(gid)
+                generation = snapshot
                 book = store.book(generation['book_id'])
             selected = chapter_selection(book, chapters, generation['config']['chapters'])
             first_chapter = chapter_selection(book, None, generation['config']['chapters'])[0]
@@ -406,6 +424,7 @@ def build_export(store,gid,format,chapters,binaries: Path,stop=None,guard=nullco
             validate_coverage(book, selected, segments)
             holds = speaker_review_holds(generation['segments'], generation['analysis'].get('speaker_resolution', []), generation['analysis'].get('speaker_verdicts'))[1]
             pending = {s['id'] for s in generation['segments'] if s['status'] == 'review'} | holds
+            pending.difference_update(s['id']for s in generation['segments']if s.get('replacement_status')and s['status']=='ready'and s['audio_hash'])
             held = len({s['id'] for s in segments} & pending)
             if held:
                 raise AppError(f'{held} held passage(s) still need review. A complete export was not made; held text is never omitted or narrated as accepted audio.', 'held_segments', held=held)
@@ -432,12 +451,7 @@ def build_export(store,gid,format,chapters,binaries: Path,stop=None,guard=nullco
                 # audio to the old cue rows. Capture those rows and handles together.
                 with ExitStack() as resources:
                     with store.lock:
-                        rows = [row for segment in expected for row in store.rows(
-                            'SELECT * FROM segments WHERE generation_id=? AND id=?', (gid, segment['id']))]
                         audio, metadata = resources.enter_context(open_audio_pair(source))
-                    current = [{**row, 'cues': json.loads(row['cues']), 'performance': json.loads(row['performance'])} for row in rows]
-                    if current != expected:
-                        raise AppError('Audio changed while preparing the export. Retry after preparation finishes.')
                     capture_audio(source, folder/'audio'/f'{key}.wav', audio, metadata)
                 check_export_stop(stop)
         opening_info = verify_opening_audio(opening_source, opening) if opening else None
@@ -549,8 +563,13 @@ def build_export(store,gid,format,chapters,binaries: Path,stop=None,guard=nullco
             size = temporary.stat().st_size
             os.replace(temporary, output)
             try:
-                store.execute('INSERT INTO exports VALUES(?,?,?,?,?)', (export_id,gid,name,format,now()))
+                with store.transaction():
+                    store.db.execute('INSERT INTO exports VALUES(?,?,?,?,?)', (export_id,gid,name,format,now()))
+                    store.db.execute('INSERT INTO export_snapshots VALUES(?,?)',(export_id,json.dumps({
+                        'generation_id':gid,'revision':snapshot.get('revision'),'pending_updates':snapshot.get('pending_replacements',0),
+                        'parts':[{k:s[k]for k in ('id','source_id','start','end','audio_hash')}for s in segments]},ensure_ascii=False)))
             except Exception:
                 output.unlink(missing_ok=True)
                 raise
-    return {'id':export_id,'file':name,'format':format,'size':size,'title':book['title']}
+    return {'id':export_id,'file':name,'format':format,'size':size,'title':book['title'],
+            'source_revision':snapshot.get('revision'),'pending_updates':snapshot.get('pending_replacements',0)}

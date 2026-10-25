@@ -12,7 +12,7 @@ and labeling records stay local. New demos use [one-shot generation](docs/PUBLIC
 
 - Import EPUB/FB2, inspect chapters, read, bookmark and navigate without loading a model.
 - Prepare selected chapters with whole-book primary-text analysis, automatic casting from a reusable narrator repertoire, a cast review step before narration (on by default), and saved passage audio.
-- Play and resume saved generations; correct passages or request a new take without replacing earlier performances; repair missing audio explicitly.
+- Play and resume one current audiobook per book. Corrections replace affected passages progressively while existing audio stays playable until its replacement is ready.
 - New audiobooks begin with the eight-second Dogma Soft + Mist branded opening in the book’s language, in playback and exports. Its music always plays independently of the chapter background-music setting. Russian and English are available; other languages require an approved matching opening.
 - Export M4B, single MP3, chapter MP3/VTT ZIP, SRT or WebVTT from saved audio without new synthesis.
 - Attach illustrations to paragraphs, or explicitly request optional online Codex paragraph jobs. Saved images appear inline and link to their text anchors.
@@ -69,9 +69,9 @@ Book preparation performs no inference. Audio inspection does not transcribe, cr
 
 ## Data and network behavior
 
-The original external ebook is not modified. Generated audio remains until explicitly deleted; shared audio is retained while another saved generation references it. Exported files outside the application library are independent copies. Existing generations keep their own model-pack fingerprint.
+The original external ebook is not modified. Each book keeps one current audiobook; superseded managed audio and playback caches are reclaimed once playback, jobs and exports no longer need them. Saved pronunciation notes and compact render receipts survive replacements. Exported files outside the application library are independent copies.
 
-The library uses schema 4, with transactional upgrades from earlier schemas. Reading and listening positions are stored independently, and bounded change journals support compact generation and illustration polling. Older applications refuse the upgraded library. A second core cannot open an active library.
+The library uses schema 5, with upgrades from earlier schemas. Reading and listening positions are stored independently, and bounded change journals support compact generation and illustration polling. Older applications refuse the upgraded library so they cannot bypass current-output replacement safeguards. A second core cannot open an active library.
 
 Reading, narration, subtitle playback, training and audio export use local files/models. No automatic model downloads or remote narration fallback are enabled. Online paragraph illustrations are separately initiated and consented; they may consume Codex allowance or provider charges. Opening a book does not send its text online.
 

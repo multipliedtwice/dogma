@@ -34,6 +34,8 @@ class HLSPlaybackTests(stream_tests.PlaybackStreamTests):
         self.store.execute("UPDATE generations SET status='rendering' WHERE id=?", (self.generation['id'],))
         for segment in original[1:]:
             self.store.execute("UPDATE segments SET status='pending',duration=0 WHERE generation_id=? AND id=?", (self.generation['id'], segment['id']))
+        # This is an initial prefix, not a replacement of a playable chapter.
+        self.store.execute('DELETE FROM audiobook_replacements')
         for ready_count in (1, 2):
             if ready_count == 2:
                 segment = original[1]
@@ -74,6 +76,7 @@ class HLSPlaybackTests(stream_tests.PlaybackStreamTests):
             self.store.execute('UPDATE segments SET duration=150 WHERE generation_id=? AND id=?', (self.generation['id'], segment['id']))
         for segment in original[2:]:
             self.store.execute("UPDATE segments SET status='pending',duration=0 WHERE generation_id=? AND id=?", (self.generation['id'], segment['id']))
+        self.store.execute('DELETE FROM audiobook_replacements')
         first = self.wait()['chunks'][0]
         self.assertEqual('ready', first['status'], first)
         self.assertEqual(300, first['duration'])
@@ -91,6 +94,7 @@ class HLSPlaybackTests(stream_tests.PlaybackStreamTests):
         # An external bridge may not have inserted its continuation rows yet.
         first = self.generation['segments'][0]
         self.store.execute("DELETE FROM segments WHERE generation_id=? AND id!=?", (self.generation['id'], first['id']))
+        self.store.execute('DELETE FROM audiobook_replacements')
         self.store.execute("UPDATE generations SET status='rendering' WHERE id=?", (self.generation['id'],))
         manifest = self.streams.request(self.generation['id'])
         self.assertEqual('chapter_buffering', manifest['chunks'][0]['pending_reason'])

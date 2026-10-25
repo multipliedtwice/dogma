@@ -224,8 +224,8 @@ class Core(unittest.TestCase):
         text=('Русский текст! Ещё предложение. 🚀\n'*100)+'Конец.';parts=split_text(text);self.assertEqual(''.join(p[2] for p in parts),text);self.assertTrue(all(len(p[2])<=420 for p in parts))
     def test_segmentation_offsets(self):
         text='abc '+('я'*500);self.assertTrue(all(text[a:b]==s for a,b,s in split_text(text)))
-    def test_generation_separate_versions(self):
-        first=self.generation();second=self.generation();self.assertNotEqual(first['id'],second['id']);self.assertEqual(len(self.store.generation_list(self.book['id'])),2)
+    def test_generation_updates_current_audiobook(self):
+        first=self.generation();second=self.generation();self.assertEqual(first['id'],second['id']);self.assertEqual(len(self.store.generation_list(self.book['id'])),1)
     def test_chapter_selection(self):
         gid=self.store.create_generation(self.book['id'],{},chapters=[self.book['chapters'][1]['id']]);self.assertTrue(all(s['chapter_id']==self.book['chapters'][1]['id'] for s in gid['segments']))
     def test_unknown_chapter(self):
@@ -233,12 +233,15 @@ class Core(unittest.TestCase):
     def test_audio_saved_per_segment(self):
         generation=self.generation();complete_audio(self.store,generation);self.assertTrue(all(s['audio_hash'] for s in self.store.generation(generation['id'])['segments']))
     def test_revision_reuses_unchanged_audio(self):
-        generation=self.generation();complete_audio(self.store,generation);old=self.store.generation(generation['id']);new=self.store.revise(old['id'],[{'id':old['segments'][0]['id'],'spoken':'Новое произношение.'}]);self.assertIsNone(new['segments'][0]['audio_hash']);self.assertEqual(new['segments'][1]['audio_hash'],old['segments'][1]['audio_hash']);self.assertEqual(self.store.generation(old['id'])['segments'][0]['spoken'],old['segments'][0]['spoken'])
+        generation=self.generation();complete_audio(self.store,generation);old=self.store.generation(generation['id']);new=self.store.revise(old['id'],[{'id':old['segments'][0]['id'],'spoken':'Новое произношение.'}]);self.assertEqual(new['id'],old['id']);self.assertIsNone(new['segments'][0]['audio_hash']);self.assertEqual(new['segments'][1]['audio_hash'],old['segments'][1]['audio_hash']);self.assertEqual(self.store.playback_generation(old['id'])['segments'][0]['spoken'],old['segments'][0]['spoken'])
     def test_revision_unknown_speaker(self):
         generation=self.generation();complete_audio(self.store,generation)
         with self.assertRaises(AppError):self.store.revise(generation['id'],[{'id':generation['segments'][0]['id'],'speaker':'unlisted'}])
     def test_shared_audio_not_deleted(self):
-        generation=self.generation();complete_audio(self.store,generation);old=self.store.generation(generation['id']);new=self.store.revise(old['id'],[{'id':old['segments'][0]['id'],'spoken':'Changed'}]);shared=new['segments'][1]['audio_hash'];self.store.delete_generation(old['id']);self.assertTrue((self.store.root/'audio'/f'{shared}.wav').exists())
+        generation=self.generation();complete_audio(self.store,generation);shared=self.store.generation(generation['id'])['segments'][1]['audio_hash']
+        other=self.store.import_data(FB2.replace(b'Verification book',b'Another book'),'another.fb2')
+        current=self.store.create_generation(other['id'],{});complete_audio(self.store,current)
+        self.store.delete_generation(generation['id']);self.assertTrue((self.store.root/'audio'/f'{shared}.wav').exists())
     def test_position_persisted(self):
         c=self.book['chapters'][1]['id'];self.store.save_position(self.book['id'],{'chapter_id':c,'offset':1.2});self.assertEqual(self.store.book(self.book['id'])['position']['offset'],1.2)
     def test_position_nonfinite_rejected(self):
@@ -253,22 +256,22 @@ class Core(unittest.TestCase):
         self.assertIsNone(plain['synthesis_snapshot']);self.assertIsNone(self.store.stress_reports(self.book['id'])[0]['synthesis_snapshot'])
         performance={**segment['performance'],'synthesis_snapshot':snapshot}
         self.store.execute('UPDATE segments SET performance=? WHERE generation_id=? AND id=?',(json.dumps(performance,ensure_ascii=False),generation['id'],segment['id']))
-        self.store.report_stress(generation['id'],segment['id'],segment['source_id'],'Маша',segment['start']+segment['text'].index('Маша'),.05,intended_stress='Ма́ша')
+        self.store.report_stress(generation['id'],segment['id'],segment['source_id'],'Маша',segment['start']+segment['text'].index('Маша'),.05,intended_stress='Ма́ша',audio_hash=segment['audio_hash'])
         newest=self.store.stress_reports(self.book['id'])[0]
         self.assertEqual(newest['synthesis_snapshot'],snapshot);self.assertEqual(newest['spoken_text'],segment['spoken'])
     def test_stress_report_keeps_heard_generation_and_audio(self):
         generation=self.generation();complete_audio(self.store,generation)
         segment=next(s for s in self.store.generation(generation['id'])['segments'] if 'Маша' in s['text'])
-        report=self.store.report_stress(generation['id'],segment['id'],segment['source_id'],'Маша',segment['start']+segment['text'].index('Маша'),.05,intended_stress='Ма́ша')
+        report=self.store.report_stress(generation['id'],segment['id'],segment['source_id'],'Маша',segment['start']+segment['text'].index('Маша'),.05,intended_stress='Ма́ша',audio_hash=segment['audio_hash'])
         self.assertEqual(report['audio_hash'],segment['audio_hash'])
         self.assertEqual(report['spoken_text'],segment['spoken'])
         self.assertEqual(report['intended_stress'],'Ма́ша')
         self.assertEqual(self.store.stress_reports(self.book['id'])[0]['selected_text'],'Маша')
         self.store.delete_generation(generation['id'])
         self.assertEqual(self.store.stress_reports(self.book['id'])[0]['generation_id'],generation['id'])
-        self.assertTrue((self.store.root/'audio'/f'{report["audio_hash"]}.wav').is_file())
+        self.assertFalse((self.store.root/'audio'/f'{report["audio_hash"]}.wav').is_file())
         self.store.collect_audio()
-        self.assertTrue((self.store.root/'audio'/f'{report["audio_hash"]}.wav').is_file())
+        self.assertEqual(self.store.stress_reports(self.book['id'])[0]['audio_hash'],report['audio_hash'])
     def test_stress_report_rejects_unrelated_text(self):
         generation=self.generation();segment=generation['segments'][0]
         with self.assertRaises(AppError):
@@ -469,13 +472,13 @@ class Core(unittest.TestCase):
         self.assertEqual(repair['retry_response'],{'passages':[engine.rejected],'characters':[]})
         self.assertIn(f"Passage {engine.rejected['id']}",repair['retry_error'])
         self.assertEqual([s['id'] for s in repair['segments']],[engine.rejected['id']])
-    def test_new_generation_reuses_matching_audio(self):
+    def test_explicit_regeneration_refreshes_audio_in_the_same_output(self):
         old=self.run_job(self.prepared_generation(),SyntheticEngine())
         new=self.store.create_generation(self.book['id'],old['config'])
         engine=SyntheticEngine()
         result=self.run_job(new,engine)
         self.assertEqual(result['status'],'ready',result['error'])
-        self.assertEqual(engine.rendered,0)
+        self.assertEqual(result['id'],old['id']);self.assertGreater(engine.rendered,0)
     def test_revision_regenerates_only_changed_passage(self):
         old=self.run_job(self.prepared_generation(),SyntheticEngine())
         new=self.store.revise(old['id'],[{'id':old['segments'][0]['id'],'spoken':'Отдельная исправленная фраза.'}])

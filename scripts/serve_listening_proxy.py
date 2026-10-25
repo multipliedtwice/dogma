@@ -131,9 +131,7 @@ class Handler(BaseHTTPRequestHandler):
             connection.close()
 
     def runtime_selection(self):
-        """Choose only an unambiguous single-book runtime for a bare public URL."""
-        if self.server.listener_book_id and self.server.listener_generation_id:
-            return self.server.listener_book_id, self.server.listener_generation_id
+        """Resolve the current book output; a launch-time generation is no pin."""
         body = json.dumps({'op': 'library', 'data': {}}).encode()
         connection = http.client.HTTPConnection('127.0.0.1', self.server.runtime_port, timeout=10)
         try:
@@ -147,12 +145,24 @@ class Handler(BaseHTTPRequestHandler):
             if response.status != 200:
                 return None
             books = json.loads(raw)
-            if not isinstance(books, list) or len(books) != 1:
+            if not isinstance(books, list):
                 return None
-            generations = books[0].get('generations')
+            configured = self.server.listener_book_id
+            selected = [book for book in books if book.get('id') == configured] if configured else books
+            if len(selected) != 1:
+                return None
+            book = selected[0]
+            generations = book.get('generations')
             if not isinstance(generations, list) or not generations:
                 return None
-            return books[0].get('id'), generations[0].get('id')
+            current = book.get('current_generation_id')
+            if current:
+                generation = next((row for row in generations if row.get('id') == current), None)
+                if generation is None:
+                    return None
+            else:
+                generation = next((row for row in generations if row.get('status') in (None, 'ready', 'rendering')), None)
+            return (book.get('id'), generation.get('id')) if generation else None
         except (ConnectionError, TimeoutError, OSError, ValueError, TypeError):
             return None
         finally:
@@ -168,10 +178,21 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path == PRODUCTION_PAGE.rstrip('/') and parsed.path.endswith('/'):
             query = parse_qs(parsed.query)
-            if not (query.get('book', [''])[0] and query.get('generation', [''])[0]):
+            # Old bookmarks still open the current book. Internal physical hashes
+            # invalidate audio caches; listeners never choose an output version.
+            if 'generation' in query:
+                query.pop('generation')
+                query['listener'] = ['1']
+                self.redirect(PRODUCTION_PAGE + (('?' + urlencode(query, doseq=True)) if query else ''))
+                return True
+            if query.get('book', [''])[0] and query.get('listener') != ['1']:
+                query['listener'] = ['1']
+                self.redirect(PRODUCTION_PAGE + '?' + urlencode(query, doseq=True))
+                return True
+            if not query.get('book', [''])[0]:
                 selected = self.runtime_selection()
                 if selected and all(selected):
-                    self.redirect(PRODUCTION_PAGE + '?' + urlencode({'listener': '1', 'book': selected[0], 'generation': selected[1]}))
+                    self.redirect(PRODUCTION_PAGE + '?' + urlencode({'listener': '1', 'book': selected[0]}))
                     return True
             self.runtime_request('HEAD' if head else 'GET', '/', head=head)
             return True

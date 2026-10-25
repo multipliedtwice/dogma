@@ -104,14 +104,28 @@ function callback(name, environment) {
 
 test('feedback save stays bound to the generation selected when its context menu opened',async()=>{
   const requests=[],pending=[];
-  const save=callback('saveNarrationFeedback',{ru:false,run:(_label,action)=>{pending.push(action());},player:{segment:{id:'segment-1'},position:12.5},
+  const save=callback('saveNarrationFeedback',{ru:false,run:(_label,action)=>{pending.push(action());},player:{segment:{id:'segment-1',audio_hash:'heard-hash'},position:12.5},
     api:(operation,payload)=>{requests.push([operation,payload]);return Promise.resolve({});},correctionAdoption:{current:{watch:()=>{},receive:async()=>{}}},feedbackServicesRef:{current:{selection:()=>({})}},setStressMenu:()=>{},setStressMenuComment:()=>{},setModal:()=>{},setFeedbackSelection:()=>{},setFeedbackComment:()=>{},setNotice:()=>{}});
-  save({sourceId:'source-1',text:'плоти',textOffset:7,segmentId:'segment-1',generationId:'heard-generation'},'stress','','плоти́');
+  save({sourceId:'source-1',text:'плоти',textOffset:7,segmentId:'segment-1',generationId:'heard-generation',audioHash:'heard-hash',audioRevision:4},'stress','','плоти́');
   await Promise.all(pending);
   assert.equal(requests[0][0],'report_stress');
   assert.equal(requests[0][1].generation_id,'heard-generation');
   assert.equal(requests[0][1].audio_offset,12.5);
+  assert.equal(requests[0][1].audio_hash,'heard-hash');assert.equal(requests[0][1].audio_revision,4);
   assert.equal(requests[0][1].intended_stress,'плоти́');
+});
+
+test('feedback menu retains the actually heard hash after the same audiobook part is replaced',async()=>{
+  const requests=[],pending=[];
+  const save=callback('saveNarrationFeedback',{ru:false,run:(_label,action)=>{pending.push(action());},player:{segment:{id:'part',audio_hash:'new-current'},position:3},
+    api:(operation,payload)=>{requests.push(payload);return Promise.resolve({});},correctionAdoption:{current:{watch:()=>{},receive:async()=>{}}},feedbackServicesRef:{current:{selection:()=>({})}},setStressMenu:()=>{},setStressMenuComment:()=>{},setNotice:()=>{}});
+  save({sourceId:'source',text:'word',textOffset:0,segmentId:'part',generationId:'same-current',audioHash:'actual-old-heard',audioRevision:2},'stress','','wórd');
+  await Promise.all(pending);assert.equal(requests[0].audio_hash,'actual-old-heard');assert.equal(requests[0].audio_revision,2);
+  assert.equal(requests[0].audio_offset,null,'The new clip position cannot be attached to the older heard take');
+});
+
+test('opening a book prefers its current audiobook over a stale generation URL or saved position',()=>{
+  assert.equal(defaultGeneration({current_generation_id:'current',position:{generation_id:'old'},generations:[{id:'old'},{id:'current'}]}).id,'current');
 });
 
 function pauseClick(environment) {

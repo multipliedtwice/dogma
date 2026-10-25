@@ -188,6 +188,7 @@ test('flagged passages, render estimate and preparation stages are derived witho
   assert.equal(review.preparationStatus('ru', {status: 'analyzing', analysis: {progress: {stage: 'analysis', done: 1200, total: 2000}}}, 0, 0), 'Анализ персонажей · 1 200/2 000');
   assert.equal(review.preparationPercent({status: 'analyzing', analysis: {progress: {stage: 'analysis', done: 25, total: 100}}, segments: []}), 25);
   assert.equal(review.preparationPercent({status: 'rendering', analysis: {}, segments: [{status: 'ready'}, {status: 'pending'}]}), 50);
+  assert.equal(review.preparationPercent({status: 'rendering', analysis: {}, segments: [{status: 'ready'}, {status: 'ready'}], preparation_progress: {ready: 1,total: 2,held: 0}}), 50);
 });
 
 test('corrections may request a new take of an unchanged passage', () => {
@@ -425,7 +426,7 @@ test('the correction dialog shows passage warnings, alias-qualified speakers and
   assert.equal(warning.props.title, 'Speech output is empty, invalid, silent, or too long.');
   const speakers = walk(nodes.find(node => node.tag === 'select' && node.props.value === 'anna')).filter(node => node.tag === 'option').map(text);
   assert.deepEqual(speakers, ['Narrator', 'Stranger (Anna, Anya)', 'Unit 7', 'Ghost', 'Stranger', 'Unresolved']);
-  const save = tree => tree.find(node => node.tag === 'button' && text(node) === 'Save corrected version');
+  const save = tree => tree.find(node => node.tag === 'button' && text(node) === 'Save correction');
   assert.equal(save(nodes).props.disabled, true);
   assert.ok(nodes.some(node => node.tag === 'input' && node.props.type === 'checkbox'));
   assert.equal(save(render(true)).props.disabled, false);
