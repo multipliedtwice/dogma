@@ -23,11 +23,28 @@ SELF=Path(__file__).resolve()
 read,write=d.read,d.write
 
 
+# These root namespaces are live operational metadata, not synthesis evidence.
+# native/, assets/, source/preparation, plans and publication records remain bound.
+LIVE_INVENTORY_ROOTS=frozenset(('listener-stress-queue','__pycache__','supervision'))
+INVENTORY_POLICY='listener-repair-immutable-generation-v2'
+
+
+def immutable_inventory(recorded):
+    """Compare historical inventories without rewriting their original bytes."""
+    if not isinstance(recorded,dict):raise ValueError('Invalid immutable inventory')
+    selected={}
+    for name,sha in recorded.items():
+        if (not isinstance(name,str) or not name or '\\' in name or name.startswith('/') or
+            any(part in ('','.','..') for part in name.split('/')) or ':' in name or
+            not re.fullmatch(r'[0-9a-f]{64}',str(sha))):
+            raise ValueError('Malformed immutable inventory entry')
+        if name.split('/')[0] not in LIVE_INVENTORY_ROOTS:selected[name]=sha
+    return selected
+
+
 def inventory(folder):
-    # Queue receipts are live control state owned by the caller. Never rewrite
-    # source media, inputs, plans, failure receipts or publication metadata.
     return {p.relative_to(folder).as_posix():file_digest(p) for p in sorted(folder.rglob('*'))
-        if p.is_file() and p.relative_to(folder).parts[0] not in ('listener-stress-queue','__pycache__')}
+        if p.is_file() and p.relative_to(folder).parts[0] not in LIVE_INVENTORY_ROOTS}
 
 
 def copy_exact(source,target,sha=None):
@@ -114,6 +131,7 @@ def verify_native_derivation(folder,ready,*,bundled=False):
     expected=repair.get('base_inventory');base=Path(derivation['base']).resolve()
     if not isinstance(expected,dict)or not expected or any(not isinstance(k,str)or not re.fullmatch(r'[0-9a-f]{64}',str(v))for k,v in expected.items()):
         raise ValueError('Native ancestry lacks an immutable base inventory')
+    expected=immutable_inventory(expected)
     d.basic.checked(base/'ready.json',derivation['base_ready_sha256'])
     key=(str(folder),current_sha,file_digest(repair_path))
     if key not in _verified_native_edges:
@@ -592,7 +610,7 @@ def materialize(output,config,ready,units,effective,blocks,frozen,notes):
     base=Path(config['base']);before=inventory(base)
     if (output/'repair.json').exists():
         prior=read(output/'repair.json')
-        if {k:v for k,v in prior.items() if k not in ('base_inventory','derived_ready_sha256')}!=config or before!=prior['base_inventory']:
+        if {k:v for k,v in prior.items() if k not in ('base_inventory','derived_ready_sha256')}!=config or before!=immutable_inventory(prior['base_inventory']):
             raise ValueError('Reserved listener repair inputs changed')
         d.basic.checked(output/'ready.json',prior['derived_ready_sha256'])
         return prior,read(output/'ready.json')
@@ -873,7 +891,7 @@ def run(args):
             if not failed:complete_publication(output,new_ready,synced)
             if not failed:require_pending_coverage(output,config)
             gateway=handoff_gateway(output,config,new_ready,args.data_dir,final=not failed)
-            if inventory(base)!=config['base_inventory']:raise ValueError('Original generation bytes changed during listener repair')
+            if inventory(base)!=immutable_inventory(config['base_inventory']):raise ValueError('Original generation bytes changed during listener repair')
             result={'status':'held' if failed else 'applied','generation':str(output),'generation_name':output.name,
                 'affected_ids':config['affected_ids'],'reused':config['reused'],'rendered':len(config['affected_ids'])-len(failed),
                 'generation_id':synced['generation_id'],
