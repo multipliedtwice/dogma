@@ -130,6 +130,7 @@ class DevelopmentSelectedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory()as t:
             root=Path(t);clip=root/'speech.wav';intro=root/'intro.wav';bed=root/'bed.wav';end=root/'ending.wav'
             wav(clip,1,.02);wav(intro,8,.01,2);wav(bed,20,.001,2);wav(end,1,.001,2)
+            speech,speech_rate=sf.read(clip,dtype='int16');speech[:2400]=0;speech[-2400:]=0;sf.write(clip,speech,speech_rate,subtype='PCM_16')
             config={'frozen':{'assignment':{'units':[{'id':'u','source_id':'p','text':'Текст'}],'title':'Fixture','language':'Russian'},
                 'manifest':{'music':{'bed':{},'ending':{}},'ffmpeg':'fake','opening':{'sha256':dev.file_digest(intro)}}},
                 'source_generation':'g','music_volume_scale':.9,'player_sha256':dev.file_digest(dev.assets.PLAYER_SOURCE)}
@@ -163,6 +164,21 @@ class DevelopmentSelectedTests(unittest.TestCase):
                  patch.object(dev.assets,'music_asset',side_effect=lambda data,kind:bed if kind=='bed'else end),\
                  patch.object(dev.subprocess,'run',side_effect=encode),self.assertRaises(ValueError):
                 dev.assemble_selected(out)
+
+    def test_lowlevel_mix_rejects_unbound_incomplete_or_unsafe_selection(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t);clip=root/'speech.wav';wav(clip,1,.02)
+            config={'frozen':{'assignment':{'units':[{'id':'u'}]}}}
+            row={'unit':'u','status':'rendered','audio_path':str(clip),'audio_sha256':dev.file_digest(clip)}
+            def proof(rows):
+                return {'config_sha256':dev.sha(config),'selected_sha256':dev.sha(rows),
+                        'diagnostic_count':6,'source_pcm_boundary_verified':True}
+            with self.assertRaisesRegex(ValueError,'proof'):
+                dev.mix_selected(root/'bad-proof',config,[row],{**proof([row]),'selected_sha256':'0'*64})
+            with self.assertRaisesRegex(ValueError,'coverage'):
+                dev.mix_selected(root/'missing',config,[],proof([]))
+            with self.assertRaisesRegex(ValueError,'unsafe boundary'):
+                dev.mix_selected(root/'unsafe',config,[row],proof([row]))
 
     def test_diagnostic_counts_are_actual_receipts_and_reject_duplicates(self):
         with tempfile.TemporaryDirectory()as t:

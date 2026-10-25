@@ -242,8 +242,31 @@ def assemble_selected(output):
     output=Path(output).resolve()
     config,selected=selection(output,require_safe=True)
     plan_value=read(output/'development-plan.json')
-    diagnostic_count=sum(r['native_requests']for r in plan_value['diagnostic_inventory'])
-    write(output/'selected-manifest.json',{'policy':POLICY,'config_sha256':sha(config),'selected':selected},immutable=True)
+    proof={'policy':POLICY,'config_sha256':sha(config),'selected_sha256':sha(selected),
+           'diagnostic_count':sum(r['native_requests']for r in plan_value['diagnostic_inventory']),
+           'source_pcm_boundary_verified':True,'plan_sha256':file_digest(output/'development-plan.json')}
+    return mix_selected(output,config,selected,proof)
+
+
+def mix_selected(output,config,selected,selection_proof,*,speech_processing='Whole native PCM; no trim, fade, normalization or time stretch'):
+    """Mix caller-verified whole native clips or provenance-bound exact PCM slices.
+
+    This function adds no recognition or approval claim. The caller must validate
+    physical/source lineage; this layer rechecks coverage, hashes and boundaries.
+    """
+    output=Path(output).resolve();output.mkdir(parents=True,exist_ok=True)
+    if(selection_proof.get('config_sha256')!=sha(config)or selection_proof.get('selected_sha256')!=sha(selected)
+       or selection_proof.get('source_pcm_boundary_verified')is not True or type(selection_proof.get('diagnostic_count'))is not int
+       or selection_proof['diagnostic_count']<0):raise ValueError('Verified selection proof does not bind assembly inputs')
+    units=config['frozen']['assignment']['units']
+    if len(selected)!=len(units)or any(u['id']!=r['unit']or r['status']!='rendered'for u,r in zip(units,selected,strict=True)):
+        raise ValueError('Selected assembly requires exact full source coverage')
+    for row in selected:
+        _,audio=pcm(checked(Path(row['audio_path']),row['audio_sha256']))
+        edge=boundary_check(audio,24000)
+        if edge['unsafe_start']or edge['unsafe_end']:raise ValueError('Selected assembly contains unsafe boundary')
+    diagnostic_count=selection_proof['diagnostic_count']
+    write(output/'selected-manifest.json',{'policy':POLICY,'config_sha256':sha(config),'selected':selected,'selection_proof':selection_proof},immutable=True)
     import numpy as np
     import soundfile as sf
     from scipy.signal import resample_poly
@@ -281,7 +304,7 @@ def assemble_selected(output):
         ending[:fade_in]*=np.linspace(0,1,fade_in)[:,None];ending[-fade_out:]*=np.linspace(1,0,fade_out)[:,None]
         audio=np.concatenate([audio,ending*gain])
     if not np.isfinite(audio).all() or np.max(np.abs(audio))>=1:raise ValueError('Nonfinite/clipped deliverable; no automatic retake')
-    version=sha({'policy':POLICY,'config':sha(config),'captions':captions,'full':full,'implementation_sha256':file_digest(Path(__file__))})
+    version=sha({'policy':POLICY,'config':sha(config),'captions':captions,'full':full,'selection_proof_sha256':sha(selection_proof),'speech_processing':speech_processing,'implementation_sha256':file_digest(Path(__file__))})
     public=output/'public';public.mkdir(exist_ok=True);wav=public/(version+'.wav')
     mp3=public/(version+'.mp3')
     temporary_wav=public/(version+'.'+uuid.uuid4().hex+'.tmp.wav')
@@ -309,8 +332,8 @@ def assemble_selected(output):
             'opening_seconds':8,'speech_end':position,'duration':len(audio)/rate,'captions':captions,
             'mp3':mp3.name,'mp3_sha256':file_digest(mp3),'wav':wav.name,'wav_sha256':file_digest(wav),
             'mix':{'bed_rms_dbfs':-30+20*math.log10(volume),'bed_gap_seconds':4,'music_volume_scale':volume,
-                   'opening_unchanged':True,'speech_processing':'Whole native PCM; no trim, fade, normalization or time stretch'},
-            'development_checks':{'source_pcm_boundary_verified':True,'additional_takes':sum(r['take']for r in selected),
+                   'opening_unchanged':True,'speech_processing':speech_processing},
+            'selection_proof_sha256':sha(selection_proof),'development_checks':{'source_pcm_boundary_verified':True,'additional_takes':sum(r['take']for r in selected),
                                   'units_with_additional_takes':sum(r['take']>0 for r in selected),
                                   'selected_lineage_native_requests':sum(r['physical_attempt_count']for r in selected),
                                   'separate_diagnostic_native_requests':diagnostic_count,
