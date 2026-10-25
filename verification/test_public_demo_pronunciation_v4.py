@@ -132,7 +132,9 @@ class ContextV4(unittest.TestCase):
         for name in ('name-stress.request.json','name-stress.answer.json','homograph.request.json'):m.immutable(source/'pronunciation'/name,{'original':name})
         paths=list((source/'pronunciation').glob('*.json'));baseline={'assignment':{'units':[unit]},'evidence_sha256':{p.relative_to(source).as_posix():m.file_digest(p) for p in paths}}
         m.immutable(source/'pronunciation/result.json',baseline)
-        with patch.object(m.legacy,'verify_assignment_source',return_value={}),patch.object(m,'prepare_rows',return_value=([unit],{'context_conflicts':1})):
+        book={'id':'a'*32,'source_hash':'b'*64,'title':'Fixture','author':'Fixture author',
+            'chapters':[{'id':'c','blocks':[{'id':'p','text':' '*unit['start']+unit['text']}]}]}
+        with patch.object(m.legacy,'verify_assignment_source',return_value=book),patch.object(m,'prepare_rows',return_value=([unit],{'context_conflicts':1})),patch.object(m.feedback.listener_stress,'shared_profile',return_value=self.out/'isolated-profile.sqlite3'):
             with self.assertRaisesRegex(ValueError,'Conflicting stress'):m.prepare(source,target)
         self.assertTrue((target/'pronunciation/context-conflicts.json').exists());self.assertFalse((target/'assignment.json').exists());self.assertFalse((target/'pronunciation/result.json').exists())
         for original in paths:

@@ -1,0 +1,118 @@
+"""Private shared human preparation feedback, without providers or synthesis."""
+import copy
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path[:0]=[str(ROOT/'scripts'),str(ROOT/'runtime')]
+import public_demo_listener_feedback as feedback
+import freeze_public_audiobook_demo as freeze
+from rimsky import russian_pronunciation as phonetics
+
+
+class PublicFeedbackTest(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name);self.profile=self.root/'shared.sqlite3'
+
+    def source(self,text,source_hash='b'*64):
+        book={'id':source_hash[:32],'source_hash':source_hash,'title':'Synthetic source','author':'Fixture author',
+            'chapters':[{'id':'c','blocks':[{'id':'p','text':text}]}]}
+        unit={'id':'u1','chapter_id':'c','source_id':'p','start':0,'end':len(text),'text':text,'spoken':text}
+        return book,unit
+
+    def write(self,name,data):
+        path=self.root/name;path.write_text(json.dumps(data,ensure_ascii=False),encoding='utf8');return path
+
+    def stress(self,unit,word,marked):
+        return self.write('notes.json',{'schema':1,'created':'2026-10-24T00:00:00Z','created_basis':'explicit_fixture',
+            'audio_approval':False,'notes':[{'unit':unit['id'],'source_text':unit['text'],
+                'selected_text':word,'intended_stress':marked,'instruction':'Explicit human fixture instruction'}]})
+
+    def test_noncast_human_family_overrides_automatic_and_survives_independent_preparation(self):
+        book,unit=self.source('Она гуляла с Маришкой. Маришка ждала Маришку.')
+        note=self.stress(unit,'Маришкой','Мари́шкой')
+        with feedback.source_store(self.root/'first',self.profile) as store:
+            feedback.import_source_notes(store,book,{'units':[unit]},note)
+            self.assertEqual([],store.rows('SELECT id FROM books'))
+            frozen=feedback.freeze(store,book)
+        with feedback.source_store(self.root/'later',self.profile) as store:
+            later=feedback.freeze(store,book)
+            foreign=copy.deepcopy(book);foreign['author']='Unrelated author';foreign['title']='Unrelated book'
+            foreign['source_hash']='f'*64;foreign['id']='f'*32
+            self.assertEqual({},feedback.freeze(store,foreign)['stress']['names'])
+        actual,receipt=feedback.apply('Она гуляла с Ма́ришкой. Ма́ришка ждала Ма́ришку.',later,
+            source_id='p',source_text=unit['text'],source_start=0,source_end=unit['end'])
+        self.assertEqual('Она гуляла с Мари́шкой. Мари́шка ждала Мари́шку.',actual)
+        self.assertEqual(frozen['stress']['names'],later['stress']['names'])
+        feedback.validate(receipt,later)
+
+    def test_ordinary_stress_is_source_bound_and_different_book_rules_do_not_leak(self):
+        book,unit=self.source('На площади ни души. А дальше души поют.')
+        path=self.stress(unit,'души','души́')
+        # Repeated source words require an explicit bound occurrence, not a guess.
+        with feedback.source_store(self.root/'library',self.profile) as store:
+            with self.assertRaisesRegex(ValueError,'unique source occurrence'):
+                feedback.import_source_notes(store,book,{'units':[unit]},path)
+        book,unit=self.source('На площади ни души.')
+        path=self.stress(unit,'души','души́')
+        with feedback.source_store(self.root/'one',self.profile) as store:
+            feedback.import_source_notes(store,book,{'units':[unit]},path)
+            frozen=feedback.freeze(store,book)
+            other,_=self.source('На площади ни души.','c'*64)
+            unrelated=feedback.freeze(store,other)
+        actual,_=feedback.apply('На площади ни ду́ши.',frozen,source_id='p',source_text=unit['text'],source_start=0,source_end=unit['end'])
+        self.assertEqual('На площади ни души́.',actual)
+        self.assertEqual([],unrelated['stress']['occurrences'])
+        self.assertEqual({},unrelated['stress']['names'])
+
+    def test_exact_phonetic_edit_keeps_new_automatic_stress_and_no_heard_evidence_is_invented(self):
+        book,unit=self.source('Он вышел из дровяного склада.')
+        path=self.write('old.json',{'schema':1,'human_approval':False,'changes':[{'id':'u1','source_text':unit['text'],
+            'before':'Он вы́шел из дровяно́го склада.','after':'Он вы́шел из дровяно́во склада.',
+            'basis':'Explicit human pronunciation instruction'}]})
+        with feedback.source_store(self.root/'library',self.profile) as store:
+            ids=feedback.import_overrides(store,book,{'units':[unit]},path)
+            frozen=feedback.freeze(store,book)
+            original=feedback.listener_stress.notes(store,book)[0]['report']
+            moved=self.root/'moved.json';moved.write_bytes(path.read_bytes())
+            self.assertEqual(ids,feedback.import_overrides(store,book,{'units':[unit]},moved))
+            self.assertEqual(original,feedback.listener_stress.notes(store,book)[0]['report'])
+        before='Он вы́шел из дровя́ного склада.'
+        after,receipt=feedback.apply(before,frozen,source_id='p',source_text=unit['text'],source_start=0,source_end=unit['end'])
+        self.assertEqual('Он вы́шел из дровя́ново склада.',after)
+        self.assertIsNone(original['audio_hash']);self.assertEqual('',original['generation_id'])
+        self.assertFalse(original['preparation_origin']['audio_approval'])
+        feedback.validate(receipt,frozen)
+
+    def test_final_freeze_replays_human_then_pronoun_phonetics_and_rejects_tampering(self):
+        book,unit=self.source('Он никого не видел около дровяного склада.')
+        path=self.write('old.json',{'schema':1,'human_approval':False,'changes':[{'id':'u1','source_text':unit['text'],
+            'before':unit['text'],'after':unit['text'].replace('дровяного','дровяново'),'basis':'Explicit phonetic instruction'}]})
+        with feedback.source_store(self.root/'library',self.profile) as store:
+            feedback.import_overrides(store,book,{'units':[unit]},path);frozen=feedback.freeze(store,book)
+        human,receipt=feedback.apply(unit['text'],frozen,source_id='p',source_text=unit['text'],source_start=0,source_end=unit['end'])
+        final,records=phonetics.apply(human)
+        phonetic={'rule':phonetics.RULE,'prephonetic_source':human,'records':records,
+            'module_sha256':feedback.file_digest(Path(phonetics.__file__))}
+        self.assertIn('никаво',final)
+        freeze.validate_synthesis_pronunciation(unit['text'],final,phonetic,listener=receipt,listener_context=frozen)
+        with self.assertRaises(ValueError):freeze.validate_synthesis_pronunciation(unit['text'],final,phonetic)
+        tampered=copy.deepcopy(receipt);tampered['after']=tampered['after'].replace('склада','дома')
+        with self.assertRaises(ValueError):feedback.validate(tampered,frozen)
+
+    def test_source_changes_cannot_reuse_imported_phonetic_edit(self):
+        book,unit=self.source('Он вышел из дровяного склада.')
+        path=self.write('old.json',{'schema':1,'human_approval':False,'changes':[{'id':'u1','source_text':unit['text'],
+            'before':unit['text'],'after':unit['text'].replace('дровяного','дровяново'),'basis':'Explicit human instruction'}]})
+        with feedback.source_store(self.root/'library',self.profile) as store:
+            feedback.import_overrides(store,book,{'units':[unit]},path);frozen=feedback.freeze(store,book)
+        changed=unit['text'].replace('вышел','ушёл')
+        actual,receipt=feedback.apply(changed,frozen,source_id='p',source_text=changed,source_start=0,source_end=len(changed))
+        self.assertEqual(changed,actual);self.assertEqual([],receipt['token_edits'])
+
+
+if __name__=='__main__':unittest.main()

@@ -101,7 +101,7 @@ def validate_pronunciation(spoken, synthesis):
         raise ValueError('Disabled Higgs effect tag')
 
 
-def validate_synthesis_pronunciation(spoken,synthesis,phonetic=None):
+def validate_synthesis_pronunciation(spoken,synthesis,phonetic=None,*,listener=None,listener_context=None):
     """Keep the original letter gate; only an exact pinned phonetic record bridges it."""
     if phonetic is None:
         validate_pronunciation(spoken,synthesis);return
@@ -111,6 +111,12 @@ def validate_synthesis_pronunciation(spoken,synthesis,phonetic=None):
         raise ValueError('Unpinned Russian phonetic pronunciation provenance')
     before=phonetic['prephonetic_source']
     rules.validate(before,synthesis,phonetic['records'])
+    if listener is not None:
+        import public_demo_listener_feedback as human
+        if listener_context is None or listener['after']!=before:
+            raise ValueError('Human preparation requires its frozen profile and exact final phonetic input')
+        human.validate(listener,listener_context)
+        before=listener['before']
     validate_pronunciation(spoken,before)
 
 
@@ -419,7 +425,9 @@ def freeze(folder, music_path=None):
         if original['id'] != unit['id'] or original['text'] != unit['text']:
             raise ValueError('Pronunciation reordered or changed source units')
         validate_synthesis_pronunciation(unit['spoken'],unit.get('synthesis_text',unit['spoken']),
-                                         unit.get('pronunciation',{}).get('russian_phonetics'))
+                                         unit.get('pronunciation',{}).get('russian_phonetics'),
+                                         listener=unit.get('pronunciation',{}).get('listener_preparation'),
+                                         listener_context=assignment.get('listener_feedback'))
         ref = unit['palette_reference']
         if ref.get('reviewed') is not True or ref.get('voice_family') != unit['voice'] or ref.get('mood') != unit['mood']:
             raise ValueError('Missing matching reviewed voice/mood reference')

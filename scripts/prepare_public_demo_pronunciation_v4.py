@@ -19,6 +19,7 @@ import build_yo_restoration as builder
 import build_homograph_stress as stress_builder
 import build_contextual_stress as context_builder
 import independent_luna_passes as independent
+import public_demo_listener_feedback as feedback
 from rimsky import yo_restoration as yo,homograph_stress as hs
 from rimsky import russian_pronunciation as phonetics
 from rimsky import contextual_stress
@@ -41,7 +42,10 @@ SYSTEM=yo.SYSTEM+(' For these ambiguous finite-verb items, jointly decide the co
 def dependencies():
     modules=(legacy,builder,stress_builder,context_builder,independent,yo,hs,phonetics,contextual_stress)
     return {str(Path(m.__file__).resolve().relative_to(ROOT)).replace('\\','/'):file_digest(Path(m.__file__)) for m in modules}|{
-        SELF.relative_to(ROOT).as_posix():file_digest(SELF),'runtime/rimsky/auto_pronunciation.py':file_digest(ROOT/'runtime/rimsky/auto_pronunciation.py')}
+        SELF.relative_to(ROOT).as_posix():file_digest(SELF),'runtime/rimsky/auto_pronunciation.py':file_digest(ROOT/'runtime/rimsky/auto_pronunciation.py'),
+        **{name:file_digest(ROOT/name) for name in ('scripts/public_demo_listener_feedback.py',
+            'runtime/rimsky/listener_stress.py','runtime/rimsky/listener_family_projection.py',
+            'runtime/rimsky/series_characters.py','runtime/rimsky/name_stress.py')}}
 
 
 def finite_forms(word):
@@ -167,7 +171,7 @@ def overlay_context(unit,synthesis,rows,homograph):
     legacy.validate_pronunciation(unit['spoken'],synthesis);return synthesis,{'rule':RULE,'applied':edits,'conflicts':conflicts,'audio_approval':False}
 
 
-def prepare_rows(units,names,common,homograph,out):
+def prepare_rows(units,names,common,homograph,out,listener_feedback=None,source_blocks=None):
     analyses=[analyse(u,names,common) for u in units];immutable(out/'analysis.json',{'rule':RULE,'units':analyses,'dependencies':dependencies(),'versions':yo._versions()})
     context_rows=[r for a in analyses for r in a['context']];regular=[r for a in analyses for r in a['regular']]
     all_rows=regular+context_rows
@@ -201,13 +205,18 @@ def prepare_rows(units,names,common,homograph,out):
             [result for result in context_answers if result['row']['unit']==unit['id']],homograph)
         intermediate.append((unit,synthesis,record,context_record))
     for unit,synthesis,record,context_record in intermediate:
+        human=None
+        if listener_feedback is not None:
+            synthesis,human=feedback.apply(synthesis,listener_feedback,source_id=unit['source_id'],
+                source_text=source_blocks[unit['source_id']],source_start=unit['start'],source_end=unit['end'])
         before_phonetic=synthesis;synthesis,phonetic_records=phonetics.apply(before_phonetic)
         phonetic={'rule':phonetics.RULE,'prephonetic_source':before_phonetic,'records':phonetic_records,
                   'module_sha256':file_digest(Path(phonetics.__file__))}
-        legacy.validate_synthesis_pronunciation(unit['spoken'],synthesis,phonetic)
+        legacy.validate_synthesis_pronunciation(unit['spoken'],synthesis,phonetic,listener=human,listener_context=listener_feedback)
         if record['yo_restoration']['unbound'] or record.get('homograph_overrides',{}).get('unbound'):raise ValueError('Unbound pronunciation occurrence')
         result.append({**unit,'synthesis_text':synthesis,'pronunciation':{**record,'context_stress':context_record,
-            'dictionary_context_stress':{'status':'disabled','reason':'Restored Silero/RUAccent/Opus stress; Luna selects ё only'},'russian_phonetics':phonetic}})
+            'dictionary_context_stress':{'status':'disabled','reason':'Restored Silero/RUAccent/Opus stress; Luna selects ё only'},
+            **({'listener_preparation':human} if human is not None else {}),'russian_phonetics':phonetic}})
     return result,{'policy':'stress-rare-v4','context_policy':RULE,'dictionary_context_policy':'disabled',
         'stress_authority':'silero-ruaccent-opus-high','phonetic_policy':phonetics.RULE,'yo_answer_sha256':answer_sha,'context_conflicts':sum(len(u['pronunciation']['context_stress']['conflicts']) for u in result),
         'scope':'Development/demo text preparation only; no audio regeneration or acoustic-stress claim'}
@@ -221,7 +230,7 @@ def copy_bytes(target,source):
         with target.open('xb') as stream:stream.write(source.read_bytes())
 
 
-def prepare(folder,output):
+def prepare(folder,output,listener_imports=(),listener_notes=()):
     if output==folder or output.is_relative_to(folder/'pronunciation'):raise ValueError('Use a separate preparation output; historical files are immutable')
     assigned=read(folder/'analysis/assigned.json');book=legacy.verify_assignment_source(folder,assigned)
     if assigned['language']!='Russian':raise ValueError('This focused pronunciation entrypoint is Russian only')
@@ -245,9 +254,15 @@ def prepare(folder,output):
     units=copy.deepcopy(baseline['assignment']['units'])
     if any(a['id']!=b['id'] or a['text']!=b['text'] for a,b in zip(assigned['units'],units,strict=True)):raise ValueError('Historical preparation changed original units')
     for unit in units:unit.pop('synthesis_text',None);unit.pop('pronunciation',None)
-    prepared,details=prepare_rows(units,lexicon['names'],lexicon['common'],homograph,out/'yo-v4')
+    with feedback.source_store(output/'listener-state') as store:
+        for path in listener_imports:feedback.import_overrides(store,book,baseline['assignment'],path)
+        for path in listener_notes:feedback.import_source_notes(store,book,baseline['assignment'],path)
+        listener_feedback=feedback.freeze(store,book)
+    immutable(out/'listener-feedback.json',listener_feedback)
+    prepared,details=prepare_rows(units,lexicon['names'],lexicon['common'],homograph,out/'yo-v4',
+        listener_feedback=listener_feedback,source_blocks=feedback._blocks(book))
     details.update(name_lexicon_sha256=file_digest(folder/'pronunciation/name-lexicon.json'),homograph_answer_sha256=file_digest(folder/'pronunciation/homograph.answer.json'))
-    assignment={**baseline['assignment'],'units':prepared,'pronunciation':details}
+    assignment={**baseline['assignment'],'units':prepared,'pronunciation':details,'listener_feedback':listener_feedback}
     if details['context_conflicts']:
         immutable(out/'context-conflicts.json',{'status':'preparation_conflict','candidate_assignment':assignment,'ready_for_freeze':False})
         raise ValueError('Conflicting stress authorities retained; preparation cannot freeze')
@@ -270,9 +285,12 @@ def freeze(output,music_path=None):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--folder',type=Path);parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--stage',choices=['prepare','freeze'],default='prepare');parser.add_argument('--music-path',type=Path);args=parser.parse_args()
+    parser.add_argument('--stage',choices=['prepare','freeze'],default='prepare');parser.add_argument('--music-path',type=Path)
+    parser.add_argument('--listener-import',type=Path,action='append',default=[],help='Private exact-source historical preparation export')
+    parser.add_argument('--listener-source-notes',type=Path,action='append',default=[],help='Private explicit stress instructions with source/provenance')
+    args=parser.parse_args()
     if args.stage=='prepare':
         if args.folder is None:parser.error('--folder required for source/name/homograph evidence')
-        prepare(args.folder.resolve(),args.output.resolve())
+        prepare(args.folder.resolve(),args.output.resolve(),args.listener_import,args.listener_source_notes)
     else:freeze(args.output.resolve(),args.music_path)
 if __name__=='__main__':main()
