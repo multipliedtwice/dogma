@@ -11,6 +11,14 @@ import sys
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'runtime'))
+from rimsky.russian_preparation import RUACCENT_REQUIRED_FILES,local_model_pins
+
+
+def require_preparation_assets(models):
+    missing=[name for name in RUACCENT_REQUIRED_FILES if not(models/name).is_file()]
+    if missing:raise RuntimeError('Install the reviewed local RUAccent preparation assets before packaging; missing: '+', '.join(missing))
+    return models
 
 def source_digest(root:Path=ROOT)->str:
     runtime=root/'runtime'
@@ -27,7 +35,7 @@ def app_version(root:Path=ROOT)->str:
     return match.group(1)
 
 def build(kind:str,output:Path):
-    modes={'core':('server.py','rimsky-runtime',('lxml','PIL','numpy','soundfile','certifi','pymorphy3','pymorphy3_dicts_ru')),'infer':('worker.py','rimsky-infer',('qwen_tts','qwen_asr','llama_cpp','torch','transformers','librosa','soundfile','numpy')),'align':('align_worker.py','rimsky-align',('qwen_asr','torch','transformers','soundfile','numpy'))}
+    modes={'core':('server.py','rimsky-runtime',('lxml','PIL','numpy','soundfile','certifi','pymorphy3','pymorphy3_dicts_ru')),'infer':('worker.py','rimsky-infer',('qwen_tts','qwen_asr','llama_cpp','torch','transformers','librosa','soundfile','numpy','silero_stress','ruaccent','onnxruntime','wordfreq','pymorphy3','pymorphy3_dicts_ru')),'align':('align_worker.py','rimsky-align',('qwen_asr','torch','transformers','soundfile','numpy'))}
     script,name,modules=modes[kind]
     missing=[m for m in ('PyInstaller',*modules) if importlib.util.find_spec(m) is None]
     if missing:
@@ -41,6 +49,11 @@ def build(kind:str,output:Path):
         command+=['--collect-all',module]
     if kind=='infer':
         command+=['--copy-metadata','qwen-tts','--copy-metadata','llama-cpp-python']
+        models=require_preparation_assets(ROOT/'training-work/models/ruaccent-1.5.8.3')
+        info['russian_preparation_models']=local_model_pins()
+        command+=['--add-data',str(models)+':russian-preparation/ruaccent-1.5.8.3']
+        for package in ('silero-stress','ruaccent','wordfreq','pymorphy3','pymorphy3-dicts-ru'):
+            command+=['--copy-metadata',package]
     if kind=='align':
         command+=['--copy-metadata','qwen-asr']
     command.append(str(ROOT/'runtime'/script))

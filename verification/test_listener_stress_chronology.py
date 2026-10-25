@@ -273,6 +273,19 @@ class ListenerStressChronologyTest(unittest.TestCase):
         text='Маришка вошла.</p><p>Он говорил с Маришкой.</p><p>Он ждал Маришку.</p><p>Обычная фраза.'
         store,book,old_generation=self.store('current',text,[{'id':'m','name':'Маришка'}])
         self.report(store,old_generation,'Маришка','Ма́ришка','2026-10-23T00:00:00Z')
+        # A true legacy output is distinct from the stable current ID. Give
+        # it a later timestamp and saved position to exercise both old routes.
+        legacy_id='1'*24
+        store.execute('''INSERT INTO generations(id,book_id,name,created,updated,status,config,"cast",analysis,error,parent_id)
+            SELECT ?,book_id,'Legacy history','2030-01-01',updated,'ready',config,"cast",analysis,error,NULL
+            FROM generations WHERE id=?''',(legacy_id,old_generation['id']))
+        from rimsky.current_audiobook import FIELDS
+        columns=','.join(FIELDS)
+        store.execute(f'INSERT INTO segments({columns}) SELECT ?,'+','.join(FIELDS[1:])+' FROM segments WHERE generation_id=?',
+            (legacy_id,old_generation['id']))
+        old_generation=store.generation(legacy_id)
+        store.execute('INSERT INTO positions(book_id,value) VALUES(?,?)',
+            (book['id'],json.dumps({'generation_id':legacy_id,'segment_id':old_generation['segments'][0]['id']})))
         with patch('rimsky.store.now',return_value='2026-10-25T00:00:00Z'):
             current=store.create_generation(book['id'],{})
         store.execute('UPDATE generations SET cast=? WHERE id=?',(json.dumps([{'id':'m','name':'Маришка'}]),current['id']))
@@ -281,6 +294,7 @@ class ListenerStressChronologyTest(unittest.TestCase):
         before=store.generation(current['id']);old_before=store.generation(old_generation['id'])['segments']
         report=self.report(store,current,'Маришкой','Мари́шкой','2026-10-26T00:00:00Z')
         jobs=Jobs(store,ROOT,engine_factory=lambda _pack:None)
+        jobs.active=legacy_id  # A historical owner must not expand the target set.
         with patch.object(jobs,'_start_listener_queue'):
             outcome=jobs.listener_stress(report)
         after=store.generation(current['id'])
@@ -290,5 +304,7 @@ class ListenerStressChronologyTest(unittest.TestCase):
         unchanged=next(row for row in after['segments'] if 'Обычная' in row['text'])
         self.assertEqual(next(row for row in before['segments'] if row['id']==unchanged['id']),unchanged)
         self.assertEqual(old_before,store.generation(old_generation['id'])['segments'])
+        self.assertFalse(jobs.stop.is_set())
+        self.assertEqual([current['id']],jobs.listener_queue)
 
 if __name__=='__main__':unittest.main()

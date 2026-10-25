@@ -224,7 +224,7 @@ class ProductionDirectionTests(unittest.TestCase):
             root=Path(folder);(root/'audio').mkdir();(root/'audio/k.wav').write_bytes(b'accepted take')
             segment={'id':'s','chapter_id':'c','source_id':'p','start':0,'end':3,'spoken':'Да.',
                      'speaker':'a','performance':{},'audio_hash':'k','status':'ready'}
-            generation={'segments':[segment],'config':{'pack_fingerprint':'p'},'analysis':{'scene_direction':{'c':{}}}}
+            generation={'segments':[segment],'config':{'pack_fingerprint':'p','post_processing':'on'},'analysis':{'scene_direction':{'c':{}}}}
             self.assertFalse(music_released(generation,'c',root))
             value=report(generation_binding([segment],'p',root),{k:[{'status':'pass'}] for k in CHECKS})
             generation['analysis']['chapter_acceptance']={'c':value}

@@ -390,7 +390,7 @@ class HiggsBackend:
             from .audio_join import boundary_check
             edges = boundary_check(audio[:, 0], rate, plan['boundary_quality']['policy'])
             if edges['unsafe_start'] or edges['unsafe_end']:
-                raise SpeechHoldError('Higgs has an active abrupt audio edge; an automatic retake is required.')
+                raise SpeechHoldError('Higgs has an active abrupt audio edge; the candidate is held.')
             atomic_write(output, wav.read_bytes())
         return {'duration': len(audio) / rate, 'sample_rate': rate, 'samples': len(audio), 'warning': '',
                 'synthesis': {**plan, 'plan_sha256': digest(plan)},

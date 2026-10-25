@@ -71,10 +71,16 @@ def validator(characters: dict[str, str]):
     from .auto_pronunciation import validate_name_stress
 
     def validate(answer: dict) -> None:
+        if not isinstance(answer,dict)or not isinstance(answer.get('names'),list):
+            raise ValueError('Name-stress decisions must be a list')
         seen = {}
         for row in answer['names']:
+            if not isinstance(row,dict)or not isinstance(row.get('character_id'),str):
+                raise ValueError('Invalid name-stress character decision')
             if row['character_id'] not in characters:
                 raise ValueError(f"Unknown character {row['character_id']}")
+            if row['character_id']in seen:
+                raise ValueError(f"Duplicate name-stress character {row['character_id']}")
             if row['name'] != characters[row['character_id']]:
                 raise ValueError(f"Name changed for {row['character_id']}")
             validate_name_stress(row['name'], row['stressed'])

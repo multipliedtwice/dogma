@@ -264,6 +264,10 @@ class CastKind(Base):
         changed = jobs.cast_name_stress(done['id'], ivan['id'], 'Ива' + acute + 'н')
         row = changed['analysis']['pronunciation']['names'][ivan['id']]
         self.assertEqual(('Ива' + acute + 'н', 'listener', 'И' + acute + 'ван'), (row['stressed'], row['source'], row['model_stressed']))
+        with self.assertRaisesRegex(AppError, 'changes the letters'):
+            jobs.cast_name_stress(done['id'], ivan['id'], 'Ива' + acute + 'нн')
+        with self.assertRaisesRegex(AppError, 'no automatic name stress'):
+            jobs.cast_name_stress(done['id'], self.character(done, 'Маша')['id'], 'Ма' + acute + 'ша')
         from rimsky.listener_stress import snapshot,notes
         from rimsky.series_characters import apply_pronunciations
         book=self.store.book(changed['book_id'])
@@ -278,10 +282,6 @@ class CastKind(Base):
         self.store.correction_profile=self.root/'recovered-cast-profile.sqlite3'
         recovered=snapshot(self.store,book)
         self.assertEqual('Ива'+acute+'н',recovered['names']['иван'])
-        with self.assertRaisesRegex(AppError, 'changes the letters'):
-            jobs.cast_name_stress(done['id'], ivan['id'], 'Ива' + acute + 'нн')
-        with self.assertRaisesRegex(AppError, 'no automatic name stress'):
-            jobs.cast_name_stress(done['id'], self.character(done, 'Маша')['id'], 'Ма' + acute + 'ша')
 
     def test_person_voted_mechanical_gets_a_character_voice_when_corrected(self):
         jobs, _, done = self.reviewed()
@@ -391,18 +391,19 @@ class ReviewFlow(Base):
         super().setUp()
         self.store.update_settings({'cast_review': True})
 
-    def test_correction_during_review_creates_a_revision_that_waits_for_review(self):
+    def test_correction_during_review_updates_current_output_and_waits_for_review(self):
         jobs, engine, done = self.reviewed()
         ivan, masha = self.character(done, 'Иван'), self.character(done, 'Маша')
         segment = next(item for item in done['segments'] if item['speaker'] == ivan['id'])
         revision = jobs.revise(done['id'], [{'id': segment['id'], 'speaker': masha['id']}])
+        self.assertEqual(done['id'], revision['id'])
         self.assertEqual(('review', False, True), (revision['status'], revision['analysis']['approved'], revision['analysis']['complete']))
         other = 'b' if masha['voice_id'] == 'a' else 'a'
         self.assertEqual(other, self.character(jobs.cast_voice(revision['id'], masha['id'], other), 'Маша')['voice_id'])
         self.assertEqual('review', jobs.start(revision['id'])['status'])
         ready = self.finish(jobs, revision, narrate=True)
         self.assertEqual('ready', ready['status'], ready['error'])
-        self.assertEqual('review', self.store.generation(done['id'])['status'])
+        self.assertEqual('ready', self.store.generation(done['id'])['status'])
 
     def test_queued_narration_does_not_report_the_finished_casting_stage(self):
         engine = Held()

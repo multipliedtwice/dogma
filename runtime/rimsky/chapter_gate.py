@@ -63,6 +63,8 @@ def generation_binding(segments,pack_fingerprint,root):
     return audio_binding(digest({'segments':bound,'pack':pack_fingerprint}),takes)
 
 def music_released(generation,chapter_id,root):
+    from .post_processing import enabled
+    if not enabled(generation.get('config')or{}):return True
     analysis=generation.get('analysis') or {}
     # Legacy generations have no chapter direction/gate and retain their
     # existing behavior. New directed generations never bypass this check.

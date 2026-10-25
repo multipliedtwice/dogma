@@ -120,11 +120,11 @@ class HiggsTests(unittest.TestCase):
                 return {'synthesis':{**planned,'plan_sha256':digest(planned)},'audio_checks':{}}
             return transcript_check(payload['text'],unmarked(payload['text']),file_digest(wav),verifier)
         jobs=Jobs.__new__(Jobs);jobs._guarded=guarded
-        request={'pack':self.pack,'text':text,'voice_id':voice['id'],'delivery':'neutral',
+        request={'post_processing':'on','pack':self.pack,'text':text,'voice_id':voice['id'],'delivery':'neutral',
                  'language':'Russian','resolved_speech':self.resolved,'take':0}
         result=jobs._speak(request,wav)
         self.assertTrue(all('на́ ноги' in native for _,native in seen))
-        config={'resolved_speech':self.resolved,'_speech_language':'Russian'}
+        config={'resolved_speech':self.resolved,'_speech_language':'Russian','post_processing':'on'}
         key=render_key(self.pack,config,text,voice,'neutral','Russian',0)
         plans=[({'text':text},voice,'neutral',True,'',key)]
         self.assertTrue(jobs._higgs_cached(result,plans,self.pack,config))
@@ -292,7 +292,7 @@ class HiggsTests(unittest.TestCase):
         store.update_settings({'cast_review': False, 'device': 'cpu'})
         book = store.import_data(FB2, 'fixture.fb2')
         generation = store.create_generation(book['id'], {'pack_path': self.pack['_root'], 'pack_fingerprint': self.pack['_fingerprint'],
-                                                         'device': 'cpu', 'align_words': False})
+                                                         'device': 'cpu', 'align_words': False, 'post_processing':'on'})
         test = self
         class Engine(SyntheticEngine):
             def call(self, method, payload, stop):
@@ -374,7 +374,7 @@ class HiggsTests(unittest.TestCase):
         self.addCleanup(store.close)
         jobs = Jobs(store, self.root)
         self.addCleanup(jobs.shutdown)
-        request = {'pack': self.pack, 'device': 'cpu', 'resolved_speech': self.resolved, 'voice_id': 'n',
+        request = {'post_processing':'on','pack': self.pack, 'device': 'cpu', 'resolved_speech': self.resolved, 'voice_id': 'n',
                    'text': 'Hello.', 'delivery': 'neutral', 'language': 'English'}
         wav = self.root / 'output.wav'
         def guarded(method, payload):
@@ -399,7 +399,7 @@ class HiggsTests(unittest.TestCase):
             if len(requests)==1:raise SpeechHoldError('Word check mismatch')
             return {'duration':1.2,'warning':'','synthesis':{'take':request['take']}}
         jobs._speak=speak
-        request={'pack':self.pack,'take':7,'text':'Hello there.','voice_id':'n','delivery':'excited',
+        request={'post_processing':'on','pack':self.pack,'take':7,'text':'Hello there.','voice_id':'n','delivery':'excited',
                  'controls':{'mood':'excited'},'language':'English','resolved_speech':self.resolved}
         result=jobs._synthesize('g',{},request,self.root/'candidate.wav')
         self.assertEqual([7,8],[r['take'] for r in requests])
@@ -411,7 +411,7 @@ class HiggsTests(unittest.TestCase):
     def test_immutable_cache_collision_advances_seed_without_overwriting(self):
         jobs=Jobs.__new__(Jobs);jobs.store=types.SimpleNamespace(root=self.root)
         jobs._check=lambda:None;jobs._intact=lambda *args:None
-        request={'pack':self.pack,'take':0,'text':'Hello there.','voice_id':'n',
+        request={'post_processing':'on','pack':self.pack,'take':0,'text':'Hello there.','voice_id':'n',
             'delivery':'excited','language':'English','resolved_speech':self.resolved}
         key=render_key(self.pack,request,request['text'],self.pack['voices'][0],'excited','English',0)
         (self.root/'audio').mkdir();published=self.root/'audio'/f'{key}.wav';published.write_bytes(b'older immutable take')
@@ -428,7 +428,7 @@ class HiggsTests(unittest.TestCase):
         store=Store(self.root/'recovery-library');self.addCleanup(store.close)
         book=store.import_data(FB2,'fixture.fb2')
         generation=store.create_generation(book['id'],{'pack_path':self.pack['_root'],
-            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False})
+            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False,'post_processing':'on'})
         jobs=Jobs(store,self.root);self.addCleanup(jobs.shutdown)
         first,second=store.generation(generation['id'])['segments'][:2]
         first={**first,'warning':'Existing notice.'}
@@ -466,7 +466,7 @@ class HiggsTests(unittest.TestCase):
             raise SpeechHoldError('Active audio edge')
         jobs._speak=speak
         with self.assertRaisesRegex(SpeechHoldError,'no failed audio was published'):
-            jobs._synthesize('g',{}, {'pack':self.pack,'take':0,'text':'Hello.'},wav)
+            jobs._synthesize('g',{}, {'post_processing':'on','pack':self.pack,'take':0,'text':'Hello.'},wav)
         self.assertEqual([0,1,2],attempts)
         self.assertFalse(wav.exists())
 
@@ -476,7 +476,7 @@ class HiggsTests(unittest.TestCase):
         store.update_settings({'cast_review':False,'device':'cpu'})
         book=store.import_data(FB2,'fixture.fb2')
         generation=store.create_generation(book['id'],{'pack_path':self.pack['_root'],
-            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False})
+            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False,'post_processing':'on'})
         test=self
         class Engine(SyntheticEngine):
             def __init__(self,reject):super().__init__();self.reject=reject;self.takes=[]
@@ -515,7 +515,7 @@ class HiggsTests(unittest.TestCase):
         store.update_settings({'cast_review':False,'device':'cpu'})
         book=store.import_data(FB2,'fixture.fb2');before=copy.deepcopy(store.book(book['id'])['chapters'])
         generation=store.create_generation(book['id'],{'pack_path':self.pack['_root'],
-            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False})
+            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False,'post_processing':'on'})
         test=self
         class Engine(SyntheticEngine):
             def call(self,method,payload,stop):
@@ -589,7 +589,7 @@ class HiggsTests(unittest.TestCase):
         store.update_settings({'cast_review':False,'device':'cpu'})
         book=store.import_data(FB2,'fixture.fb2')
         generation=store.create_generation(book['id'],{'pack_path':self.pack['_root'],
-            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False})
+            'pack_fingerprint':self.pack['_fingerprint'],'device':'cpu','align_words':False,'post_processing':'on'})
         test=self
         class Engine(SyntheticEngine):
             def __init__(self):super().__init__();self.verified_temperature=None
@@ -627,7 +627,7 @@ class HiggsTests(unittest.TestCase):
         store.update_settings({'cast_review':False,'device':'cpu'})
         book=store.import_data(FB2,'fixture.fb2')
         generation=store.create_generation(book['id'],{'pack_path':pack['_root'],
-            'pack_fingerprint':pack['_fingerprint'],'device':'cpu','align_words':False})
+            'pack_fingerprint':pack['_fingerprint'],'device':'cpu','align_words':False,'post_processing':'on'})
         test=self
         class Engine(SyntheticEngine):
             def __init__(self,opening=False):super().__init__();self.events=[];self.opening=opening
@@ -681,8 +681,9 @@ class HiggsTests(unittest.TestCase):
         resumed,_=run();self.assertNotIn('narrative_frame',resumed.events)
         # A special frame is not silently routed to ordinary narration when its
         # qualified register is missing. This exercises real source-ID mapping.
-        new=store.create_generation(book['id'],{'pack_path':pack['_root'],
-            'pack_fingerprint':pack['_fingerprint'],'device':'cpu','align_words':False})
+        opening_book=store.import_data(FB2.replace(b'<book-title>',b'<book-title>Opening fixture '),'opening.fb2')
+        new=store.create_generation(opening_book['id'],{'pack_path':pack['_root'],
+            'pack_fingerprint':pack['_fingerprint'],'device':'cpu','align_words':False,'post_processing':'on'})
         missing=Engine(opening=True);jobs=Jobs(store,self.root,engine_factory=lambda _:missing)
         jobs.start(new['id']);jobs.thread.join(15);self.assertFalse(jobs.thread.is_alive());jobs.shutdown()
         stopped=store.generation(new['id'])

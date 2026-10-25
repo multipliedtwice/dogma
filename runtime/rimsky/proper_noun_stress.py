@@ -20,6 +20,7 @@ RULE = 'proper-noun-base-stress-v1'
 # oblique-only family (Нимраса) takes its stress from the derived nominative stem instead of staying
 # unmarked for the rare-word pass (which stressed the oblique form itself: Нимраса́).
 RULE_V2 = 'proper-noun-base-stress-v2'
+RULE_SOURCE = 'proper-noun-explicit-source-stress-v3'
 OBLIQUE = ('ами', 'ями', 'ой', 'ом', 'ем', 'ам', 'ям', 'ах', 'ях', 'а', 'я', 'у', 'ю', 'е', 'и', 'ы')
 
 
@@ -35,13 +36,14 @@ def _coinages(texts) -> set[str]:
             if not _morph().word_is_known(m[0])}
 
 
-def _candidates(texts, initial: bool = False) -> set[str]:
+def _candidates(texts, initial: bool = False, *, acute_transparent: bool = False) -> set[str]:
     """Capitalized mid-sentence words of >=3 letters that are not dictionary words."""
     found = set()
     for text in texts:
         start = True
-        for match in re.finditer(r'[А-Яа-яЁё]+|[.!?…]', text):
-            token = match[0]
+        pattern=r'[А-Яа-яЁё́]+|[.!?…]'if acute_transparent else r'[А-Яа-яЁё]+|[.!?…]'
+        for match in re.finditer(pattern, text):
+            token = match[0].replace(ACUTE,'')if acute_transparent else match[0]
             if token in '.!?…':start = True; continue
             # All-caps tokens are shouting (ХАААРРР), not names.
             if ((initial or not start) and token[0].isupper() and not token.isupper() and len(token) >= 3
@@ -83,13 +85,17 @@ def _stress(base: str, derive: bool = False) -> str | None:
     return marked[:i] + marked[i + 1] + ACUTE + marked[i + 2:]
 
 
-def proper_noun_lexicon(texts, character_lexicon: dict[str, str], v2: bool = False) -> dict[str, str]:
+def proper_noun_lexicon(texts, character_lexicon: dict[str, str], v2: bool = False,
+                        *, explicit_stress: list[dict] | None = None,
+                        source_evidence: list[dict] | None = None) -> dict[str, str]:
     """Stressed base forms: 'pn:' proper nouns (capitalized forms only) and
     'cw:' invented lowercase words (any case; they cannot clash with ordinary words)."""
     texts = list(texts)
     known = build(character_lexicon, implicit_single=True)
     lexicon = {}
-    families = (('pn:', _candidates(texts, v2)), ('cw:', _coinages(texts)))
+    source_marks=explicit_stress is not None
+    families = (('pn:', _candidates(texts, v2,acute_transparent=source_marks)),
+                ('cw:', _coinages([text.replace(ACUTE,'')for text in texts]if source_marks else texts)))
     # v2: sentence-initial candidates overlap the coined words; the any-case 'cw:' entry must win (игв/Игв).
     for prefix, found in (families[::-1] if v2 else families):
         words = sorted((w for w in found if w.casefold().replace('ё', 'е') not in known), key=lambda w: (len(w), w))
@@ -97,6 +103,26 @@ def proper_noun_lexicon(texts, character_lexicon: dict[str, str], v2: bool = Fal
         for word in words:
             if _base_of(word, bases) is None:bases.append(word)
         for base in bases:
-            stressed = _stress(base, v2)
-            if stressed and not any(k[3:].casefold() == base.casefold() for k in lexicon):lexicon[prefix + base] = stressed
+            choices=set();sources=[]
+            if source_marks:
+                from .name_stress import parse,aligned_stress_index
+                for evidence in explicit_stress:
+                    plain,index=parse(evidence['word'])
+                    if evidence.get('plain')!=plain or evidence.get('stress')!=index:
+                        raise ValueError('Explicit source-name stress evidence changed')
+                    if plain.casefold().replace('ё','е')in known:continue
+                    matching=[candidate for candidate in bases if _base_of(plain,[candidate])is not None]
+                    if base not in matching:continue
+                    if len(matching)!=1:raise ValueError('Ambiguous explicit source-name family: '+plain)
+                    mapped=aligned_stress_index(plain,base,index)
+                    if mapped is None:raise ValueError('Explicit source-name stress loses its vowel: '+plain)
+                    choices.add(mapped);sources.append(evidence)
+                if len(choices)>1:raise ValueError('Conflicting explicit source-name stresses: '+base)
+            if choices:
+                index=next(iter(choices));stressed=base[:index+1]+ACUTE+base[index+1:]
+            else:stressed = _stress(base, v2)
+            if stressed and not any(k[3:].casefold() == base.casefold() for k in lexicon):
+                lexicon[prefix + base] = stressed
+                if choices and source_evidence is not None:
+                    source_evidence.append({'family':prefix+base,'stressed':stressed,'sources':sources})
     return lexicon

@@ -186,13 +186,11 @@ def render_key(pack, config, text, voice, delivery, language, take, controls=Non
     from .speech_backend import is_higgs
     if is_higgs(pack):
         from .higgs_backend import synthesis_plan
-        from .spoken_pronunciation import synthesis_text
+        from .spoken_pronunciation import synthesis_text,cache_binding
         text,pronunciation = synthesis_text(text, config.get('_pronunciation'))
-        listener=pronunciation.get('listener_stress') or {}
-        binding={'policy':listener.get('policy'),'applications':listener.get('applications',[])}
         return digest({'schema': 5, 'language': language,
                        'plan': synthesis_plan(pack, voice, text, delivery, controls, config.get('resolved_speech'), take),
-                       **({'listener_stress':binding} if binding['applications'] else {})})
+                       **cache_binding(pronunciation)})
     return digest({'schema': 3, 'pack': pack['_fingerprint'], 'device': config['device'], 'text': text, 'voice': synthesis_voice(pack, voice, delivery),
                    'delivery': delivery, 'language': language, 'qwen_tts': '0.1.1', 'take': take, **({'controls': controls} if controls else {})})
 
@@ -747,15 +745,11 @@ class Jobs:
         from .listener_stress import snapshot, apply
         with self.lock:
             book=self.store.book(report['book_id'])
-            generations=self.store.generation_list(book['id'])
-            current_ids={generations[0]['id']} if generations else set()
-            if self.active:
-                active=self.store.generation(self.active)
-                if active['book_id']==book['id']:current_ids.add(self.active)
-            positions=self.store.rows('SELECT value FROM positions WHERE book_id=?',(book['id'],))
-            if positions:
-                with contextlib.suppress(ValueError,TypeError):
-                    current_ids.add(json.loads(positions[0]['value']).get('generation_id'))
+            # Old listening positions and legacy creation order are heard
+            # evidence, not additional replacement targets. An active owner
+            # participates only when it is this canonical current output.
+            current_id=self.store.current_generation_id(book['id'])
+            current_ids={current_id} if current_id else set()
             count=0
             for gid in current_ids- {None}:
                 generation=self.store.generation(gid)
@@ -1317,6 +1311,8 @@ class Jobs:
     def _prepare(self,gid):
         generation=self.store.generation(gid)
         config=generation['config']
+        from .post_processing import mode,enabled
+        config={**config,'post_processing':mode(config)}
         pack = self._pack(config, verify=True, stop=self.stop)
         self._check()
         pack_unchanged(pack)
@@ -1525,7 +1521,7 @@ class Jobs:
         self._render(gid,pack,config,book,language)
         # Exhausted machine word checks receive two independent recovery
         # rounds before this job settles. Human/casting holds are never cleared.
-        for recovery_round in range(2):
+        for recovery_round in range(2 if enabled(config)else 0):
             if not self._retry_word_holds(gid):break
             self._check()
             self._render(gid,pack,config,book,language)
@@ -1859,6 +1855,8 @@ class Jobs:
         return sha
 
     def _candidate_audio(self,gid,segment,request,proposed_key,spoken,config):
+        from .post_processing import mode
+        request={**request,'post_processing':mode(config)}
         staging=self.store.root/'render-candidates';staging.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='take-',dir=staging) as folder:
             candidate=Path(folder)/'candidate.wav'
@@ -1888,19 +1886,95 @@ class Jobs:
                 'parts':[{'key':p.stem,'audio_sha256':file_digest(p)} for p in paths],
                 'pauses':pauses}}
 
+    def _prepare_russian_chapter(self,gid,book,chapter_id,recipe):
+        """Freeze bounded preparation before rendering this chapter, retaining resume evidence."""
+        from .russian_preparation import POLICY,BATCH,validate_config,entry_key,validate_entry,resolve_entry,book_binding,proper_inventory
+        validate_config(recipe)
+        current=self.store.generation(gid);spec=dict(current['analysis'].get('pronunciation')or{})
+        book_sha=book_binding(book)
+        names={key:row['stressed']for key,row in spec.get('names',{}).items()}
+        inventory=proper_inventory(book)
+        lexicon_input=digest({'inventory':inventory,'names':names})
+        name_evidence=spec.get('proper_noun_preparation')or{}
+        if (name_evidence.get('input_sha256')!=lexicon_input or name_evidence.get('book_sha256')!=book_sha
+                or name_evidence.get('sha256')!=digest({k:v for k,v in name_evidence.items()if k!='sha256'})):
+            name_evidence=self._call('prepare_russian_names',{'inventory':inventory,'names':names,'book_sha256':book_sha})
+            if (name_evidence.get('input_sha256')!=lexicon_input or name_evidence.get('book_sha256')!=book_sha
+                    or name_evidence.get('sha256')!=digest({k:v for k,v in name_evidence.items()if k!='sha256'})):
+                raise AppError('Book-wide proper-noun preparation returned invalid evidence')
+        spec={**spec,'proper_nouns':name_evidence['proper_nouns'],'proper_noun_preparation':name_evidence,'book_sha256':book_sha}
+        # A later provider hold must not lose the book-wide name decisions.
+        if spec!=current['analysis'].get('pronunciation'):
+            latest=self.store.generation(gid)['analysis']
+            self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
+                (json.dumps({**latest,'pronunciation':spec},ensure_ascii=False),gid))
+        blocks={b['id']:b['text']for c in book['chapters']for b in c['blocks']}
+        units=[]
+        for segment in current['segments']:
+            if segment['chapter_id']!=chapter_id or segment['status']=='review':continue
+            for part in render_parts(segment)or[]:
+                if not audible(part['text']):continue
+                units.append({'text':part['text'],'source':{'source_id':segment['source_id'],
+                    'source_text':blocks[segment['source_id']],'source_start':part.get('start',segment['start']),
+                    'source_end':part.get('end',segment['end'])}})
+        # Identical source/text may be shared, but homographs in different source
+        # passages never share an occurrence binding.
+        units=list({entry_key(u['text'],u['source']):u for u in units}.values())
+        input_sha=digest({'units':units,'recipe':recipe,'book_sha256':book_sha,
+            'pronunciation':{k:spec.get(k)for k in ('names','common','terms','proper_nouns','respelling_sources')}})
+        source_input_sha=digest({'units':units,'recipe':recipe,'book_sha256':book_sha})
+        saved=(spec.get('prepared_chapters')or{}).get(chapter_id)
+        if saved and saved.get('source_input_sha256')==source_input_sha:
+            for unit in units:
+                resolve_entry(unit['text'],{**spec,'listener_source':unit['source']})
+            return spec
+        entries={};batches=[]
+        cache=self.store.root/'russian-preparation'
+        for start in range(0,len(units),BATCH):
+            self._check()
+            latest=self.store.generation(gid)['analysis']
+            self.store.execute('UPDATE generations SET analysis=? WHERE id=?',(json.dumps({**latest,
+                'progress':{'stage':'russian_preparation','chapter':chapter_id,'done':start,'total':len(units)}},ensure_ascii=False),gid))
+            lexical={k:spec.get(k)for k in ('names','common','terms','proper_nouns','respelling_sources')}
+            result=self._call('prepare_russian',{'units':units[start:start+BATCH],'pronunciation':lexical,
+                'recipe':recipe,'book_sha256':book_sha,'cache_dir':str(cache)})
+            if result.get('policy')!=POLICY or result.get('sha256')!=digest({k:v for k,v in result.items()if k!='sha256'}):
+                raise AppError('Russian preparation returned invalid frozen evidence')
+            expected={entry_key(u['text'],u['source'])for u in units[start:start+BATCH]}
+            if set(result['prepared_units'])!=expected:raise AppError('Russian preparation omitted source parts')
+            for key,entry in result['prepared_units'].items():
+                entries[key]=validate_entry(entry)
+                if entry['book_sha256']!=book_sha:raise AppError('Preparation returned a different source book')
+            for unit in units[start:start+BATCH]:
+                resolve_entry(unit['text'],{**spec,'prepared_units':entries,'listener_source':unit['source']})
+            batches.append({'request_sha256':result['request_sha256'],'sha256':result['sha256']})
+        latest=self.store.generation(gid)['analysis']
+        prepared={**spec,'policy':POLICY,'prepared_units':{**spec.get('prepared_units',{}),**entries},
+            'prepared_chapters':{**spec.get('prepared_chapters',{}),chapter_id:{'input_sha256':input_sha,
+                'source_input_sha256':source_input_sha,'batches':batches}}}
+        latest={**latest,'pronunciation':prepared};latest.pop('progress',None)
+        self.store.execute('UPDATE generations SET analysis=? WHERE id=?',(json.dumps(latest,ensure_ascii=False),gid))
+        return prepared
+
     def _render(self, gid, pack, config, book, language):
         from .speech_backend import is_higgs
+        from .post_processing import enabled,disclosure
         higgs = is_higgs(pack)
-        gated=higgs
+        gated=higgs and enabled(config)
         if higgs:
             config = {**config, '_speech_language': language}
         current = self.store.generation(gid)
+        if higgs:
+            current={**current,'analysis':{**current['analysis'],'post_processing':disclosure(config)}}
+            self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
+                (json.dumps(current['analysis'],ensure_ascii=False),gid))
         if higgs:
             from .listener_stress import snapshot
             frozen_listener=snapshot(self.store,book,current['cast'])
             pronunciation={**current['analysis'].get('pronunciation',{}),'listener_stress':frozen_listener}
             config={**config,'_pronunciation':pronunciation}
             source_blocks={b['id']:b['text'] for c in book['chapters'] for b in c['blocks']}
+        russian_recipe=config.get('russian_preparation') if higgs and language=='Russian' else None
         if higgs and current['analysis'].get('pronunciation'):
             config = {**config, '_pronunciation': pronunciation}
         accepted_chapters={}
@@ -1942,6 +2016,9 @@ class Jobs:
                     self._chapter_acceptance(gid,pack,book,{**config,'chapters':[checked_chapter]})
                 pack_unchanged(pack)
                 checked_chapter = segment['chapter_id']
+                if russian_recipe:
+                    prepared=self._prepare_russian_chapter(gid,book,checked_chapter,russian_recipe)
+                    config={**config,'_pronunciation':{**prepared,'listener_stress':frozen_listener}}
             if segment['status'] == 'review':
                 continue
             if higgs and segment['id'] in chapter_ends and audible(segment['spoken']):
@@ -1959,13 +2036,23 @@ class Jobs:
                 from .listener_stress import apply
                 corrected=[]
                 for part in parts:
-                    native,evidence=apply(part['text'],frozen_listener,source_id=segment['source_id'],
-                        source_text=source_blocks[segment['source_id']],
-                        source_start=part.get('start',segment['start']),source_end=part.get('end',segment['end']))
+                    if russian_recipe:
+                        # Frozen automatic input binds the original spoken text;
+                        # human corrections are authoritative at the final layer.
+                        native,evidence=part['text'],{}
+                    else:
+                        native,evidence=apply(part['text'],frozen_listener,source_id=segment['source_id'],
+                            source_text=source_blocks[segment['source_id']],
+                            source_start=part.get('start',segment['start']),source_end=part.get('end',segment['end']))
                     binding={'source_id':segment['source_id'],'source_text':source_blocks[segment['source_id']],
                         'source_start':part.get('start',segment['start']),'source_end':part.get('end',segment['end'])}
+                    part_spec=config['_pronunciation']
+                    if russian_recipe and audible(part['text']):
+                        from .russian_preparation import entry_key
+                        unit_key=entry_key(part['text'],binding)
+                        part_spec={**part_spec,'prepared_chapters':{},'prepared_units':{unit_key:part_spec['prepared_units'][unit_key]}}
                     corrected.append({**part,'text':native,'_listener_stress':evidence,
-                        '_pronunciation':{**config['_pronunciation'],'listener_source':binding}})
+                        '_pronunciation':{**part_spec,'listener_source':binding}})
                 parts=corrected
             take = takes.get(segment['id'], 0)
             plans, controls, part_takes = [], {}, {}
@@ -1980,7 +2067,7 @@ class Jobs:
                     actual_take=take
                     automatic=automatic_takes.get(segment['id'],{}).get(str(index),{})
                     decoding_profile=None
-                    if higgs and automatic.get('requested_take')==take and type(automatic.get('selected_take')) is int:
+                    if higgs and enabled(config) and automatic.get('requested_take')==take and type(automatic.get('selected_take')) is int:
                         actual_take=max(take,automatic['selected_take'])
                         decoding_profile=automatic.get('decoding_profile')
                         if automatic.get('spoken_text_plan'):
@@ -2121,6 +2208,8 @@ class Jobs:
             if gated:self._chapter_acceptance(gid,pack,book,{**config,'chapters':[checked_chapter]})
 
     def _chapter_acceptance(self,gid,pack,book,config):
+        from .post_processing import enabled
+        if not enabled(config):return
         from .chapter_gate import measure,report,audio_binding
         from .util import file_digest
         current=self.store.generation(gid)
@@ -2263,6 +2352,11 @@ class Jobs:
     def _higgs_cached(self, result, plans, pack, config):
         from .higgs_backend import synthesis_plan
         from .speech_quality import transcript_check
+        from .post_processing import enabled
+        checked=enabled(config)
+        retake=result.get('automatic_retake')or{}
+        if not checked and (retake.get('selected_take',retake.get('requested_take'))!=retake.get('requested_take')
+                or retake.get('decoding_profile') or retake.get('spoken_text_plan')):return False
         syntheses = result.get('synthesis_parts', [result.get('synthesis')])
         audits = result.get('word_checks_parts', [result.get('word_check')])
         if not isinstance(syntheses, list) or not isinstance(audits, list) or len(syntheses) != len(plans) or len(audits) != len(plans):
@@ -2277,12 +2371,16 @@ class Jobs:
                 path=self.store.root/'audio'/f'{key}.wav'
                 if piece.get('key')!=key or not path.is_file() or file_digest(path)!=piece.get('audio_sha256'):return False
                 if spoken and (not isinstance(audit,dict) or audit.get('audio_sha256')!=piece['audio_sha256']):return False
-        prefix = pack['speech']['verifier']['path'].rstrip('/') + '/'
-        verifier = digest({k: v for k, v in pack['files'].items() if k.startswith(prefix)})
+        if checked:
+            prefix = pack['speech']['verifier']['path'].rstrip('/') + '/'
+            verifier = digest({k: v for k, v in pack['files'].items() if k.startswith(prefix)})
         for (part, voice, delivery, spoken, _, key), synthesis, audit in zip(plans, syntheses, audits):
             if not spoken:
                 continue
-            if not isinstance(synthesis, dict) or not isinstance(audit, dict) or not isinstance(audit.get('heard'), str):
+            from .spoken_pronunciation import synthesis_text,cache_binding
+            native_text,pronunciation=synthesis_text(part['text'],part.get('_pronunciation',config.get('_pronunciation')))
+            if not isinstance(synthesis, dict) or not isinstance(audit, dict):return False
+            if checked and not isinstance(audit.get('heard'), str):
                 if not (isinstance(synthesis,dict) and synthesis.get('backend')=='nonverbal_asset' and isinstance(audit,dict)
                         and audit.get('status')=='nonverbal_not_spoken_text' and
                         audit.get('asset_sha256')==synthesis.get('asset_sha256') and
@@ -2294,13 +2392,11 @@ class Jobs:
                     or audit.get('event_kind')!=synthesis.get('event',{}).get('kind')):return False
                 saved_plan={k:v for k,v in synthesis.items() if k!='plan_sha256'}
                 if synthesis.get('plan_sha256')!=digest(saved_plan) or key!=digest({'schema':5,
-                        'language':config.get('_speech_language'),'plan':saved_plan}):return False
+                        'language':config.get('_speech_language'),'plan':saved_plan,**cache_binding(pronunciation)}):return False
                 if 'synthesis_parts' not in result and audit.get('audio_sha256')!=result['sha256']:return False
                 continue
-            from .spoken_pronunciation import synthesis_text
-            native_text,pronunciation=synthesis_text(part['text'],part.get('_pronunciation',config.get('_pronunciation')))
             from .word_verification import verified
-            if not verified(native_text,audit,audit.get('audio_sha256'),verifier,config.get('_speech_language')):
+            if checked and not verified(native_text,audit,audit.get('audio_sha256'),verifier,config.get('_speech_language')):
                 return False
             if 'synthesis_parts' not in result and audit.get('audio_sha256') != result['sha256']:
                 return False
@@ -2309,10 +2405,8 @@ class Jobs:
             saved_plan = {k: v for k, v in synthesis.items() if k != 'plan_sha256'}
             if synthesis.get('plan_sha256') != digest(saved_plan):
                 return False
-            listener=pronunciation.get('listener_stress') or {}
-            binding={'policy':listener.get('policy'),'applications':listener.get('applications',[])}
             if key != digest({'schema': 5, 'language': config.get('_speech_language'), 'plan': saved_plan,
-                    **({'listener_stress':binding} if binding['applications'] else {})}):
+                    **cache_binding(pronunciation)}):
                 # Language is stored by the caller below; do not reuse a plan
                 # under an unknown or changed language conditioning.
                 return False
@@ -2327,7 +2421,10 @@ class Jobs:
 
     def _speak(self, request, wav):
         from .speech_backend import is_higgs
+        from .post_processing import enabled,disclosure
         if is_higgs(request['pack']):
+            if not enabled(request)and(request.get('_decoding_profile')or request.get('_spoken_repair')):
+                raise SpeechHoldError('Automatic recovery input is disabled for this one-shot generation.')
             from .recovery_decoding import execution_pack
             request={**request,'pack':execution_pack(request['pack'],request.get('_decoding_profile'),request['text'])}
             from .spoken_pronunciation import synthesis_text
@@ -2352,6 +2449,12 @@ class Jobs:
                     raise SpeechHoldError('Sound-event provenance does not bind to the actual audio.')
                 return {**read_audio(wav),'warning':result.get('warning',''),
                         'synthesis':result['synthesis'],'audio_checks':result['audio_checks'],'word_check':audit}
+            if not enabled(request):
+                return {**read_audio(wav),'warning':result.get('warning',''),
+                    'synthesis':result['synthesis'],'phrase_pronunciation':pronunciation,
+                    'audio_checks':{**result.get('audio_checks',{}),'spoken_words':'not_checked'},
+                    'word_check':{'status':'not_checked','audio_sha256':file_digest(wav)},
+                    'post_processing':disclosure(request)}
             audit = self._guarded('verify_audio', {'pack': request['pack'], 'audio': str(wav), 'text': request['text'], 'language': request['language']})
             if not isinstance(audit, dict) or audit.get('audio_sha256') != file_digest(wav) or not isinstance(audit.get('heard'), str):
                 raise SpeechHoldError('Independent word check did not bind to this exact take.')
@@ -2397,11 +2500,24 @@ class Jobs:
                        request['language'],request.get('take',0),request.get('controls'))
         published=self.store.root/'audio'/f'{key}.wav'
         if published.exists() and file_digest(published)!=file_digest(wav):
-            raise SpeechHoldError('This synthesis key already has immutable audio; trying a new seed.')
+            from .post_processing import enabled
+            raise SpeechHoldError('This synthesis key already has different audio; '+
+                ('trying a new seed.'if enabled(request)else'the one-shot output is held without an automatic retake.'))
 
     def _synthesize(self, gid, segment, request, wav):
         from .speech_backend import is_higgs
         if is_higgs(request['pack']):
+            from .post_processing import enabled,disclosure
+            if not enabled(request):
+                self._check()
+                try:
+                    result=self._speak(request,wav)
+                    self._intact(request['pack'],wav)
+                    self._check_immutable_candidate(request,wav)
+                    return {**result,'reset_cues':True,'post_processing':disclosure(request)}
+                except (AppError,OSError):
+                    self._intact(request['pack'],wav)
+                    raise
             failures=[];word_failures=[];cap_failure=None;requested_take=request.get('take',0)
             for offset in range(3):
                 self._check()

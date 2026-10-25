@@ -32,6 +32,30 @@ test('Save accepts a normal stress correction as well as a permitted respelling'
   assert.equal(stressCorrection('Моес','Мо\u0301эс'),'Мо\u0301эс');
 });
 
+test('generation requests carry the explicitly selected post-processing mode',async()=>{
+  for(const postProcessing of [false,true]){
+    const calls=[];
+    await callback('startGeneration',{
+      t,run:(_label,action)=>action(),book:{id:'book'},selectionEpoch:{current:1},modalRevision:{current:1},
+      narrationSelection:()=>['c1'],scope:'all',generationChapter:'c1',selectedChapters:[],generationSource:'',
+      generationName:'',defaultGenerationName:'Book',postProcessing,
+      api:async(op,data)=>{calls.push([op,data]);return {id:'current'};},
+      setGeneration:()=>{},setPlayFrom:()=>{},setGenerationSource:()=>{},closeModal:()=>{},setGenerationName:()=>{},
+      refreshBook:async()=>{},refreshLibrary:async()=>{},
+    })();
+    assert.deepEqual(calls,[['generate',{book_id:'book',name:'Book',chapters:['c1'],post_processing:postProcessing?'on':'off'}]]);
+  }
+});
+
+test('opening a new generation resets automatic recognition and retakes to off',()=>{
+  const modes=[];
+  callback('openGenerate',{
+    setGenerationChapter:()=>{},setScope:()=>{},setGenerationName:()=>{},setPostProcessing:value=>modes.push(value),
+    setGenerationSource:()=>{},book:null,setSelectedChapters:()=>{},setModal:()=>{},
+  })('c1','all');
+  assert.deepEqual(modes,[false]);
+});
+
 test('narration feedback offsets count Unicode code points',()=>{
   const markup={contains:()=>true};
   const section={dataset:{sourceId:'p'},contains:()=>true,querySelector:()=>markup};

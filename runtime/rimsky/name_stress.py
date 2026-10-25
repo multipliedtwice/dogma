@@ -9,6 +9,7 @@ stressed vowel (stress on a dropped final vowel) is left unmarked.
 """
 from __future__ import annotations
 import re
+from functools import lru_cache
 from .respelling import respelled_letters, substitute
 
 ACUTE = '́'
@@ -49,17 +50,81 @@ def _keys(form: str):
         yield key.replace('э', 'е')
 
 
-def _put(forms, respell, form, index, letters):
+def _put(forms, respell, form, index, letters, conflicts):
     for key in _keys(form):
+        if key in conflicts:continue
+        if key in forms and (forms[key]!=index or respell.get(key,())!=letters):
+            forms.pop(key,None);respell.pop(key,None);conflicts.add(key);continue
         if key not in forms:
             forms[key] = index
             if letters:
                 respell[key] = letters
 
 
+@lru_cache(maxsize=4096)
+def aligned_stress_index(source: str, target: str, index: int) -> int | None:
+    """Map a retained vowel only when every optimal letter alignment agrees.
+
+    This proves a position, never a family identity; callers must independently
+    bind the two words to the same lexeme. A lost/substituted vowel abstains.
+    """
+    if (not isinstance(source,str)or not isinstance(target,str)or type(index)is not int
+            or not 0<=index<len(source)or max(len(source),len(target))>80
+            or source[index]not in VOWELS):return None
+    left=source.casefold().replace('ё','е');right=target.casefold().replace('ё','е')
+    if len(left)!=len(source)or len(right)!=len(target):return None
+    m,n=len(left),len(right)
+    def distance(a,b):
+        matrix=[list(range(len(b)+1))]
+        for i,ch in enumerate(a,1):
+            row=[i]
+            for j,other in enumerate(b,1):
+                row.append(min(matrix[-1][j]+1,row[-1]+1,matrix[-1][j-1]+(ch!=other)))
+            matrix.append(row)
+        return matrix
+    prefix=distance(left,right);suffix=distance(left[::-1],right[::-1]);best=prefix[m][n];positions=set()
+    for j in range(n+1):
+        if prefix[index][j]+1+suffix[m-index-1][n-j]==best:positions.add(None)
+        if j<n and prefix[index][j]+(left[index]!=right[j])+suffix[m-index-1][n-j-1]==best:
+            positions.add(j if left[index]==right[j]else None)
+    return next(iter(positions))if len(positions)==1 and None not in positions else None
+
+
+@lru_cache(maxsize=4096)
+def dictionary_name_forms(base: str) -> tuple[str,...]:
+    """One exact dictionary proper-name lexeme; never use suffix predictors."""
+    if not base or len(base)>80:return ()
+    from .yo_restoration import _dictionary_parses
+    folded=lambda word:word.casefold().replace('ё','е')
+    lexemes=set()
+    for parsed in _dictionary_parses(base.casefold()):
+        if (folded(parsed.word)!=folded(base)or folded(parsed.normal_form)!=folded(base)
+                or 'nomn'not in parsed.tag or 'sing'not in parsed.tag
+                or not any(role in parsed.tag for role in ('Name','Surn','Patr'))):continue
+        forms=tuple(sorted({form.word for form in parsed.lexeme
+            if len(form.word)<=80 and re.fullmatch('[А-Яа-яЁё]+',form.word)}))
+        if forms:lexemes.add(forms)
+    return next(iter(lexemes))if len(lexemes)==1 else ()
+
+
+def _dictionary_extras(forms,respell,word,index,letters,conflicts):
+    # Regular/invented stems keep their historical behavior; add the genuinely
+    # different dictionary forms (Павел -> Павлом) with a proven vowel mapping.
+    regular={key for stem in _stems(word)for ending in ENDINGS for key in _keys(stem+ending)}
+    for surface in dictionary_name_forms(word):
+        if any(key in regular for key in _keys(surface)):continue
+        mapped=aligned_stress_index(word,surface,index)if index is not None else None
+        if index is not None and mapped is None:continue
+        substitutions=[]
+        for position,letter in letters:
+            target=aligned_stress_index(word,surface,position)
+            if target is not None:substitutions.append((target,letter))
+        _put(forms,respell,surface,mapped,tuple(substitutions),conflicts)
+
+
 def _build(lexicon: dict[str, str], implicit_single: bool = False):
     """(forms, respellings): respellings maps a surface to the (index, 'э'|'ё') letters of its stem."""
-    forms = {}; respell = {}
+    forms = {}; respell = {};conflicts=set()
     for stressed in lexicon.values():
         for part in re.findall(r'[А-Яа-яЁё́]+', stressed):
             if ACUTE not in part and implicit_single and _single_vowel(part) is not None:
@@ -70,7 +135,8 @@ def _build(lexicon: dict[str, str], implicit_single: bool = False):
                 letters = respelled_letters(part)
                 for stem in _stems(part) if len(part) > 1 else ():
                     for ending in ENDINGS:
-                        _put(forms, respell, stem + ending, None, tuple(x for x in letters if x[0] < len(stem)))
+                        _put(forms, respell, stem + ending, None, tuple(x for x in letters if x[0] < len(stem)),conflicts)
+                _dictionary_extras(forms,respell,part,None,letters,conflicts)
                 continue
             # ё is always stressed, so a single ё is the stress of an unmarked form (Мозёс).
             word, index = parse(part) if ACUTE in part else (part, yo[0])
@@ -79,7 +145,8 @@ def _build(lexicon: dict[str, str], implicit_single: bool = False):
                 if index >= len(stem):
                     continue
                 for ending in ENDINGS:
-                    _put(forms, respell, stem + ending, index, tuple(x for x in letters if x[0] < len(stem)))
+                    _put(forms, respell, stem + ending, index, tuple(x for x in letters if x[0] < len(stem)),conflicts)
+            _dictionary_extras(forms,respell,word,index,letters,conflicts)
     return forms, respell
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .name_stress import ACUTE
 from .util import digest, file_digest
+from .listener_order import ordered
 
 POLICY = 'listener-family-projection-v1'
 
@@ -17,7 +18,7 @@ POLICY = 'listener-family-projection-v1'
 def _validated_family(store, book, row, journal_db):
     from .listener_stress import _ordinary_context, _legacy_family
     from .respelling import validate_respelled_stress
-    from .series_characters import _base_match
+    from .series_characters import _base_match,unique_name_bindings
     raw = json.loads(row['raw'])
     family = json.loads(row['family']) if row['family'] else None
     if not family:
@@ -43,7 +44,7 @@ def _validated_family(store, book, row, journal_db):
         return None
     rebound = [_base_match({'canonical_name': value.replace(ACUTE, '')}, selected, intended)
         for value in family.values()]
-    rebound = list(dict.fromkeys(value for value in rebound if value))
+    rebound = unique_name_bindings(rebound)
     return (raw, family) if len(rebound) == 1 and {rebound[0][0]: rebound[0][1]} == family else None
 
 
@@ -64,14 +65,15 @@ def _project_locked(store, book):
     voice choices and unrelated state are retained by upsert_character.
     """
     from .listener_stress import _journal
-    from .series_characters import identity
+    from .series_characters import identity,series_ids
     series = identity(store, book)
+    ids=series_ids(store,series)
     with _journal(store) as db:
         # One SQLite writer reservation serializes all library/process readers
         # against human journal commits until the derived local write finishes.
         db.execute('BEGIN IMMEDIATE')
-        rows = db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE series_id=? ORDER BY created,rowid',
-            (series['id'],)).fetchall()
+        rows = db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE series_id IN ('+','.join('?'for _ in ids)+') ORDER BY created,rowid',
+            ids).fetchall()
         return _project_rows(store, book, series, rows, db)
 
 
@@ -79,7 +81,7 @@ def _project_locked(store, book):
 def _project_rows(store, book, series, rows, journal_db):
     from .series_characters import series_state, _base_match, upsert_character
     families, histories = {}, {}
-    for row in rows:
+    for row in ordered(rows):
         validated = _validated_family(store, book, row, journal_db)
         if not validated:
             continue

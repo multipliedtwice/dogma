@@ -758,6 +758,14 @@ class Store:
             reusable=bool(original and original['analysis'].get('complete')and previous.get('pack_fingerprint')==config.get('pack_fingerprint')
                           and previous.get('engine')!='higgs_audio_tts_q8_external_preview')
             analysis=dict(original['analysis'])if reusable else {}
+            if config.get('russian_preparation') and analysis.get('pronunciation'):
+                # An explicit new generation request refreshes selected
+                # preparation under the released recipe. Resume never comes
+                # through this method and keeps its frozen decisions.
+                pronunciation=dict(analysis['pronunciation'])
+                pronunciation['prepared_chapters']={key:value for key,value in pronunciation.get('prepared_chapters',{}).items()if key not in selected}
+                pronunciation.pop('proper_noun_preparation',None)
+                analysis['pronunciation']=pronunciation
             if original:
                 takes=self.takes(book_id);targets=[s for s in original['segments']if s['chapter_id']in selected]
                 from .current_audiobook import capture_parts

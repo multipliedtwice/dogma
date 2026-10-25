@@ -18,6 +18,7 @@ sys.path[:0] = [str(ROOT / 'runtime')]
 from rimsky import listener_stress
 from rimsky.store import Store
 from rimsky.util import digest, file_digest
+from rimsky.listener_order import UNKNOWN_EXPORT_TIME,priority
 
 POLICY = 'external-book-listener-preparation-v1'
 TOKEN = re.compile(r'(?:[^\W\d_]|\u0301)+', re.UNICODE)
@@ -116,8 +117,10 @@ def import_overrides(store, book, assignment, path):
             if _fold(printed[0]) != _fold(old[0]):
                 raise ValueError('Listener edited token no longer matches its source word')
             origin = {'sha256': file_digest(path), 'file': str(path.resolve()), 'change': change,
-                'created': datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
-                'created_basis': 'original_preparation_export_mtime', 'instruction': change['basis'],
+                'created': '1970-01-01T00:00:00Z',
+                'created_basis': UNKNOWN_EXPORT_TIME,
+                'observed_export_mtime': datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
+                'instruction': change['basis'],
                 'audio_approval': False}
             raw = _raw(book, unit, block, printed[0], unit['start'] + printed.start(), new[0], origin, index)
             if raw['kind'] == 'pronunciation':
@@ -139,6 +142,12 @@ def import_source_notes(store, book, assignment, path):
     document = _read(path)
     if document.get('schema') != 1 or document.get('audio_approval') is not False:
         raise ValueError('Source notes require explicit no-audio-approval provenance')
+    try:
+        original_time=datetime.fromisoformat(document['created'].replace('Z','+00:00'))
+        if original_time.tzinfo is None or not document.get('created_basis'):
+            raise ValueError('Missing original instruction timezone or provenance')
+    except (KeyError,TypeError,AttributeError,ValueError)as error:
+        raise ValueError('Source notes require an explicit original timestamp with timezone and provenance')from error
     units = {unit['id']: unit for unit in assignment['units']}
     blocks = _blocks(book)
     imported = []
@@ -149,7 +158,8 @@ def import_source_notes(store, book, assignment, path):
         if unit['text'] != note['source_text'] or len(matches) != 1 or not note.get('instruction'):
             raise ValueError('Explicit preparation instruction lacks a unique source occurrence')
         origin = {'sha256': file_digest(path), 'file': str(path.resolve()), 'note': note,
-            'created': document['created'], 'created_basis': document['created_basis'],
+            'created': original_time.astimezone(timezone.utc).isoformat().replace('+00:00','Z'),
+            'original_created':document['created'],'created_basis': document['created_basis'],
             'instruction': note['instruction'], 'audio_approval': False}
         raw = _raw(book, unit, block, note['selected_text'],
             unit['start'] + matches[0].start(), note['intended_stress'], origin, index)
@@ -163,11 +173,36 @@ def import_source_notes(store, book, assignment, path):
 def freeze(store, book):
     frozen = listener_stress.snapshot(store, book)
     edits = []
-    for row in listener_stress.notes(store, book):
+    rows=listener_stress.notes(store,book)
+    latest={}
+    for row in rows:
+        raw=row['report']
+        structured=bool(raw.get('preparation_token_edit')or raw.get('kind')=='stress'and raw.get('intended_stress'))
+        if row['book_key']==listener_stress._book_key(book)and structured:
+            key=(raw.get('source_id'),digest(raw.get('passage_text','')),raw.get('text_offset'),raw.get('selected_text'))
+            latest[key]=raw
+    statuses={row['report_id']:dict(row)for row in frozen['note_statuses']}
+    for row in rows:
         raw = row['report']
         if row['book_key'] == listener_stress._book_key(book) and raw.get('preparation_token_edit'):
-            edits.append(raw)
-    result = {'policy': POLICY, 'stress': frozen, 'token_edits': edits}
+            key=(raw.get('source_id'),digest(raw.get('passage_text','')),raw.get('text_offset'),raw.get('selected_text'))
+            winner=latest[key]
+            superseding=winner['id']if priority(raw)<priority(winner)else None
+            if priority(raw)==0 and not listener_stress._ordinary_context(raw):
+                from rimsky.name_stress import build
+                token=raw['selected_text'].casefold().replace('ё','е')
+                families=[evidence for base,evidence in frozen['family_evidence'].items()
+                    if token in build({base:frozen['names'][base]},implicit_single=True)
+                    and evidence['chronology'][0]>priority(raw)]
+                if len(families)==1:superseding=families[0]['report_id']
+            if superseding:
+                statuses[raw['id']]={'report_id':raw['id'],'status':'superseded','superseded_by_report_id':superseding,
+                    'reason':'A direct human correction outranks an imported export with unknown original time.'}
+            else:
+                edits.append(raw)
+                statuses[raw['id']]={'report_id':raw['id'],'status':'token_edit',
+                    'reason':'Explicit source-bound preparation spelling; no audio approval is implied.'}
+    result = {'policy': POLICY, 'stress': frozen, 'token_edits': edits,'note_statuses':list(statuses.values())}
     return {**result, 'sha256': digest(result)}
 
 

@@ -308,6 +308,12 @@ def render(payload):
     backend = backend_for(payload['pack'])
     if backend is not None:
         release_text()
+        if (payload.get('_pronunciation')or{}).get('policy')=='russian-preparation-v1':
+            # Chapter preparation is frozen; native synthesis needs neither
+            # CPU stress model resident alongside the Higgs process.
+            from rimsky.auto_pronunciation import _accentor
+            from rimsky.homograph_stress import _ruaccent
+            _accentor.cache_clear();_ruaccent.cache_clear();gc.collect()
         return backend.render(payload)
     return render_qwen(payload)
 
@@ -500,6 +506,14 @@ def main():
                     data=request['data'];spec=data['pronunciation']
                     names={cid:row['stressed'] for cid,row in spec.get('names',{}).items()}
                     result={'texts':[auto_pronunciation(text,names,spec.get('common',[]))[0] for text in data['texts']]}
+                elif operation=='prepare_russian':
+                    release_text()
+                    from rimsky.russian_preparation import prepare
+                    result=prepare(request['data'])
+                elif operation=='prepare_russian_names':
+                    release_text()
+                    from rimsky.russian_preparation import prepare_names
+                    result=prepare_names(request['data'])
                 elif operation=='release_text':
                     release_text()
                     result=True

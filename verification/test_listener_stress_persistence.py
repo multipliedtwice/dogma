@@ -376,7 +376,7 @@ class ListenerStressPersistenceTest(unittest.TestCase):
             'report':{**report,'generation_id':current['id'],'segment_id':target['id'],'audio_hash':None}}))
         with patch('rimsky.listener_stress.shared_profile',return_value=self.store.correction_profile):
             rebind_deferred_report(Path(self.temp.name),self.store.root,current['id'],path)
-        saved=json.loads(path.read_text())
+            saved=json.loads(path.read_text(encoding='utf-8'))
         self.assertEqual('ready_for_correction',saved['phase'])
         self.assertEqual('f'*64,saved['report']['audio_hash'])
         self.assertEqual('a'*64,saved['origin_report']['audio_hash'])

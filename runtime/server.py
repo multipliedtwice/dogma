@@ -337,6 +337,9 @@ class Application:
             result['storage_bytes']=self.cached('storage_bytes',lambda:storage_bytes(store.root))
             result['codex']=self.cached('codex',lambda:bool(codex_path()),seconds=5)
             result['music']=self.music.health()
+            from rimsky.russian_preparation_providers import preflight
+            result['russian_preparation']=self.cached('russian-preparation-'+settings['character_analysis'],
+                lambda:preflight(resolve_character_analysis(settings['character_analysis']) in ('codex_cli','claude_cli')),seconds=5)
             return result
         if op=='update_settings':
             previous=store.settings()['pack_path']
@@ -371,6 +374,18 @@ class Application:
             config={'pack_path':pack['_root'],'pack_fingerprint':pack['_fingerprint'],'pack_name':pack['name'],'device':current['device'],'align_words':current['align_words'],
                     'character_analysis':provider,'speaker_tie_breaker':current['speaker_tie_breaker'],'unresolved_policy':current['unresolved_policy'],
                     'pinned_at':datetime.now(timezone.utc).isoformat(timespec='microseconds')}
+            from rimsky.post_processing import mode
+            config['post_processing']=mode(data)
+            from rimsky.preparation import speech_language
+            from rimsky.speech_backend import is_higgs
+            if is_higgs(pack) and speech_language(store.book(data['book_id']))=='Russian':
+                from rimsky.russian_preparation import config as preparation_config
+                from rimsky.russian_preparation_providers import preflight
+                config['russian_preparation']=preparation_config(provider)
+                requirements=preflight(config['russian_preparation']['online_allowed'])
+                if requirements['missing']:
+                    raise AppError('Russian preparation requires pinned Opus and Luna CLI providers: '+'; '.join(requirements['missing']))
+                config['preparation_disclosure']=requirements['disclosure']
             generation=store.create_generation(data['book_id'],config,data.get('name',''),data.get('chapters'))
             return playable(self.jobs.start(generation['id']))
         if op=='repair_audio':

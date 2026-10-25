@@ -7,6 +7,17 @@ from rimsky.util import digest
 
 
 class SpokenStressTests(unittest.TestCase):
+    def test_exact_word_gate_rejects_mixed_identifiers_marks_and_partial_compounds(self):
+        word='потом';marked='по\u0301том'
+        def apply(text):
+            start=text.index(word)
+            return apply_stress(text,{'source_text_sha256':digest(text.encode('utf8')),'edits':[{
+                'start':start,'end':start+len(word),'word':word,'marked':marked,'sense':'Fixture','evidence':text}]})
+        for text in ('abcпотом','потомX','потом2','2потом','_потом','потом_',
+                     'потом\u0300','a\u200dпотом','когда-потом','потом-то','потом\u2011то','когда\u2010потом'):
+            with self.subTest(text=text),self.assertRaisesRegex(ValueError,'entire word'):apply(text)
+        for text in ('(потом),','—потом.','- потом','-потом','потом\n'):
+            with self.subTest(text=text):self.assertEqual(apply(text),text.replace(word,marked))
     def test_movement_phrase_is_shared_preserves_words_and_is_idempotent(self):
         for text in ['Охотник резко вскочил на ноги и вскинул лук.',
                      'Она встала на ноги.', 'Поставить его на ноги.', 'Поднялся наконец на ноги.']:

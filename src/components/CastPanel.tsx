@@ -46,7 +46,8 @@ export function CastPanel({generation, chapters, passages, language, busy, block
     const entry = stressNames[character.id];
     if (!entry) return null;
     const label = ru ? 'Ударение в имени' : 'Name stress';
-    const note = entry.source === 'listener' ? (ru ? 'выбрано вами' : 'your choice')
+    const note = entry.source === 'series_listener' ? (ru ? 'ваш выбор для серии' : 'your choice for this series')
+      : entry.source === 'listener' ? (ru ? 'выбрано вами' : 'your choice')
       : entry.confidence === 'low' ? (ru ? 'догадка, стоит проверить' : 'a guess, worth a check') : (ru ? 'автоматически' : 'automatic');
     const words = stressWords(entry.stressed);
     return <div className="name-stress">

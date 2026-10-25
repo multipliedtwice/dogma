@@ -63,7 +63,7 @@ test('chapter-only generation retains the chapter chosen before playback advance
   const sent=[];const book={id:'book',chapters:[old,next]};
   const start=variable(app,'startGeneration',{
     run:(_label,fn)=>fn(),book,selectionEpoch:{current:1},modalRevision:{current:1},
-    scope:'chapter',chapter:next,generationChapter:old.id,generationName:'Saved choice',generationSource:'',selectedChapters:[],
+    scope:'chapter',chapter:next,generationChapter:old.id,generationName:'Saved choice',generationSource:'',selectedChapters:[],postProcessing:false,
     narrationSelection:(_book,scope,id)=>[id],api:async(op,data)=>{sent.push({op,data});return {id:'new-generation'};},
     setGeneration:()=>{},setPlayFrom:()=>{},setGenerationSource:()=>{},setGenerationName:()=>{},
     closeModal:()=>{},refreshBook:async()=>{},refreshLibrary:async()=>{}

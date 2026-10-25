@@ -10,8 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'runtime'))
 
-from rimsky.series_characters import apply_pronunciations, propagation_targets, record_listener_stress, seed_cast, sync_generation,identity,upsert_character
+from rimsky.series_characters import apply_pronunciations, propagation_targets, record_listener_stress, seed_cast, sync_generation,identity,upsert_character,generation_characters,unique_name_bindings,_base_match
 from rimsky.store import Store
+from rimsky.util import digest
 
 
 def fb2(title: str, volume: int, text: str) -> bytes:
@@ -70,6 +71,68 @@ class SeriesCharacterStateTest(unittest.TestCase):
         self.assertEqual(report['selected_text'],legacy['legacy_evidence']['selected_text'])
         self.assertEqual(first['id'],legacy['book_id'])
         self.assertNotIn('text_offset',legacy);self.assertNotIn('passage_text',legacy)
+
+    def test_unrelated_anonymous_books_do_not_share_name_corrections(self):
+        import re
+        def anonymous(text):
+            source=fb2('',1,text).decode('utf8')
+            return re.sub(r'<author>.*?</author>|<sequence[^>]*/>','',source).encode('utf8')
+        first=self.store.import_data(anonymous('Гундахар сказал.'),'anonymous-a.fb2')
+        second=self.store.import_data(anonymous('Гундахар ушёл.'),'anonymous-b.fb2')
+        self.assertNotEqual(identity(self.store,first)['id'],identity(self.store,second)['id'])
+        cast=[{'id':'gundahar','name':'Гундахар','aliases':[]}]
+        generation=self.generation(first,cast)
+        self.formal_report(first,generation,'Гундахар','Гунда́хар')
+        from rimsky.listener_stress import snapshot,notes
+        self.assertIn('Гунда́хар',snapshot(self.store,first)['names'].values())
+        self.assertEqual({},snapshot(self.store,second)['names'])
+        self.assertEqual([],notes(self.store,second))
+
+    def test_case_only_binding_duplicates_do_not_erase_a_cast_name_family(self):
+        book=self.store.import_data(fb2('Synthetic IV',4,'Гундахар сказал. Он увидел Гундахара.'),'name.fb2')
+        generation=self.generation(book,[{'id':'gundahar','name':'Гундахар','aliases':['гундахар']}])
+        self.formal_report(book,generation,'Гундахар','Гунда́хар')
+        from rimsky.listener_stress import snapshot,apply
+        frozen=snapshot(self.store,book)
+        self.assertIn('Гунда́хар',frozen['names'].values())
+        self.assertEqual('Гунда́хар Гунда́хара Гунда́харом',apply('Гундахар Гундахара Гундахаром',frozen)[0])
+        choices=[('елена','Еле́на'),('елена','еле́на'),('елена','Е́лена'),('елена','Елёна'),('елена','Эле́на')]
+        self.assertEqual([choices[0],*choices[2:]],unique_name_bindings(choices))
+
+    def test_irregular_name_form_carries_only_a_retained_stressed_vowel_to_base(self):
+        self.assertEqual(('павел','Па́вел'),_base_match({'canonical_name':'Павел'},'Павлом','Па́влом'))
+        self.assertIsNone(_base_match({'canonical_name':'Павел'},'Павла','Павла́'))
+
+    def test_shared_case_form_does_not_choose_identity_from_the_stress_position(self):
+        book=self.store.import_data(fb2('Synthetic IV',4,'Алекса вошла.'),'ambiguous.fb2')
+        generation=self.generation(book,[{'id':'male','name':'Алекс'},{'id':'female','name':'Алекса'}])
+        report=self.formal_report(book,generation,'Алекса','Алекса́')
+        from rimsky.listener_stress import snapshot
+        frozen=snapshot(self.store,book)
+        self.assertEqual({},frozen['names'])
+        self.assertIn(report['id'],[row['report_id']for row in frozen['occurrences']])
+
+    def test_external_display_names_require_exact_snapshot_binding_and_keep_live_names(self):
+        book=self.store.import_data(fb2('Synthetic IV',4,'Гундахар сказал.'),'cast.fb2')
+        generation=self.generation(book,[{'id':'speaker','name':'CurrentName','aliases':[]}])
+        checkpoint=self.root/'analysis/c0001/cast.json';checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_text(json.dumps([{'id':'speaker','name':'StaleName'}]),encoding='utf8')
+        generation['analysis']={'external_preview':{'generation':'old-folder'}}
+        self.assertEqual('CurrentName',generation_characters(self.store,generation)[0]['name'])
+        generation['cast'][0]['name']='speaker'
+        snapshot={'book_id':book['id'],'source_hash':book['source_hash'],'generation_id':generation['id'],
+            'characters':[{'id':'speaker','name':'BoundName','aliases':['BoundAlias']}]}
+        snapshot['sha256']=digest(snapshot)
+        generation['analysis']['external_preview']['cast_snapshot']=snapshot
+        self.assertEqual('BoundName',generation_characters(self.store,generation)[0]['name'])
+        generation['cast'][0]['name']='HumanName'
+        self.assertEqual('HumanName',generation_characters(self.store,generation)[0]['name'])
+        generation['cast'][0]['name']='speaker'
+        for field,value in (('book_id','foreign'),('source_hash','wrong'),('generation_id','foreign')):
+            with self.subTest(field=field):
+                changed={**snapshot,field:value};changed['sha256']=digest({k:v for k,v in changed.items()if k!='sha256'})
+                generation['analysis']['external_preview']['cast_snapshot']=changed
+                self.assertEqual('speaker',generation_characters(self.store,generation)[0]['name'])
 
     def formal_report(self,book,generation,selected,intended):
         self.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('a'*64,generation['id']))

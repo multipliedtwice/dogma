@@ -1,6 +1,7 @@
 """Private shared human preparation feedback, without providers or synthesis."""
 import copy
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -31,6 +32,113 @@ class PublicFeedbackTest(unittest.TestCase):
         return self.write('notes.json',{'schema':1,'created':'2026-10-24T00:00:00Z','created_basis':'explicit_fixture',
             'audio_approval':False,'notes':[{'unit':unit['id'],'source_text':unit['text'],
                 'selected_text':word,'intended_stress':marked,'instruction':'Explicit human fixture instruction'}]})
+
+    def direct(self,store,book,unit,word,marked,identifier='direct',created='2026-10-24T00:00:00Z'):
+        raw={'id':identifier,'book_id':book['id'],'generation_id':'fixture','segment_id':unit['id'],
+             'chapter_id':unit['chapter_id'],'source_id':unit['source_id'],'kind':'stress',
+             'selected_text':word,'intended_stress':marked,'passage_text':unit['text'],
+             'text_offset':unit['text'].index(word),'created':created,'comment':'Direct human fixture'}
+        feedback.listener_stress.record(store,book,raw,_project=False)
+        return raw
+
+    def test_copied_legacy_export_cannot_override_direct_occurrence_or_later_direct_choice(self):
+        book,unit=self.source('На площади ни души.')
+        path=self.write('copied.json',{'schema':1,'human_approval':False,'changes':[{'id':'u1',
+            'source_text':unit['text'],'before':unit['text'],'after':unit['text'].replace('души','ду́ши'),
+            'basis':'Historical instruction'}]})
+        os.utime(path,(2051222400,2051222400)) # copying in 2035 is not a 2035 human choice
+        with feedback.source_store(self.root/'library',self.profile)as store:
+            self.direct(store,book,unit,'души','души́')
+            ids=feedback.import_overrides(store,book,{'units':[unit]},path)
+            frozen=feedback.freeze(store,book)
+            actual,_=feedback.apply(unit['text'],frozen,source_id='p',source_text=unit['text'],source_start=0,source_end=unit['end'])
+            self.assertEqual('На площади ни души́.',actual)
+            status=next(row for row in frozen['stress']['note_statuses']if row['report_id']==ids[0])
+            self.assertEqual(('superseded','direct'),(status['status'],status['superseded_by_report_id']))
+            original=next(row['report']for row in feedback.listener_stress.notes(store,book)if row['report']['id']==ids[0])
+            os.utime(path,(2082758400,2082758400))
+            self.assertEqual(ids,feedback.import_overrides(store,book,{'units':[unit]},path))
+            self.assertEqual(original,next(row['report']for row in feedback.listener_stress.notes(store,book)if row['report']['id']==ids[0]))
+            self.direct(store,book,unit,'души','ду́ши','later','2026-10-25T00:00:00Z')
+            later=feedback.freeze(store,book)
+            self.assertEqual('later',later['stress']['occurrences'][0]['report_id'])
+
+    def test_legacy_mtime_raw_family_stays_immutable_and_projection_uses_direct_authority(self):
+        book,unit=self.source('Она гуляла с Маришкой.')
+        path=self.write('legacy.json',{'schema':1,'human_approval':False,'changes':[{'id':'u1',
+            'source_text':unit['text'],'before':unit['text'],'after':unit['text'].replace('Маришкой','Ма́ришкой'),
+            'basis':'Historical name choice'}]})
+        with feedback.source_store(self.root/'library',self.profile)as store:
+            ids=feedback.import_overrides(store,book,{'units':[unit]},path)
+            # Reproduce receipts imported by the old released mtime importer.
+            with feedback.listener_stress._journal(store)as db:
+                row=db.execute('SELECT * FROM corrections WHERE report_id=?',(ids[0],)).fetchone()
+                raw=json.loads(row['raw']);raw['created']='2035-01-01T00:00:00+00:00'
+                raw['preparation_origin'].update(created=raw['created'],created_basis='original_preparation_export_mtime')
+                db.execute('UPDATE corrections SET created=?,raw=? WHERE report_id=?',
+                    (raw['created'],json.dumps(raw,ensure_ascii=False,sort_keys=True),ids[0]))
+            self.direct(store,book,unit,'Маришкой','Мари́шкой')
+            with feedback.listener_stress._journal(store)as db:
+                before=dict(db.execute('SELECT rowid,* FROM corrections WHERE report_id=?',(ids[0],)).fetchone())
+            frozen=feedback.freeze(store,book)
+            self.assertEqual('Мари́шка',frozen['stress']['names']['маришка'])
+            from rimsky.series_characters import series_state
+            state=series_state(store,book)[1][0]['state']
+            self.assertEqual('Мари́шка',state['pronunciations']['маришка'])
+            self.assertEqual('direct',state['listener_family_projection']['маришка']['report_id'])
+            self.direct(store,book,unit,'Маришкой','Ма́ришкой','later','2026-10-25T00:00:00Z')
+            self.assertEqual('later',feedback.freeze(store,book)['stress']['family_evidence']['маришка']['report_id'])
+            with feedback.listener_stress._journal(store)as db:
+                after=dict(db.execute('SELECT rowid,* FROM corrections WHERE report_id=?',(ids[0],)).fetchone())
+            for field in ('rowid','raw','created','series_id','book_key'):
+                self.assertEqual(before[field],after[field],field)
+
+    def test_imported_token_substitution_cannot_reapply_after_direct_choice(self):
+        book,unit=self.source('Он вышел из дровяного склада.')
+        path=self.write('phonetic.json',{'schema':1,'human_approval':False,'changes':[{'id':'u1',
+            'source_text':unit['text'],'before':unit['text'],'after':unit['text'].replace('дровяного','дровяново'),
+            'basis':'Historical phonetic spelling'}]})
+        with feedback.source_store(self.root/'library',self.profile)as store:
+            ids=feedback.import_overrides(store,book,{'units':[unit]},path)
+            self.direct(store,book,unit,'дровяного','дровяно́го')
+            frozen=feedback.freeze(store,book)
+        self.assertEqual([],frozen['token_edits'])
+        self.assertEqual('superseded',next(row['status']for row in frozen['note_statuses']if row['report_id']==ids[0]))
+        actual,_=feedback.apply(unit['text'],frozen,source_id='p',source_text=unit['text'],source_start=0,source_end=unit['end'])
+        self.assertEqual('Он вышел из дровяно́го склада.',actual)
+
+    def test_source_note_rejects_timestamp_without_original_timezone(self):
+        book,unit=self.source('На площади ни души.')
+        path=self.stress(unit,'души','души́');doc=json.loads(path.read_text('utf8'))
+        doc['created']='2026-10-24';path.write_text(json.dumps(doc),encoding='utf8')
+        with feedback.source_store(self.root/'library',self.profile)as store:
+            with self.assertRaisesRegex(ValueError,'timestamp'):feedback.import_source_notes(store,book,{'units':[unit]},path)
+
+    def test_valid_source_timestamp_is_utc_and_later_direct_note_wins_actual_time(self):
+        book,unit=self.source('На площади ни души.')
+        path=self.stress(unit,'души','ду́ши');doc=json.loads(path.read_text('utf8'))
+        doc['created']='2026-10-24T23:00:00+07:00';path.write_text(json.dumps(doc),encoding='utf8')
+        with feedback.source_store(self.root/'library',self.profile)as store:
+            self.direct(store,book,unit,'души','души́',created='2026-10-24T17:00:00Z')
+            ids=feedback.import_source_notes(store,book,{'units':[unit]},path)
+            frozen=feedback.freeze(store,book)
+            self.assertEqual('direct',frozen['stress']['occurrences'][0]['report_id'])
+            raw=next(row['report']for row in feedback.listener_stress.notes(store,book)if row['report']['id']==ids[0])
+            self.assertEqual('2026-10-24T16:00:00Z',raw['created'])
+            self.assertEqual(doc['created'],raw['preparation_origin']['original_created'])
+
+    def test_new_direct_family_also_supersedes_legacy_token_edit_on_other_inflection(self):
+        book,unit=self.source('Она гуляла с Маришкой. Маришка ждала.')
+        path=self.write('phonetic-name.json',{'schema':1,'human_approval':False,'changes':[{'id':'u1',
+            'source_text':unit['text'],'before':unit['text'],'after':unit['text'].replace('Маришкой','Маришкай'),
+            'basis':'Historical spelling instruction'}]})
+        with feedback.source_store(self.root/'library',self.profile)as store:
+            feedback.import_overrides(store,book,{'units':[unit]},path)
+            self.direct(store,book,unit,'Маришка','Мари́шка')
+            frozen=feedback.freeze(store,book)
+            self.assertEqual([],frozen['token_edits'])
+            actual,_=feedback.apply(unit['text'],frozen,source_id='p',source_text=unit['text'],source_start=0,source_end=unit['end'])
+            self.assertEqual('Она гуляла с Мари́шкой. Мари́шка ждала.',actual)
 
     def test_noncast_human_family_overrides_automatic_and_survives_independent_preparation(self):
         book,unit=self.source('Она гуляла с Маришкой. Маришка ждала Маришку.')

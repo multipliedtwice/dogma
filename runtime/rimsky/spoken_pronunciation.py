@@ -4,6 +4,7 @@ Meaning/stress decisions come from contextual analysis or explicit corrections;
 this module applies them without changing words or the printed source.
 """
 import re
+import unicodedata
 from .util import digest
 
 ACUTE='\u0301'
@@ -73,6 +74,18 @@ def validate_marks(text):
             raise ValueError('Stress mark must follow a Russian vowel')
 
 
+def _word_character(char):
+    return char.isalnum()or char=='_'or char in '\u200c\u200d'or unicodedata.category(char).startswith('M')
+
+
+def _whole_word(text,start,end):
+    if start and _word_character(text[start-1])or end<len(text)and _word_character(text[end]):return False
+    hyphens='-\u2010\u2011'
+    if start>1 and text[start-1]in hyphens and _word_character(text[start-2]):return False
+    if end+1<len(text)and text[end]in hyphens and _word_character(text[end+1]):return False
+    return True
+
+
 def apply_stress(text,plan):
     if plan.get('source_text_sha256')!=digest(text.encode('utf8')):
         raise ValueError('Stress plan belongs to different spoken text')
@@ -83,7 +96,7 @@ def apply_stress(text,plan):
             or text[start:end]!=word or unmarked(marked)!=word or marked.count(ACUTE)!=1
             or not re.fullmatch('[А-Яа-яЁё]+',word)):
             raise ValueError('Invalid exact-word stress edit')
-        if (start and text[start-1].isalpha()) or (end<len(text) and text[end].isalpha()):
+        if not _whole_word(text,start,end):
             raise ValueError('Stress edit must cover an entire word')
         if not edit.get('sense') or not edit.get('evidence'):
             raise ValueError('Stress edit requires a lexical sense and evidence')
@@ -121,12 +134,33 @@ def _automatic(text,pronunciation):
 
 
 def synthesis_text(text, pronunciation=None):
-    """The exact synthesis input for one passage: phrase rule, then automatic pronunciation.
+    """The exact synthesis input and source-bound preparation evidence.
 
-    `pronunciation` is the generation's analysis['pronunciation'] (policy, names,
-    common name words). Without it the result equals phrase_stress, so older
-    generations keep their cache keys.
+    New recipes use frozen automatic text, final human corrections and phonetic
+    spellings. Without a recipe the historical phrase/automatic flow and its
+    cache inputs stay unchanged.
     """
+    if pronunciation and pronunciation.get('policy')=='russian-preparation-v1':
+        from .russian_preparation import resolve_entry
+        from .russian_preparation_providers import module_digest
+        from . import russian_pronunciation as phonetics
+        entry=resolve_entry(text,pronunciation)
+        final=entry['automatic_text']
+        validate_marks(final)
+        plan={'prepared_pronunciation':{'policy':pronunciation['policy'],
+              'entry_sha256':entry['sha256'],'sound_sha256':entry['sound_sha256']}}
+        if pronunciation.get('listener_stress'):
+            from . import listener_stress
+            final,listener=listener_stress.apply(final,pronunciation['listener_stress'],
+                **pronunciation.get('listener_source',{}))
+            listener['module_sha256']=module_digest('rimsky.listener_stress')
+            plan['listener_stress']=listener
+        before_phonetic=final
+        final,records=phonetics.apply(before_phonetic)
+        phonetics.validate(before_phonetic,final,records)
+        plan['russian_phonetics']={'rule':phonetics.RULE,'prephonetic_source':before_phonetic,
+            'records':records,'module_sha256':module_digest('rimsky.russian_pronunciation')}
+        return final,plan
     text,plan=phrase_stress(text)
     if not pronunciation or not pronunciation.get('policy'):
         if pronunciation and pronunciation.get('listener_stress'):
@@ -156,3 +190,29 @@ def synthesis_text(text, pronunciation=None):
         from .respelling import disclosure
         plan={**plan,'listener_respelling':disclosure(respelled)}
     return final,{**plan,'automatic':{'policy':POLICY,'changed':final!=text}}
+
+
+def cache_binding(receipt):
+    """Per-part sound evidence, preserving the historical legacy key shape.
+
+    Diagnostic preparation evidence and unrelated profile revisions never
+    invalidate another part. Actual human applications remain sound inputs even
+    when their intended spelling was already present in automatic text.
+    """
+    listener=receipt.get('listener_stress')or {}
+    binding={}
+    if listener.get('applications'):
+        binding['listener_stress']={'policy':listener.get('policy'),
+                                    'applications':listener['applications']}
+    prepared=receipt.get('prepared_pronunciation')
+    if prepared:
+        if prepared.get('policy')!='russian-preparation-v1'or not prepared.get('sound_sha256'):
+            raise ValueError('Invalid prepared pronunciation cache binding')
+        binding['prepared_pronunciation']={'policy':prepared['policy'],'sound_sha256':prepared['sound_sha256']}
+        if listener.get('edits'):
+            binding['listener_stress']={**binding.get('listener_stress',{'policy':listener.get('policy')}),
+                                        'edits':listener['edits']}
+        if listener.get('applications')or listener.get('edits'):
+            binding['listener_stress']['module_sha256']=listener.get('module_sha256')
+        binding['russian_phonetics']=receipt['russian_phonetics']
+    return binding

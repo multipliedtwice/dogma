@@ -11,10 +11,11 @@ import re
 import unicodedata
 from pathlib import Path
 
-from .book_identity import hints, parse_title
-from .name_stress import ACUTE, VOWELS, build, name_spans
+from .book_identity import hints, parse_title, UNKNOWN_AUTHOR, UNTITLED
+from .name_stress import ACUTE, VOWELS, build, name_spans,aligned_stress_index
 from .respelling import substitute, validate_respelling
 from .util import digest, now, file_digest
+from .listener_order import ordered
 
 
 WORD = re.compile(r'[А-Яа-яЁё]+(?:[-‐‑][А-Яа-яЁё]+)*')
@@ -48,9 +49,43 @@ def identity(store, book: dict) -> dict:
         series = (parsed.get('series') or book.get('title') or 'Unknown series').strip()
     authors = [part for part in (found.get('authors') or [book.get('author', '')]) if part]
     author = ', '.join(authors) or book.get('author', '') or 'Unknown author'
-    key = {'author': normalized(author), 'series': normalized(series)}
+    author_keys=_author_keys(authors)
+    # Keep existing single-author release identities, but order is not part of
+    # coauthor identity. A multiset retains repeated metadata authors.
+    key = {'author': author_keys if len(author_keys)>1 else (author_keys[0]if author_keys else ''),
+           'series': normalized(series)}
+    # Missing bibliographic identity is not evidence that two files belong to
+    # one series. Retain same-source corrections without leaking name families
+    # between unrelated anonymous/untitled books.
+    if not author_keys or key['series']in ('',normalized(UNTITLED),'unknown series'):
+        key['source']=book.get('source_hash')or book.get('id')or digest(book)
     return {'id': digest(key)[:32], 'name': series, 'author': author,
-            'volume': found.get('volume'), 'key': key}
+            'volume': found.get('volume'), 'key': key,'author_keys':author_keys}
+
+
+def _author_keys(authors):
+    return sorted(value for author in authors if (value:=normalized(author))and value!=normalized(UNKNOWN_AUTHOR))
+
+
+def series_ids(store,series):
+    """Canonical ID and verified read-only aliases of legacy ordered coauthors.
+
+    Only persisted bibliographic metadata may establish a former order. Never
+    infer aliases for anonymous/source-scoped books or arbitrary journal IDs.
+    """
+    canonical=series['id'];keys=series.get('author_keys',[])
+    if len(keys)<2 or 'source'in series.get('key',{}):return (canonical,)
+    aliases=set()
+    metadata=[{'series_id':digest({'author':normalized(series['author']),
+                                  'series':normalized(series['name'])})[:32],
+               'series_name':series['name'],'author':series['author']}]
+    metadata.extend(store.rows('SELECT DISTINCT series_id,series_name,author FROM series_character_state'))
+    for row in metadata:
+        if (normalized(row['series_name'])!=normalized(series['name'])
+                or _author_keys(row['author'].split(','))!=keys):continue
+        legacy=digest({'author':normalized(row['author']),'series':normalized(row['series_name'])})[:32]
+        if row['series_id']==legacy:aliases.add(legacy)
+    return (canonical,*sorted(aliases-{canonical}))
 
 
 def _resource_path(store) -> Path:
@@ -83,7 +118,9 @@ def _decoded(row: dict) -> dict:
 def series_state(store, book: dict) -> tuple[dict, list[dict]]:
     series = identity(store, book)
     merged = {row.get('character_key'): row for row in _bundled(store, series['id']) if row.get('character_key')}
-    for raw in store.rows('SELECT * FROM series_character_state WHERE series_id=? ORDER BY created,character_key', (series['id'],)):
+    ids=series_ids(store,series)
+    rows=store.rows('SELECT * FROM series_character_state WHERE series_id IN ('+','.join('?'for _ in ids)+') ORDER BY created,character_key',ids)
+    for raw in sorted(rows,key=lambda row:row['series_id']==series['id']):
         row = _decoded(raw)
         previous = merged.get(row['character_key'], {})
         merged[row['character_key']] = {**previous, **row,
@@ -92,17 +129,19 @@ def series_state(store, book: dict) -> tuple[dict, list[dict]]:
 
 
 def _analysis_cast(store, generation: dict) -> dict[str, dict]:
-    """Recover display names retained by external-preview analysis checkpoints."""
-    rows: dict[str, dict] = {}
+    """Read an explicitly source-bound display snapshot, never nearby checkpoints."""
     preview = generation.get('analysis', {}).get('external_preview') or {}
-    if not preview.get('generation'):
-        return rows
-    analysis = store.root.parent / 'analysis'
-    for path in sorted(analysis.glob('c*/cast.json')):
-        with contextlib.suppress(OSError, ValueError, TypeError):
-            for row in json.loads(path.read_text('utf8')):
-                if isinstance(row, dict) and row.get('id') and row.get('name'):
-                    rows.setdefault(row['id'], row)
+    snapshot=preview.get('cast_snapshot')
+    if not isinstance(snapshot,dict)or not isinstance(snapshot.get('characters'),list):return {}
+    if (snapshot.get('generation_id')!=generation.get('id')or snapshot.get('book_id')!=generation.get('book_id')
+        or snapshot.get('sha256')!=digest({key:value for key,value in snapshot.items()if key!='sha256'})):return {}
+    if snapshot.get('source_hash')!=store.book(generation['book_id']).get('source_hash'):return {}
+    rows={}
+    for row in snapshot['characters']:
+        if (not isinstance(row,dict)or not isinstance(row.get('id'),str)or not row['id']
+            or not isinstance(row.get('name'),str)or not row['name']or row['id']in rows
+            or not isinstance(row.get('aliases',[]),list)or any(not isinstance(alias,str)for alias in row.get('aliases',[]))):return {}
+        rows[row['id']]=row
     return rows
 
 
@@ -112,7 +151,7 @@ def generation_characters(store, generation: dict) -> list[dict]:
     for raw in generation.get('cast', []):
         if raw.get('id') == 'narrator':
             continue
-        display = external.get(raw.get('id'), raw)
+        display = external.get(raw.get('id'),raw)if not raw.get('name')or raw.get('name')==raw.get('id')else raw
         primary, aliases = split_display_name(display.get('name') or raw.get('name') or '')
         aliases = list(dict.fromkeys([*aliases, *(display.get('aliases') or []), *(raw.get('aliases') or [])]))
         if not primary:
@@ -130,8 +169,10 @@ def upsert_character(store, series: dict, character: dict, *, state: dict | None
     key = _key(character)
     if not key:
         raise ValueError('Character needs a stable name.')
-    existing = store.rows('SELECT * FROM series_character_state WHERE series_id=? AND character_key=?',
-                          (series['id'], key))
+    ids=series_ids(store,series)
+    existing = store.rows('SELECT * FROM series_character_state WHERE series_id IN ('+','.join('?'for _ in ids)+') AND character_key=? ORDER BY updated DESC',
+                          (*ids,key))
+    existing.sort(key=lambda row:row['series_id']!=series['id'])
     bundled = next((row for row in _bundled(store, series['id']) if row.get('character_key') == key), {})
     prior = {**_decoded(bundled), **(_decoded(existing[0]) if existing else {})}
     aliases = list(dict.fromkeys([*(prior.get('aliases') or []), *(character.get('aliases') or [])]))
@@ -227,6 +268,16 @@ def _stress_position(selected: str, intended: str) -> tuple[int, list[dict]] | N
     return (yo[0], respelled) if len(yo) == 1 else None
 
 
+def unique_name_bindings(bindings):
+    """Case-only spellings are one identity; stress and spoken letters still differ."""
+    result=[];seen=set()
+    for binding in bindings:
+        if binding is None:continue
+        key=(binding[0],binding[1].casefold())
+        if key not in seen:seen.add(key);result.append(binding)
+    return result
+
+
 def _base_match(character: dict, selected: str, intended: str) -> tuple[str, str] | None:
     selected_key = normalized(selected)
     plain_selected = selected.replace(ACUTE, '')
@@ -236,6 +287,9 @@ def _base_match(character: dict, selected: str, intended: str) -> tuple[str, str
     stress_index, respelled = position
     matches = []
     for base in _candidate_words(character):
+        # A selected lexical component binds that component, never the whole
+        # compound as a second competing identity through edit alignment.
+        if any(char in base for char in '-‐‑')and not any(char in selected for char in '-‐‑'):continue
         vowels = [i for i, letter in enumerate(base) if letter in VOWELS]
         if not vowels:
             continue
@@ -243,16 +297,20 @@ def _base_match(character: dict, selected: str, intended: str) -> tuple[str, str
         if selected_key not in build({'probe': probe or base}, implicit_single=True):
             continue
         # A listener respelling (Мо́зэс) carries into the base only inside the stem shared with the selected form.
-        shared = next((i for i, (a, b) in enumerate(zip(plain_selected.casefold().replace('ё', 'е'), base.casefold().replace('ё', 'е'))) if a != b),
-                      min(len(plain_selected), len(base)))
-        spoken = substitute(base, [(s['index'], s['spoken']) for s in respelled if s['index'] < shared])
-        if 0 <= stress_index < len(spoken) and spoken[stress_index] in 'ёЁ':
+        mapped=aligned_stress_index(plain_selected,base,stress_index)
+        if mapped is None:continue
+        substitutions=[]
+        for letter in respelled:
+            target=aligned_stress_index(plain_selected,base,letter['index'])
+            if target is not None:substitutions.append((target,letter['spoken']))
+        spoken = substitute(base,substitutions)
+        if spoken[mapped] in 'ёЁ':
             matches.append((normalized(base), spoken))
             continue
-        stressed = _marked(spoken, stress_index)
+        stressed = _marked(spoken, mapped)
         if stressed:
             matches.append((normalized(base), stressed))
-    unique = list(dict.fromkeys(matches))
+    unique = unique_name_bindings(matches)
     return unique[0] if len(unique) == 1 else None
 
 
@@ -261,11 +319,12 @@ def _canonical_family_binding(store,book,report):
     from .listener_stress import _journal,_ordinary_context,_proper_family,_legacy_family
     if _ordinary_context(report):return None
     series=identity(store,book)
+    ids=series_ids(store,series)
     with _journal(store) as db:
-        rows=db.execute('SELECT report_id,raw,family FROM corrections WHERE series_id=? AND family IS NOT NULL ORDER BY created,rowid',
-            (series['id'],)).fetchall()
+        rows=db.execute('SELECT rowid AS journal_order,created,report_id,raw,family FROM corrections WHERE series_id IN ('+','.join('?'for _ in ids)+') AND family IS NOT NULL ORDER BY created,rowid',
+            ids).fetchall()
     families={};witnesses={}
-    for row in rows:
+    for row in ordered(rows):
         raw=json.loads(row['raw']);family=json.loads(row['family'])
         if raw.get('kind')=='legacy_family':
             validated,_ordinary=_legacy_family(store,book,raw)
@@ -278,7 +337,7 @@ def _canonical_family_binding(store,book,report):
             if not is_review and (type(offset) is not int or passage[offset:offset+len(selected)]!=selected):continue
             rebound=[_base_match({'canonical_name':stressed.replace(ACUTE,'')},selected,raw.get('intended_stress',''))
                 for stressed in family.values()]
-            rebound=list(dict.fromkeys(value for value in rebound if value))
+            rebound=unique_name_bindings(rebound)
             if len(rebound)!=1 or {rebound[0][0]:rebound[0][1]}!=family:continue
         else:continue
         for base,stressed in family.items():
@@ -304,7 +363,7 @@ def _canonical_family_binding(store,book,report):
         if stress_index>=shared:continue
         found=_base_match({'canonical_name':plain},selected,report['intended_stress'])
         if found:matches.append((found,witness))
-    identities=list(dict.fromkeys(found for found,_witness in matches))
+    identities=unique_name_bindings(found for found,_witness in matches)
     if len(identities)!=1:return None
     base,stressed=identities[0]
     # Positive evidence for another identity in this book outranks an old
@@ -327,7 +386,7 @@ def _canonical_family_binding(store,book,report):
         'pronunciations':{stressed.replace(ACUTE,''):stressed},
         'series_id':series['id'],'series_name':series['name'],
         'family_resolution':{'method':'canonical-series-family-v1','resolver_sha256':resolver_sha,
-            'witness_report_ids':sorted({witness for found,witness in matches if found==(base,stressed)})}}
+            'witness_report_ids':sorted({witness for found,witness in matches if found[0]==base and found[1].casefold()==stressed.casefold()})}}
 
 
 def record_listener_stress(store, report: dict) -> dict:
@@ -349,7 +408,21 @@ def record_listener_stress(store, report: dict) -> dict:
     generation = store.generation(report['generation_id'])
     book = store.book(generation['book_id'])
     series, records = sync_generation(store, book, generation)
-    matched = [(row, _base_match(row, report['selected_text'], report['intended_stress'])) for row in records]
+    # Retained series projections must pass the canonical journal resolver;
+    # matching their spelling here would bypass its rival-family/source checks.
+    local_keys={_key(character)for character in generation_characters(store,generation)}
+    local=[]
+    for row in records:
+        if row['character_key']not in local_keys:continue
+        for base in _candidate_words(row):
+            vowel=next((i for i,letter in enumerate(base)if letter in VOWELS),None)
+            probe=_marked(base,vowel)if vowel is not None else None
+            if probe and normalized(selected)in build({'probe':probe},implicit_single=True):
+                local.append(row);break
+    # Which stress survives an ending is not evidence for character identity.
+    if len(local)>1:
+        return {'status':'ambiguous','series_id':series['id'],'series_name':series['name'],'matches':len(local)}
+    matched = [(row, _base_match(row, report['selected_text'], report['intended_stress'])) for row in local]
     matched = [(row, base) for row, base in matched if base]
     if len(matched) != 1:
         if not matched:

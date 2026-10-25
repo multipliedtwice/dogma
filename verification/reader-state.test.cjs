@@ -45,7 +45,7 @@ test('preparing the displayed chapter replaces missing and stale chapter choices
   const handler=button.openingElement.attributes.properties.find(item=>item.name?.getText(app)==='onClick').initializer.expression;
   for(const initial of ['', 'previous-chapter']){
     const values={chapter:initial,name:'Previous name',source:'previous-source'};
-    const openGenerate=variable('openGenerate',{book:null,defaultNarrationChapters:()=>[],setSelectedChapters:()=>{},setGenerationChapter:id=>{values.chapter=id;},setGenerationName:name=>{values.name=name;},setGenerationSource:id=>{values.source=id;},setScope:value=>{values.scope=value;},setModal:value=>{values.modal=value;}});
+    const openGenerate=variable('openGenerate',{book:null,setPostProcessing:()=>{},defaultNarrationChapters:()=>[],setSelectedChapters:()=>{},setGenerationChapter:id=>{values.chapter=id;},setGenerationName:name=>{values.name=name;},setGenerationSource:id=>{values.source=id;},setScope:value=>{values.scope=value;},setModal:value=>{values.modal=value;}});
     evaluate(handler,{chapter:{id:'current-chapter'},openGenerate})();
     assert.deepEqual(values,{chapter:'current-chapter',name:'',source:'',scope:'chapter',modal:'generate'});
   }

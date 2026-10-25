@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .name_stress import ACUTE, name_spans
 from .util import AppError, digest, file_digest, now
+from .listener_order import ordered,chronology,priority
 
 POLICY = 'listener-stress-v2'
 LEGACY_POLICY = 'listener-stress-v1'
@@ -86,7 +87,7 @@ def _attested_name_lemma(book,parses,lemmas):
 
 def _proper_family(book,report):
     """Resolve a reviewed proper noun even when character analysis missed it."""
-    from .series_characters import _base_match,normalized
+    from .series_characters import _base_match,normalized,unique_name_bindings
     selected=report['selected_text'].replace(ACUTE,'')
     if not selected[:1].isupper():return None
     # A supplied capitalized source occurrence is the evidence. A known
@@ -123,7 +124,7 @@ def _proper_family(book,report):
         if found:matches.append(found)
     if not matches:return None
     shortest=min(len(base) for base,_ in matches)
-    matches=list(dict.fromkeys(item for item in matches if len(item[0])==shortest))
+    matches=unique_name_bindings(item for item in matches if len(item[0])==shortest)
     return {matches[0][0]:matches[0][1]} if len(matches)==1 else None
 
 
@@ -145,12 +146,12 @@ def _ordinary_context(report):
 
 def _legacy_family(store,book,report,*,_journal_db=None):
     """Resolve retained legacy evidence without inventing a source occurrence."""
-    from .series_characters import _base_match,identity
+    from .series_characters import _base_match,identity,series_ids
     evidence=report.get('legacy_evidence') or {}
     fields=('book_id','generation_id','selected_text','intended_stress','created')
     valid=(evidence.get('source')=='listener' and evidence.get('report_id')==report.get('original_report_id')
         and all(evidence.get(key)==report.get(key) and evidence.get(key) is not None for key in fields)
-        and report.get('legacy_series_id')==identity(store,book)['id'])
+        and report.get('legacy_series_id')in series_ids(store,identity(store,book)))
     if _journal_db is None:
         with _journal(store) as db:
             original=db.execute('SELECT 1 FROM corrections WHERE report_id=?',(report.get('original_report_id'),)).fetchone()
@@ -243,17 +244,17 @@ def record(store,book,report,character_state=None,*,_project=True):
         with _journal(store) as db:
             prior_binding=db.execute('SELECT family FROM corrections WHERE report_id=?',(report['id'],)).fetchone()
         if prior_binding and prior_binding['family']:
-            from .series_characters import _base_match
+            from .series_characters import _base_match,unique_name_bindings
             matches=[_base_match({'canonical_name':value.replace(ACUTE,'')},report['selected_text'],report['intended_stress'])
                 for value in json.loads(prior_binding['family']).values()]
-            matches=list(dict.fromkeys(match for match in matches if match))
+            matches=unique_name_bindings(matches)
             if len(matches)==1:family={matches[0][0]:matches[0][1]}
     if eligible and not legacy and not ordinary and (character_state or {}).get('status')=='updated':
-        from .series_characters import _base_match
+        from .series_characters import _base_match,unique_name_bindings
         candidates=[character_state.get('canonical_name',''),*(character_state.get('pronunciations') or {})]
         matches=[_base_match({'canonical_name':base},report['selected_text'],report['intended_stress'])
                  for base in candidates if base]
-        matches=list(dict.fromkeys(row for row in matches if row))
+        matches=unique_name_bindings(matches)
         if len(matches)==1:family={matches[0][0]:matches[0][1]}
     if eligible and not legacy and not ordinary and not family:family=_proper_family(book,report)
     offset=report.get('text_offset');word=report.get('selected_text','');passage=report.get('passage_text','')
@@ -302,15 +303,16 @@ def record(store,book,report,character_state=None,*,_project=True):
 
 def notes(store,book):
     """Private audit view: original receipts plus explicit derived binding."""
-    from .series_characters import identity
+    from .series_characters import identity,series_ids
+    ids=series_ids(store,identity(store,book))
     with _journal(store) as db:
-        rows=db.execute('SELECT * FROM corrections WHERE book_key=? OR series_id=? ORDER BY created,rowid',
-            (_book_key(book),identity(store,book)['id'])).fetchall()
+        rows=db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE book_key=? OR series_id IN ('+','.join('?'for _ in ids)+') ORDER BY created,rowid',
+            (_book_key(book),*ids)).fetchall()
     return [{'report':json.loads(row['raw']),
              'family':json.loads(row['family']) if row['family'] else None,
              'occurrence':json.loads(row['occurrence']) if row['occurrence'] else None,
              'binding_status':'family' if row['family'] else 'occurrence' if row['occurrence'] else 'raw_note',
-             'book_key':row['book_key']} for row in rows]
+             'book_key':row['book_key']} for row in ordered(rows)]
 
 
 def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
@@ -372,20 +374,22 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
                 break
         record(store,book,report,state,_project=False)
     _import_legacy_evidence(store,book,records,_project=False)
-    from .series_characters import identity
+    from .series_characters import identity,series_ids
+    ids=series_ids(store,identity(store,book))
     with _journal(store) as db:
-        journal=db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE book_key=? OR series_id=? ORDER BY created,rowid',
-            (_book_key(book),identity(store,book)['id'])).fetchall()
+        journal=db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE book_key=? OR series_id IN ('+','.join('?'for _ in ids)+') ORDER BY created,rowid',
+            (_book_key(book),*ids)).fetchall()
     local_ids={report['id'] for report in reports}
-    for row in journal:
+    for row in ordered(journal):
         if row['report_id'] not in local_ids:
             # Another library may own the original receipt. Recompute only its
             # derived binding from canonical raw evidence, retaining raw bytes,
             # original identity/order and the versioned resolution history.
             record(store,book,json.loads(row['raw']),_project=False)
     with _journal(store) as db:
-        journal=db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE book_key=? OR series_id=? ORDER BY created,rowid',
-            (_book_key(book),identity(store,book)['id'])).fetchall()
+        journal=db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE book_key=? OR series_id IN ('+','.join('?'for _ in ids)+') ORDER BY created,rowid',
+            (_book_key(book),*ids)).fetchall()
+    journal=ordered(journal)
     occurrences={}
     family_evidence={}
     for row in journal:
@@ -395,11 +399,13 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
             for base,stressed in family.items():
                 family_evidence[base]={'report_id':row['report_id'],'created':row['created'],
                     'journal_order':row['journal_order'],
+                    'chronology':chronology(raw,row['journal_order'],row['created']),
                     'source_id':raw.get('source_id'),'text_offset':raw.get('text_offset'),
                     'passage_sha256':digest(raw.get('passage_text','')),'stressed':stressed}
         if row['book_key']==_book_key(book) and row['occurrence']:
             occurrence=json.loads(row['occurrence'])
-            occurrence.update(created=row['created'],journal_order=row['journal_order'])
+            occurrence.update(created=row['created'],journal_order=row['journal_order'],
+                chronology=chronology(json.loads(row['raw']),row['journal_order'],row['created']))
             occurrences[(occurrence['source_id'],occurrence['passage_sha256'],occurrence['text_offset'],occurrence['selected_text'])]=occurrence
     from .listener_family_projection import project
     project(store,book)
@@ -407,6 +413,17 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
     forms={base:build({base:stressed},implicit_single=True) for base,stressed in names.items()}
     superseded={}
     raw_by_id={row['report_id']:json.loads(row['raw']) for row in journal}
+    for row in journal:
+        if priority(raw_by_id[row['report_id']])!=0:continue
+        authorities=[]
+        if row['family']:
+            authorities=[family_evidence.get(base)for base in json.loads(row['family'])]
+        elif row['occurrence']:
+            old=json.loads(row['occurrence'])
+            authorities=[occurrences.get((old['source_id'],old['passage_sha256'],old['text_offset'],old['selected_text']))]
+        if authorities and all(authority and authority['report_id']!=row['report_id']
+                and authority['chronology']>chronology(raw_by_id[row['report_id']],row['journal_order'],row['created'])for authority in authorities):
+            superseded[row['report_id']]=authorities[-1]['report_id']
     for key,occurrence in list(occurrences.items()):
         word=occurrence['selected_text'].replace(ACUTE,'')
         if not word[:1].isupper() or _ordinary_context(raw_by_id[occurrence['report_id']]):continue
@@ -414,8 +431,8 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
         matches=[base for base,lexicon in forms.items() if family_key in lexicon and base in family_evidence]
         if len(matches)!=1:continue
         authority=family_evidence[matches[0]]
-        earlier=(occurrence['created'],occurrence['journal_order'])
-        later=(authority['created'],authority['journal_order'])
+        earlier=occurrence['chronology']
+        later=authority['chronology']
         if later>earlier:
             superseded[occurrence['report_id']]=authority['report_id']
             occurrences.pop(key)
@@ -424,7 +441,7 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
               'note_statuses':[{'report_id':row['report_id'],
                     'status':'superseded' if row['report_id'] in superseded else 'family' if row['family'] else 'occurrence' if row['occurrence'] else 'pending',
                     **({'superseded_by_report_id':superseded[row['report_id']],
-                        'reason':'A later explicit correction to the same proper-noun family is authoritative.'}
+                        'reason':'A later or more authoritative correction to the same name or source occurrence takes precedence.'}
                        if row['report_id'] in superseded else {}),
                     **({'reason':'No structured, unambiguous stress binding; original note retained.'}
                        if not row['family'] and not row['occurrence'] else {})} for row in journal]}

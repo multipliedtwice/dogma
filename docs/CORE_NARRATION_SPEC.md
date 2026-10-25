@@ -102,9 +102,10 @@ recovery wording. The strict recognition and retake contracts below apply only
 when post-processing is explicitly enabled, or to an explicitly selected
 development/evaluation run. They are not the production default.
 
-This section specifies required behavior. The documentation change does not
-implement a production toggle or certify that the existing runtime already
-enforces these defaults; implementation must be audited separately in development.
+The normal application and script renderers must enforce the same mode contract.
+Persist an explicit `post_processing: off|on` with each request, default to `off`,
+and preserve it on resume. Tests must exercise the normal worker path, including
+one requested take and no recognition or automatic recovery when disabled.
 
 ## Stress preparation authority
 
@@ -124,6 +125,37 @@ Do not infer a baseline from word-only matches or overwrite a historical plan.
 Regenerate only units whose effective inputs change, plus explicitly reported
 audio requiring a fresh take. This does not enable post-processing or establish
 that the regenerated audio follows its stress marks.
+
+New normal-app Russian preparation uses `russian-preparation-v1`. Freeze automatic
+decisions before synthesis, bind them to the immutable book/source range and exact
+spoken input, and retain provider requests and answers. Bounded batches must share
+one book-wide proper-name lexicon. Playback positions, generation status and unrelated
+corrections are not preparation inputs. Apply the effective latest human corrections
+after automatic preparation, then the closed whole-word phonetic rules. An existing
+frozen legacy job retains its recipe; a new generation request selects the new recipe.
+
+Stress disagreements require pinned Claude Opus 5.5 at high effort. Ambiguous е/ё
+requires pinned GPT-6 Luna at low effort, with an independent second opinion for
+every proposed change or unknown first-pass baseline. An explicit offline selection
+never sends book text to either provider; unresolved adjudication holds preparation.
+Show which providers receive source sentences before generation. Missing local
+linguistic assets or changed evidence must hold rather than silently use an older
+recipe, another provider or a network download.
+
+Character pronunciation state must distinguish identity from stress. A different
+stress position cannot choose between two names sharing a case form. Case-only
+spellings of one binding are equivalent; different stresses and е/ё/э spellings remain
+distinct. Carry a reviewed base stress into irregular forms only with a unique
+retained-vowel alignment; otherwise keep the correction occurrence-bound. Unknown
+author/title identity is source-scoped. Coauthor ordering may use verified metadata
+aliases to read older state, while retaining raw journal identifiers and chronology.
+External cast display snapshots require exact book/source/generation binding; nearby
+analysis files never override the live cast.
+
+Imported legacy corrections without a verified original timestamp are historical
+evidence below direct human corrections. Copying an old export must never make its
+choices newer. Preserve the raw receipt and use the same precedence for character
+families, source occurrences and imported token edits.
 
 ## Pinned production speech checkpoint
 
