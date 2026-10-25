@@ -143,7 +143,7 @@ def _ordinary_context(report):
     except ImportError:return False
 
 
-def _legacy_family(store,book,report):
+def _legacy_family(store,book,report,*,_journal_db=None):
     """Resolve retained legacy evidence without inventing a source occurrence."""
     from .series_characters import _base_match,identity
     evidence=report.get('legacy_evidence') or {}
@@ -151,8 +151,11 @@ def _legacy_family(store,book,report):
     valid=(evidence.get('source')=='listener' and evidence.get('report_id')==report.get('original_report_id')
         and all(evidence.get(key)==report.get(key) and evidence.get(key) is not None for key in fields)
         and report.get('legacy_series_id')==identity(store,book)['id'])
-    with _journal(store) as db:
-        original=db.execute('SELECT 1 FROM corrections WHERE report_id=?',(report.get('original_report_id'),)).fetchone()
+    if _journal_db is None:
+        with _journal(store) as db:
+            original=db.execute('SELECT 1 FROM corrections WHERE report_id=?',(report.get('original_report_id'),)).fetchone()
+    else:
+        original=_journal_db.execute('SELECT 1 FROM corrections WHERE report_id=?',(report.get('original_report_id'),)).fetchone()
     if original or not valid:return None,True
     selected=report.get('selected_text','').replace(ACUTE,'')
     if _ordinary_context(report):return None,True
@@ -173,7 +176,7 @@ def _legacy_family(store,book,report):
     return ({found[0]:found[1]} if found else None),not bool(found)
 
 
-def _import_legacy_evidence(store,book,records):
+def _import_legacy_evidence(store,book,records,*,_project=True):
     """Migrate only original retained listener evidence, never the latest value."""
     from .series_characters import identity
     series_id=identity(store,book)['id']
@@ -194,10 +197,10 @@ def _import_legacy_evidence(store,book,records):
             raw.update(id=migration_id,kind='legacy_family',
                 original_report_id=identifier,legacy_evidence=evidence,legacy_series_id=series_id,
                 legacy_character={'canonical_name':row.get('canonical_name',''),'aliases':row.get('aliases') or []})
-            record(store,book,raw)
+            record(store,book,raw,_project=_project)
 
 
-def record_cast_review(store,book,request):
+def record_cast_review(store,book,request,*,_project=True):
     """Persist the actual explicit cast action without inventing a heard slot."""
     from .auto_pronunciation import validate_name_stress
     from .name_stress import VOWELS
@@ -218,10 +221,10 @@ def record_cast_review(store,book,request):
             'selected_text':word,'intended_stress':intended,'created':request['created'],'kind':'stress',
             'text_offset':None,'audio_offset':None,'audio_hash':None,'passage_text':'','spoken_text':'',
             'comment':'','synthesis_snapshot':None,'feedback_source':'cast_name_stress','review_request':request}
-        record(store,book,raw,{'status':'updated','canonical_name':word})
+        record(store,book,raw,{'status':'updated','canonical_name':word},_project=_project)
 
 
-def record(store,book,report,character_state=None):
+def record(store,book,report,character_state=None,*,_project=True):
     """Append one raw human receipt; repeated backfill cannot change its meaning."""
     from .series_characters import identity
     eligible=report.get('kind')=='stress' and bool(report.get('intended_stress'))
@@ -281,10 +284,20 @@ def record(store,book,report,character_state=None):
                 (report['id'],now(),encoded_family,encoded_occurrence,file_digest(Path(__file__))))
             db.execute('UPDATE corrections SET family=?,occurrence=? WHERE report_id=?',
                 (encoded_family,encoded_occurrence,report['id']))
+    projection={}
+    if _project:
+        from .listener_family_projection import project
+        try:
+            outcome=project(store,book)
+            projection={'identity_projection':{'status':'held' if outcome['held'] else 'applied',**outcome}}
+        except Exception as error:
+            # The canonical raw receipt/family is committed before projection.
+            # A failed local identity write never asks the human to resubmit.
+            projection={'identity_projection':{'status':'held','error':str(error),'raw_report_saved':True}}
     if family:
         return {'status':'updated','canonical_name':next(iter(family)),
-                'pronunciations':family,'source':'listener_profile'}
-    return {'status':'source_bound','family_status':'unresolved' if report['selected_text'][:1].isupper() else 'not_proper_noun'} if eligible else None
+                'pronunciations':family,'source':'listener_profile',**projection}
+    return {'status':'source_bound','family_status':'unresolved' if report['selected_text'][:1].isupper() else 'not_proper_noun',**projection} if eligible else None
 
 
 def notes(store,book):
@@ -313,7 +326,7 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
         pronunciation=json.loads(row['analysis']).get('pronunciation') or {}
         for name in (pronunciation.get('names') or {}).values():
             if name.get('source') in ('listener','series_listener') and name.get('listener_review') and name['listener_review'].get('generation_id')==row['id']:
-                record_cast_review(store,book,name['listener_review'])
+                record_cast_review(store,book,name['listener_review'],_project=False)
     promoted_reports = set(seen)
     for report in reports:
         if report.get('kind') != 'stress' or not report.get('intended_stress') or report['id'] in seen:
@@ -357,8 +370,8 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
                 state={'status':'updated','canonical_name':row.get('canonical_name',''),
                        'pronunciations':character.get('pronunciations')}
                 break
-        record(store,book,report,state)
-    _import_legacy_evidence(store,book,records)
+        record(store,book,report,state,_project=False)
+    _import_legacy_evidence(store,book,records,_project=False)
     from .series_characters import identity
     with _journal(store) as db:
         journal=db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE book_key=? OR series_id=? ORDER BY created,rowid',
@@ -369,7 +382,7 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
             # Another library may own the original receipt. Recompute only its
             # derived binding from canonical raw evidence, retaining raw bytes,
             # original identity/order and the versioned resolution history.
-            record(store,book,json.loads(row['raw']))
+            record(store,book,json.loads(row['raw']),_project=False)
     with _journal(store) as db:
         journal=db.execute('SELECT rowid AS journal_order,* FROM corrections WHERE book_key=? OR series_id=? ORDER BY created,rowid',
             (_book_key(book),identity(store,book)['id'])).fetchall()
@@ -388,6 +401,8 @@ def snapshot(store, book: dict, cast: list[dict] | None = None) -> dict:
             occurrence=json.loads(row['occurrence'])
             occurrence.update(created=row['created'],journal_order=row['journal_order'])
             occurrences[(occurrence['source_id'],occurrence['passage_sha256'],occurrence['text_offset'],occurrence['selected_text'])]=occurrence
+    from .listener_family_projection import project
+    project(store,book)
     from .name_stress import build
     forms={base:build({base:stressed},implicit_single=True) for base,stressed in names.items()}
     superseded={}

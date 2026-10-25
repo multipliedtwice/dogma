@@ -6,6 +6,7 @@ new native requests; manual feedback never enables recognition or quality loops.
 from __future__ import annotations
 import argparse, copy, hashlib, json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
+from functools import lru_cache
 
 ROOT=next(p for p in Path(__file__).resolve().parents if (p/'runtime/rimsky/store.py').is_file())
 sys.path[:0]=[str(ROOT/'runtime'),str(ROOT/'scripts')]
@@ -16,7 +17,7 @@ from rimsky.name_stress import name_spans
 from rimsky.store import Store
 from rimsky.util import digest,file_digest
 
-POLICY='development-private-listener-stress-repair-v3'
+POLICY='development-private-listener-stress-repair-v4'
 RESTORED_STRESS='restored-silero-ruaccent-opus-v1'
 SELF=Path(__file__).resolve()
 read,write=d.read,d.write
@@ -72,21 +73,175 @@ def validate_effective(initial,effective):
         raise ValueError('Unapproved technical seed change')
     if (y.get('max_tokens'),y['sampling']['seed'])!=(x.get('max_tokens'),x['sampling']['seed']):
         proof=y.get('listener_technical_recovery',{})
-        if proof.get('policy') not in ('development-private-listener-stress-repair-v1','development-private-listener-stress-repair-v2',POLICY) or not proof.get('previous_session'):
+        if proof.get('policy') not in ('development-private-listener-stress-repair-v1','development-private-listener-stress-repair-v2','development-private-listener-stress-repair-v3',POLICY) or not proof.get('previous_session'):
             raise ValueError('Missing technical recovery evidence')
     for row in (x,y):
         row.pop('max_tokens');row.pop('token_cap',None);row.pop('listener_technical_recovery',None);row['sampling'].pop('seed')
     if a!=b or effective.get('key')!=digest(effective['synthesis']):raise ValueError('Technical recovery changed source or sound controls')
 
 
+@lru_cache(maxsize=64)
+def _frozen_document(path,checksum):
+    return read(Path(path))
+
+
+def frozen_document(path,checksum):
+    # Recheck bytes on every access; cache only the expensive immutable JSON decode.
+    d.basic.checked(path,checksum)
+    return _frozen_document(str(path),checksum)
+
+
+@lru_cache(maxsize=8)
+def evidence_model_paths(manifest_json):
+    # Historical evidence is checked once per exact pin; new synthesis still
+    # performs model_guard freshly before EVERY physical attempt.
+    pin,runner=d.basic.model_guard(json.loads(manifest_json))
+    return str(pin.path),str(runner)
+
+
+_verified_native_edges={}
+
+
+def verify_native_derivation(folder,ready,*,bundled=False):
+    derivation=ready.get('listener_stress_derivation')or {}
+    if not derivation.get('base'):return
+    repair_path=folder/'repair.json';repair=frozen_document(repair_path,file_digest(repair_path))
+    current_sha=file_digest(folder/'ready.json')
+    if (repair.get('derived_ready_sha256')!=current_sha or
+        {k:v for k,v in repair.items()if k not in ('base_inventory','derived_ready_sha256')}!=derivation):
+        raise ValueError('Native ancestry repair does not match frozen ready')
+    if bundled:return # Newready carries an explicit hash for every self-contained session file.
+    expected=repair.get('base_inventory');base=Path(derivation['base']).resolve()
+    if not isinstance(expected,dict)or not expected or any(not isinstance(k,str)or not re.fullmatch(r'[0-9a-f]{64}',str(v))for k,v in expected.items()):
+        raise ValueError('Native ancestry lacks an immutable base inventory')
+    d.basic.checked(base/'ready.json',derivation['base_ready_sha256'])
+    key=(str(folder),current_sha,file_digest(repair_path))
+    if key not in _verified_native_edges:
+        if inventory(base)!=expected:raise ValueError('Native ancestor bytes changed since materialization')
+        _verified_native_edges[key]=(base,expected)
+
+
+def recheck_native_derivations():
+    for base,expected in _verified_native_edges.values():
+        if inventory(base)!=expected:raise ValueError('Native ancestor changed during evidence validation')
+
+
+def native_evidence(folder,ready,unit,row):
+    """Resolve only a pinned parent chain; never search sibling generations."""
+    session=row.get('session','')
+    if not re.fullmatch(r'[0-9a-f]{64}',session):raise ValueError('Invalid native evidence session identity')
+    current=folder.resolve();seen=set();source_sha=frozen_document(current/'manifest.json',ready['manifest_sha256'])['source_sha256'];native_pin=ready['native_manifest']
+    for _ in range(32):
+        if current in seen:raise ValueError('Cyclic native evidence ancestry')
+        seen.add(current);d.basic.checked(current/'manifest.json',ready['manifest_sha256'])
+        if ready['native_manifest']!=native_pin:raise ValueError('Native model/runner pin changed across ancestry')
+        if frozen_document(current/'manifest.json',ready['manifest_sha256'])['source_sha256']!=source_sha:raise ValueError('Native evidence ancestry changed source')
+        d.basic.checked(current/'units'/(unit['id']+'.json'),file_digest(folder/'units'/(unit['id']+'.json')))
+        native=current/'native'/session
+        binding=ready.get('listener_stress_derivation',{}).get('native_evidence_bindings',{}).get(unit['id'])
+        if binding and not native.is_dir():raise ValueError('Declared copied native evidence is missing locally')
+        verify_native_derivation(current,ready,bundled=bool(binding))
+        if native.exists():
+            if binding:
+                if (binding.get('policy')!='immutable-native-evidence-v1' or binding['session']!=session or session not in binding['sessions']
+                    or binding['unit_receipt_sha256']!=file_digest(current/'units'/(unit['id']+'.json'))):
+                    raise ValueError('Copied native evidence binding changed')
+                origin_ready=current/binding['ready_archive'];origin_manifest=current/binding['manifest_archive']
+                d.basic.checked(origin_ready,binding['ready_sha256']);d.basic.checked(origin_manifest,binding['manifest_sha256'])
+                original_ready=frozen_document(origin_ready,binding['ready_sha256']);original_folder=Path(binding['origin'])
+                for sid,files in binding['sessions'].items():
+                    if not re.fullmatch(r'[0-9a-f]{64}',sid):raise ValueError('Invalid archived native session')
+                    for name,checksum in files.items():
+                        if Path(name).is_absolute()or '..'in Path(name).parts:raise ValueError('Native evidence escaped session')
+                        d.basic.checked(current/'native'/sid/name,checksum)
+            else:
+                original_ready=ready;original_folder=current;origin_ready=current/'ready.json';origin_manifest=current/'manifest.json'
+            if frozen_document(origin_manifest,original_ready['manifest_sha256'])['source_sha256']!=source_sha:raise ValueError('Archived native source identity changed')
+            d.basic.checked(origin_manifest,original_ready['manifest_sha256'])
+            request=trial.sequence_request(unit['id'],unit['synthesis']);start=read(native/'physical-start.json')
+            if read(native/'unit-result.json')!=row or start.get('unit')!=unit:
+                raise ValueError('Selected listener unit differs from immutable physical evidence')
+            if read(native/'requests.json')!={'requests':[request]} or start.get('request_sha256')!=digest(request) or row.get('request_sha256')!=digest(request):
+                raise ValueError('Selected listener request changed')
+            expected=digest({'request':request,'unit':unit,'ready_sha256':file_digest(origin_ready),
+                'attempt':start['attempt'],'helper_sha256':start['helper_sha256']})
+            if start.get('id')!=session or expected!=session:raise ValueError('Native reservation identity changed')
+            if original_ready.get('native_manifest')!=ready.get('native_manifest'):raise ValueError('Native model/runner pin changed across ancestry')
+            if original_ready.get('listener_stress_derivation',{}).get('helper_sha256')!=start['helper_sha256']:
+                raise ValueError('Native helper implementation provenance changed')
+            sessions={};pending=[session]
+            while pending:
+                sid=pending.pop()
+                if sid in sessions:raise ValueError('Cyclic technical attempt evidence')
+                if not re.fullmatch(r'[0-9a-f]{64}',sid):raise ValueError('Invalid previous native evidence identity')
+                if binding and sid not in binding['sessions']:raise ValueError('Unbound copied technical attempt')
+                attempt=current/'native'/sid;identity=read(attempt/'worker.json')
+                if not stopped(identity):raise ValueError('Prior native worker still lives')
+                terminal=read(attempt/'physical-result.json');attempt_result=read(attempt/'unit-result.json')
+                if sid==session and terminal['returncode']!=0:
+                    raise ValueError('Selected listener attempt did not finish')
+                if sid!=session and attempt_result.get('status')!='technical_failure':raise ValueError('Prior technical attempt was not a failure')
+                command=identity['command'];expected_origin=original_folder/'native'/sid
+                model,runner=evidence_model_paths(json.dumps(original_ready['native_manifest'],sort_keys=True))
+                expected_command=[runner,'--task','tts','--family','higgs_audio_tts','--model',model,'--backend','cuda','--device','0',
+                    '--threads','4','--request-sequence',str(expected_origin/'requests.json'),'--out-dir',str(expected_origin),'--out-format','pcm16','--metrics']
+                if command!=expected_command:
+                    raise ValueError('Native worker request/output provenance changed')
+                physical=read(attempt/'physical-start.json');attempt_unit=physical['unit']
+                if attempt_unit['id']!=unit['id'] or physical['id']!=sid:raise ValueError('Prior attempt changed source unit')
+                attempt_request=trial.sequence_request(unit['id'],attempt_unit['synthesis'])
+                if read(attempt/'requests.json')!={'requests':[attempt_request]} or physical['request_sha256']!=digest(attempt_request):
+                    raise ValueError('Prior technical request changed')
+                if digest({'request':attempt_request,'unit':attempt_unit,'ready_sha256':file_digest(origin_ready),
+                    'attempt':physical['attempt'],'helper_sha256':physical['helper_sha256']})!=sid:
+                    raise ValueError('Prior physical reservation changed')
+                if sid!=session:validate_effective(attempt_unit,unit)
+                files={p.relative_to(attempt).as_posix():file_digest(p)for p in sorted(attempt.rglob('*'))if p.is_file()}
+                sessions[sid]=files
+                previous=attempt_unit['synthesis'].get('listener_technical_recovery',{}).get('previous_session')
+                if previous:pending.append(previous)
+            d.basic.checked(native/(unit['id']+'.wav'),row['audio_sha256'])
+            return {'policy':'immutable-native-evidence-v1','unit':unit['id'],'session':session,'origin':str(original_folder),
+                'ready_sha256':file_digest(origin_ready),'manifest_sha256':file_digest(origin_manifest),
+                'unit_receipt_sha256':file_digest(current/'units'/(unit['id']+'.json')),
+                'ready_archive':'native-evidence/readies/'+file_digest(origin_ready)+'.json',
+                'manifest_archive':'native-evidence/manifests/'+file_digest(origin_manifest)+'.json',
+                'sessions':sessions,'copy_from':str(current),'ready_from':str(origin_ready),'manifest_from':str(origin_manifest)}
+        derivation=ready.get('listener_stress_derivation') or {}
+        if not derivation.get('base') or not derivation.get('base_ready_sha256'):
+            raise ValueError('Selected native evidence is absent from pinned ancestry')
+        repair=frozen_document(current/'repair.json',file_digest(current/'repair.json'))
+        if repair.get('base')!=derivation['base'] or repair.get('base_ready_sha256')!=derivation['base_ready_sha256']:
+            raise ValueError('Native ancestry receipt differs from frozen ready')
+        current=Path(derivation['base']).resolve();ready=frozen_document(current/'ready.json',derivation['base_ready_sha256'])
+    raise ValueError('Native evidence ancestry exceeds bounded depth')
+
+
+def copy_native_evidence(output,witness):
+    copy_exact(Path(witness['ready_from']),output/witness['ready_archive'],witness['ready_sha256'])
+    copy_exact(Path(witness['manifest_from']),output/witness['manifest_archive'],witness['manifest_sha256'])
+    for sid,files in witness['sessions'].items():
+        if not re.fullmatch(r'[0-9a-f]{64}',sid):raise ValueError('Invalid copied native session')
+        for name,checksum in files.items():
+            if Path(name).is_absolute()or '..'in Path(name).parts:raise ValueError('Copied native evidence escaped session')
+            copy_exact(Path(witness['copy_from'])/'native'/sid/name,output/'native'/sid/name,checksum)
+
+
+class VerifiedUnits(list):
+    """List-compatible units carrying already-verified immutable witness records."""
+    def __init__(self):
+        super().__init__();self.native_evidence={}
+
+
 def load_units(folder,ready,book):
     """Read hash-bound historical plans without rerunning obsolete preparation."""
+    _verified_native_edges.clear()
     d.basic.checked(folder/'manifest.json',ready['manifest_sha256'])
     for name,key in [('prepared-inputs.json','preparation_sha256'),
         ('preparation/homograph/homograph.answer.json','homograph_answer_sha256'),
         ('preparation/yo/yo.answer.json','yo_answer_sha256'),('preparation/context/answer.json','context_answer_sha256')]:
         if ready.get(key):d.basic.checked(folder/name,ready[key])
-    units=[];blocks={b['id']:b.get('text','') for c in book['chapters'] for b in c['blocks']}
+    units=VerifiedUnits();blocks={b['id']:b.get('text','') for c in book['chapters'] for b in c['blocks']}
     for rec in ready['plans']:
         d.basic.checked(folder/rec['assignment'],rec['sha256']);path=d.basic.checked(folder/rec['plan'],rec['plan_sha256'])
         for unit in read(path)['units']:
@@ -95,13 +250,7 @@ def load_units(folder,ready,book):
             row=read(folder/'units'/(unit['id']+'.json'))
             if row.get('effective_unit'):
                 validate_effective(unit,row['effective_unit']);unit=row['effective_unit']
-                native=folder/'native'/row['session']
-                if read(native/'unit-result.json')!=row or read(native/'physical-start.json')['unit']!=unit:
-                    raise ValueError('Selected listener unit differs from immutable physical evidence')
-                if read(native/'requests.json')!={'requests':[trial.sequence_request(unit['id'],unit['synthesis'])]}:
-                    raise ValueError('Selected listener request changed')
-                if read(native/'physical-result.json')['returncode']!=0:raise ValueError('Selected listener attempt did not finish')
-                if not stopped(read(native/'worker.json')):raise ValueError('Selected listener native worker is still live')
+                units.native_evidence[unit['id']]=native_evidence(folder,ready,unit,row)
             if row.get('unit')!=unit['id'] or row.get('status')!='rendered':
                 raise ValueError('Listener repair requires a complete source unit: '+unit['id'])
             if unit['synthesis']['backend']=='nonverbal_asset':
@@ -114,6 +263,7 @@ def load_units(folder,ready,book):
     if len(units)!=ready['unit_count'] or len({u['id'] for u in units})!=len(units):raise ValueError('Source coverage changed')
     for cid,count in ready['chapter_counts'].items():
         if sum(u['chapter_id']==cid for u in units)!=count:raise ValueError('Source chapter coverage changed')
+    recheck_native_derivations()
     return units,blocks
 
 
@@ -180,9 +330,17 @@ def corrected_unit(unit,frozen,blocks,forced=False,report=None,baseline=None,res
         'source_passage_sha256':digest(blocks[unit['source_id']])}
     if forced:
         reports=report if isinstance(report,list) else [report]
-        proof['reported_audio']={'reports':[{'report_id':r['id'],'audio_sha256':r.get('audio_hash')} for r in reports],
-            'report_id':reports[0]['id'],'audio_sha256':reports[0].get('audio_hash'),
-            'reason':'Explicit listener regeneration of this source occurrence'}
+        families=[r for r in reports if r.get('force_scope')=='proper_name_family']
+        heard=[r['origin_report'] for r in families if r['heard_target']]
+        heard.extend(r for r in reports if r.get('force_scope')!='proper_name_family')
+        if heard:
+            proof['reported_audio']={'reports':[{'report_id':r['id'],'audio_sha256':r.get('audio_hash')} for r in heard],
+                'report_id':heard[0]['id'],'audio_sha256':heard[0].get('audio_hash'),
+                'reason':'Explicit listener regeneration of this source occurrence'}
+        if families:
+            proof['family_regeneration']={'policy':'latest-human-family-all-mentions-v1',
+                'snapshot_sha256':frozen['sha256'],'targets':families,
+                'reason':'Explicit human family correction regenerates every matching source mention; unheard targets are not listening evidence'}
     proof['sha256']=digest({k:v for k,v in proof.items() if k!='sha256'})
     plan.update(text=native,prompt=old['prompt'][:-len(old['text'])]+native,listener_stress=proof,
         russian_phonetics={'rule':phonetics.RULE,'prephonetic_source':after,'records':records,
@@ -199,6 +357,35 @@ def corrected_unit(unit,frozen,blocks,forced=False,report=None,baseline=None,res
     return result,proof
 
 
+def family_spans(text,lexicon):
+    """Exact inflections only, with mixed-script/digit token boundaries guarded."""
+    plain,starts,ends=listener_stress._plain_map(text)
+    return [(starts[a],ends[b-1],marked) for a,b,marked in name_spans(plain,lexicon,implicit_single=True)
+        if (a==0 or not(plain[a-1].isalnum() or plain[a-1]=='_'))
+        and (b==len(plain) or not(plain[b].isalnum() or plain[b]=='_'))]
+
+
+def family_already_regenerated(unit,origin,family,blocks):
+    """A verified loaded take consumes this exact origin for this exact target."""
+    proof=unit['synthesis'].get('listener_stress') or {}
+    prior=proof.get('family_regeneration')
+    if not prior:return False
+    if prior.get('policy')!='latest-human-family-all-mentions-v1':
+        raise ValueError('Unknown existing family regeneration receipt policy')
+    if proof.get('sha256')!=digest({k:v for k,v in proof.items() if k!='sha256'}):
+        raise ValueError('Existing family regeneration receipt checksum changed')
+    if (proof.get('source_id')!=unit['source_id'] or proof.get('source_range')!=[unit['start'],unit['end']]
+        or proof.get('source_passage_sha256')!=digest(blocks[unit['source_id']])):
+        raise ValueError('Existing family regeneration receipt lost its exact target source')
+    return any(row.get('force_scope')=='proper_name_family'
+        and row.get('origin_report')==origin and row.get('origin_report_sha256')==digest(origin)
+        and row.get('families')==family and row.get('target_unit')==unit['id']
+        and row.get('target_source_id')==unit['source_id']
+        and row.get('target_source_range')==[unit['start'],unit['end']]
+        and row.get('target_passage_sha256')==digest(blocks[unit['source_id']])
+        for row in prior.get('targets',[]))
+
+
 def note_coverage(notes,units,blocks,changes,frozen):
     """Every raw note gets an explicit current-source disposition, never silence."""
     active={row['report_id'] for row in frozen.get('occurrences',[])};result=[]
@@ -207,8 +394,8 @@ def note_coverage(notes,units,blocks,changes,frozen):
         family=entry.get('family');occurrence=entry.get('occurrence')
         if family:
             active_family={k:v for k,v in family.items() if frozen.get('names',{}).get(k)==v}
-            targets=[u['id'] for u in units if name_spans(u['text'],active_family,implicit_single=True)] if active_family else []
-            wholebook=sum(len(name_spans(text,active_family,implicit_single=True)) for text in blocks.values()) if active_family else 0
+            targets=[u['id'] for u in units if family_spans(u['text'],active_family)] if active_family else []
+            wholebook=sum(len(family_spans(text,active_family)) for text in blocks.values()) if active_family else 0
             reason='Family note applies book-wide' if targets else 'Superseded family note or no occurrence in selected chapters'
         elif occurrence:
             wholebook=0
@@ -236,9 +423,10 @@ def frozen_notes(frozen,notes):
     return captured,identifiers
 
 
-def pending_reports(base,item,notes,generation,units,blocks,frozen_ids=None):
+def pending_reports(base,item,notes,generation,units,blocks,frozen_ids=None,frozen=None):
     """Coalesce valid queued origins; only audio actually heard can force a take."""
     canonical={row['report']['id']:row['report'] for row in notes}
+    bindings={row['report']['id']:row for row in notes}
     candidates=[(None,item)]
     directories={base/'listener-stress-queue'}
     if item.get('_queue_item_path'):
@@ -271,11 +459,32 @@ def pending_reports(base,item,notes,generation,units,blocks,frozen_ids=None):
         if origin.get('kind')!='stress' or not origin.get('intended_stress'):
             raise ValueError('Queued report has no explicit human stress intent: '+origin['id'])
         origins[origin['id']]=origin
+        family=bindings[origin['id']].get('family') or {}
+        active_family={key:marked for key,marked in family.items() if frozen
+            and frozen.get('names',{}).get(key)==marked
+            and frozen.get('family_evidence',{}).get(key,{}).get('report_id')==origin['id']}
         targets=[u for u in units if u['source_id']==origin['source_id']
             and u['start']<=offset and offset+len(word)<=u['end']]
         if len(targets)!=1:raise ValueError('Queued report crosses or misses current native coverage')
         unit=targets[0];heard=[s for s in generation['segments'] if s['id']==unit['id']]
-        if (len(heard)==1 and heard[0]['audio_hash']==origin.get('audio_hash')
+        exact_heard=(len(heard)==1 and heard[0]['audio_hash']==origin.get('audio_hash')
+            and heard[0]['source_id']==origin['source_id'])
+        if active_family:
+            for target in units:
+                spans=family_spans(target['text'],active_family)
+                if not spans:continue
+                if family_already_regenerated(target,origin,active_family,blocks):continue
+                if target['synthesis']['backend']!='higgs_audio_cpp':raise ValueError('Human family target is not synthesizable speech')
+                forced.setdefault(target['id'],{})[origin['id']]={'force_scope':'proper_name_family',
+                    'origin_report':origin,'origin_report_sha256':digest(origin),'families':active_family,
+                    'heard_target':bool(exact_heard and target['id']==unit['id']),
+                    'target_unit':target['id'],'target_source_id':target['source_id'],
+                    'target_source_range':[target['start'],target['end']],
+                    'target_passage_sha256':digest(blocks[target['source_id']]),
+                    'target_synthesis_sha256':digest(target['synthesis']),
+                    'occurrences':[{'start':target['start']+a,'end':target['start']+b,
+                        'source_text':target['text'][a:b],'intended_stress':marked}for a,b,marked in spans]}
+        elif not family and (len(heard)==1 and heard[0]['audio_hash']==origin.get('audio_hash')
             and heard[0]['source_id']==origin['source_id']):
             if unit['synthesis']['backend']!='higgs_audio_cpp':raise ValueError('Human stress target is not a synthesizable speech unit')
             forced.setdefault(unit['id'],{})[origin['id']]=origin
@@ -348,7 +557,7 @@ def configure(base,data_dir,generation_id,item):
         d.basic.checked(data_dir/'audio'/(heard[0]['audio_hash']+'.wav'),heard[0]['audio_hash'])
     finally:store.close()
     units,blocks=load_units(base,ready,book_source)
-    origins,forced,queued=pending_reports(base,item,notes,generation,units,blocks,frozen_ids)
+    origins,forced,queued=pending_reports(base,item,notes,generation,units,blocks,frozen_ids,frozen)
     witnesses=restoration_inputs(base,ready)
     effective=[];changes={};restorations={}
     for unit in units:
@@ -359,6 +568,7 @@ def configure(base,data_dir,generation_id,item):
         if evidence:changes[unit['id']]=evidence
     key=digest({'base_ready_sha256':file_digest(base/'ready.json'),'snapshot':frozen,'changes':changes,
         'stress_policy':RESTORED_STRESS,'restorations':restorations,'helper_sha256':file_digest(SELF)})
+    inherited={uid:proof for uid,proof in getattr(units,'native_evidence',{}).items()if uid not in changes}
     output=base.parent/('listener-stress-'+book['id'][:8]+'-'+key[:12])
     config={'policy':POLICY,'base':str(base),'base_ready_sha256':file_digest(base/'ready.json'),
         'source_sha256':file_digest(source),'book_id':book['id'],'source_generation_id':generation_id,
@@ -366,6 +576,7 @@ def configure(base,data_dir,generation_id,item):
         'snapshot_sha256':frozen['sha256'],'affected_ids':list(changes),'priority_unit':sorted(forced or changes or {units[0]['id']:None})[0],
         'unit_count':len(units),'pending_origins':origins,'forced_reports':forced,'coalesced_queue_items':queued,
         'automatic_stress_policy':RESTORED_STRESS,'restoration_witnesses':restorations,
+        'native_evidence_bindings':inherited,
         'gateway_binding':gateway_configuration(data_dir),
         'reused':len(units)-len(changes),'historical_implementation_files':{p:hashlib.sha256(b).hexdigest() for p,b in archived_preparation(ready,base).items()},
         'post_processing':'off',**d.UNCHECKED}
@@ -409,6 +620,9 @@ def materialize(output,config,ready,units,effective,blocks,frozen,notes):
         row=read(base/'units'/(unit['id']+'.json'))
         copy_exact(base/row['audio'],output/row['audio'],row['audio_sha256'])
         copy_exact(base/'units'/(unit['id']+'.json'),output/'units'/(unit['id']+'.json'))
+        if unit['id']in config.get('native_evidence_bindings',{}):
+            witness=config['native_evidence_bindings'][unit['id']]
+            copy_native_evidence(output,witness)
     manifest=read(base/'manifest.json');manifest.update(render_policy=POLICY,listener_stress_derivation=config)
     manifest['pronunciation'].pop('contextual_stress',None)
     manifest['pronunciation']['contextual_stress_policy']=RESTORED_STRESS
