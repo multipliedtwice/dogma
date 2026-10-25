@@ -785,6 +785,8 @@ class Jobs:
                 for segment,_ in targets:takes[segment['id']]=takes.get(segment['id'],0)+1
                 analysis['takes']=takes
                 with self.store.lock,self.store.db:
+                    from .current_audiobook import capture_parts
+                    capture_parts(self.store,generation,[s['id']for s,_ in targets])
                     self.store.db.execute('UPDATE generations SET analysis=?,updated=? WHERE id=?',
                         (json.dumps(analysis,ensure_ascii=False),now(),gid))
                     for segment,evidence in targets:
@@ -798,7 +800,7 @@ class Jobs:
                 if gid not in self.listener_queue:self.listener_queue.append(gid)
                 if self.active==gid:self.stop.set()
             if not self.active:self._start_listener_queue()
-            states=self.store.rows('SELECT status,error,segment_ids FROM listener_correction_jobs WHERE report_id=?',(report['id'],))
+            states=self.store.rows("SELECT status,error,segment_ids FROM listener_correction_jobs WHERE report_id=? AND id NOT LIKE 'enqueue-failure-%'",(report['id'],))
             held=next((state for state in states if state['status']=='held'),None)
             pending=next((state['status'] for state in states if state['status'] in ('queued','running','paused')),None)
             return {'id':report['id'],'status':'held' if held else pending or ('queued' if count else 'applied'),
@@ -883,7 +885,7 @@ class Jobs:
             with self.store.lock, self.store.db:
                 self.store.db.execute('UPDATE generations SET resume_on_launch=0 WHERE resume_on_launch!=0')
                 self.store.db.execute('UPDATE generations SET resume_on_launch=1 WHERE id=?',(gid,))
-                self.store.db.execute("UPDATE listener_correction_jobs SET status='running',updated=?,error='' WHERE generation_id=? AND status IN ('held','paused','queued')",(now(),gid))
+                self.store.db.execute("UPDATE listener_correction_jobs SET status='running',updated=?,error='' WHERE generation_id=? AND status IN ('held','paused','queued') AND id NOT LIKE 'enqueue-failure-%'",(now(),gid))
                 if generation['config'].get('device')!=device:
                     self.store.db.execute('UPDATE generations SET config=? WHERE id=?',(json.dumps({**generation['config'],'device':device},ensure_ascii=False),gid))
                 if approve:
@@ -1080,6 +1082,8 @@ class Jobs:
             with self.store.lock, self.store.db:
                 if self.store._generation_segments(gid) != generation['segments']:
                     raise AppError('Saved audio changed while it was being checked. Retry the audio check.')
+                from .current_audiobook import capture_parts
+                capture_parts(self.store,generation,damaged)
                 self.store.db.executemany(
                     "UPDATE segments SET status='pending',duration=0,cues='[]' WHERE generation_id=? AND id=?",
                     [(gid, sid) for sid in damaged])
@@ -1743,6 +1747,9 @@ class Jobs:
 
     def _holds(self, gid, pack, config, current, voice_for):
         analysis = current['analysis']
+        from .current_audiobook import capture_parts
+        with self.store.lock,self.store.transaction():
+            capture_parts(self.store,current,[s['id']for s in current['segments']if PREVIEW_NOTICE in s['warning']])
         preview = config.get('unresolved_policy', 'hold_flagged_segments') == 'render_with_warning'
         records = [dict(item) for item in analysis.get('speaker_resolution', [])]
         degraded = {item.get('source') for item in analysis.get('degraded', []) if isinstance(item, dict)}
@@ -1799,6 +1806,10 @@ class Jobs:
                    if any(segment['id'] == sid and segment['status'] == 'review' for segment in current['segments'])}
         reasons = Counter()
         with self.store.lock, self.store.db:
+            from .current_audiobook import capture_parts
+            capture_parts(self.store,current,[s['id']for s in current['segments']
+                if (s['status']=='review'or PREVIEW_NOTICE in s['warning']or s['id']in held)
+                and not (s['id']in playable_degraded or preview and s['id']in held)])
             for segment in current['segments']:
                 previewed = PREVIEW_NOTICE in segment['warning']
                 if previewed and preview and segment['id'] in held:
@@ -2155,6 +2166,9 @@ class Jobs:
                 from .chapter_gate import generation_binding
                 if generation_binding(latest_segments,pack['_fingerprint'],self.store.root)!=binding:
                     raise SpeechHoldError('Chapter changed during verification; no stale audio was published.')
+                if not gate['passed']:
+                    from .current_audiobook import capture_parts
+                    capture_parts(self.store,latest_generation,[s['id']for s in latest_segments])
                 self.store.db.execute('UPDATE generations SET analysis=? WHERE id=?',
                     (json.dumps({**latest,'chapter_acceptance':{**latest.get('chapter_acceptance',{}),chapter['id']:gate}},ensure_ascii=False),gid))
                 if gate['passed']:

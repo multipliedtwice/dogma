@@ -15,6 +15,9 @@ from pathlib import Path
 import sys
 import wave
 from functools import lru_cache
+from contextlib import contextmanager, ExitStack
+from contextvars import ContextVar
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'runtime'), str(ROOT / 'scripts')]
@@ -30,16 +33,17 @@ def read(path):
 
 
 @lru_cache(maxsize=512)
-def _document(path, size, modified, expected=None):
-    if expected is not None and file_digest(Path(path)) != expected:
-        raise ValueError('Physical input ancestry changed before compaction')
-    return read(path)
+def _document(content_sha256, raw):
+    return json.loads(raw.decode('utf-8-sig'))
 
 
 def document(path, expected=None):
-    path = Path(path).resolve()
-    stat = path.stat()
-    return _document(str(path), stat.st_size, stat.st_mtime_ns, expected)
+    raw = Path(path).read_bytes()
+    actual = hashlib.sha256(raw).hexdigest()
+    if expected is not None and actual != expected:
+        raise ValueError('Physical input ancestry changed before compaction')
+    # Never expose the shared parsed cache to caller mutation.
+    return copy.deepcopy(_document(actual, raw))
 
 
 def write(path, value):
@@ -130,20 +134,84 @@ def _block_map(book):
     return {b['id']: b['text'] for chapter in book['chapters'] for b in chapter['blocks']}
 
 
-@lru_cache(maxsize=16)
-def _checked_binary(path, size, modified, expected):
-    if file_digest(Path(path)) != expected:
-        raise ValueError('Selected physical model/runner checksum changed')
+_BINARY_SESSION = ContextVar('current_higgs_binary_validation_session', default=None)
+
+
+def _pinned_read(path):
+    if os.name != 'nt':return Path(path).open('rb')
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    # Read sharing only: deny writes and atomic replacement while validated.
+    handle = create(str(Path(path).resolve()), 0x80000000, 0x1, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+    try:descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+    except BaseException:
+        close(handle)
+        raise
+    try:return os.fdopen(descriptor, 'rb')
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _identity(stat):
+    # Windows ctime is creation time and CRT/path views can differ; pinned
+    # deny-write/delete handles supply the mutation guard there. POSIX ctime
+    # detects in-place edits even when a caller restores the old mtime.
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
+            stat.st_ctime_ns if os.name != 'nt' else None)
+
+
+def _unchanged_binary(path, record):
+    if (_identity(os.fstat(record['handle'].fileno())) != record['identity']
+            or _identity(Path(path).stat()) != record['identity']):
+        raise ValueError('Pinned physical model/runner changed during validation')
+
+
+@contextmanager
+def binary_validation_session():
+    """Hash once while held handles pin each binary for this operation only."""
+    if _BINARY_SESSION.get() is not None:
+        yield
+        return
+    with ExitStack() as handles:
+        state = {'handles': handles, 'files': {}}
+        token = _BINARY_SESSION.set(state)
+        try:
+            yield
+            for path, record in state['files'].items():_unchanged_binary(path, record)
+        finally:
+            _BINARY_SESSION.reset(token)
 
 
 def _binary(path, expected):
     path = Path(path).resolve()
-    stat = path.stat()
-    _checked_binary(str(path), stat.st_size, stat.st_mtime_ns, expected)
+    state = _BINARY_SESSION.get()
+    if state is None:
+        with binary_validation_session():return _binary(path, expected)
+    record = state['files'].get(str(path))
+    if record is None:
+        handle = state['handles'].enter_context(_pinned_read(path))
+        record = {'handle': handle, 'identity': _identity(os.fstat(handle.fileno())),
+                  'sha256': hashlib.file_digest(handle, 'sha256').hexdigest()}
+        state['files'][str(path)] = record
+    _unchanged_binary(path, record)
+    if record['sha256'] != expected:raise ValueError('Selected physical model/runner checksum changed')
 
 
 def _physical(folder, ready, unit, row):
     """Compact a selected physical request while its old evidence is reachable."""
+    if _BINARY_SESSION.get() is None:
+        with binary_validation_session():return _physical(folder, ready, unit, row)
     seen = set()
     while folder not in seen:
         seen.add(folder)
@@ -358,7 +426,9 @@ def replacement_segment(data_dir, old, part, unit, receipt, raw_path):
     performance['synthesis_snapshot'] = unit['synthesis']
     performance['current_output'] = {'policy': POLICY, 'part_revision': digest({'input': unit['synthesis'], 'audio': audio_hash}),
                                      'raw_audio_sha256': receipt['audio_sha256'], 'request_sha256': receipt['request_sha256']}
-    segment.update(audio_hash=audio_hash, duration=duration, status='ready', performance=performance)
+    # Word timestamps belong to the previous take. Recognition is off here;
+    # leave this replacement unaligned rather than reusing old timing.
+    segment.update(audio_hash=audio_hash, duration=duration, status='ready', performance=performance, cues=[])
     raw_path = Path(raw_path).resolve()
     if raw_path.parent.name == 'assets':
         physical_root = raw_path.parent.parent
@@ -402,14 +472,15 @@ def _publish_parts(store, data_dir, view, changes, *, expected_revision):
 
 def adopt(data_dir, generation_dir, generation_id, *, execute=False, manifest_preview=None):
     if not execute:
-        return _adopt(data_dir, generation_dir, generation_id, manifest_preview=manifest_preview)
+        with binary_validation_session():
+            return _adopt(data_dir, generation_dir, generation_id, manifest_preview=manifest_preview)
     store = Store(Path(data_dir))
     try:
         book_id = store.generation(generation_id)['book_id']
     finally:
         store.close()
     from higgs_published_timeline import publication_lock
-    with publication_lock(output_root(data_dir, book_id)):
+    with publication_lock(output_root(data_dir, book_id)), binary_validation_session():
         return _adopt(data_dir, generation_dir, generation_id, execute=True, manifest_preview=manifest_preview)
 
 
@@ -423,7 +494,7 @@ def load(store, data_dir, book_id):
 
 def publish_parts(store, data_dir, view, changes, *, expected_revision):
     from higgs_published_timeline import publication_lock
-    with publication_lock(output_root(data_dir, view['book_id'])):
+    with publication_lock(output_root(data_dir, view['book_id'])), binary_validation_session():
         return _publish_parts(store, data_dir, view, changes, expected_revision=expected_revision)
 
 

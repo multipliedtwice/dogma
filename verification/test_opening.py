@@ -88,7 +88,9 @@ class OpeningTests(unittest.TestCase):
                 pass
 
     def test_cleanup_protects_shared_pin_until_last_generation_is_deleted(self):
-        first, second = self.generation(), self.generation()
+        first = self.generation()
+        other = self.store.import_data(FB2.replace(b'<book-title>',b'<book-title>Other '),'other.fb2')
+        second = self.store.create_generation(other['id'],{})
         self.assertEqual(first['config']['opening'], second['config']['opening'])
         hashes = opening_hashes(first)
         self.store.delete_generation(first['id'])
@@ -132,15 +134,18 @@ class OpeningTests(unittest.TestCase):
         with self.assertRaises(AppError):
             verify_opening_audio(metadata.with_suffix('.wav'), selected)
 
-    def test_legacy_revisions_attach_without_mutating_parent_or_new_pin(self):
+    def test_legacy_revision_attaches_once_to_current_output_without_new_pin(self):
         generation = self.generation()
         config = {k: v for k, v in generation['config'].items() if k != 'opening'}
         self.store.execute('UPDATE generations SET config=?,analysis=? WHERE id=?',
                            (json.dumps(config), json.dumps({'complete': True}), generation['id']))
         self.assertIsNone(select_opening(self.store.generation(generation['id'])))
+        legacy = self.store.generation(generation['id'])
         revised = self.store.revise(generation['id'], [{'id': generation['segments'][0]['id'], 'spoken': 'New pronunciation.'}])
         self.assertIsNotNone(select_opening(revised))
-        self.assertIsNone(select_opening(self.store.generation(generation['id'])))
+        self.assertEqual(generation['id'],revised['id'])
+        self.assertEqual(select_opening(revised),select_opening(self.store.generation(generation['id'])))
+        self.assertIsNone(select_opening(legacy))
         again = self.store.revise(revised['id'], [{'id': revised['segments'][0]['id'], 'spoken': 'Another pronunciation.'}])
         self.assertEqual(revised['config']['opening'], again['config']['opening'])
 

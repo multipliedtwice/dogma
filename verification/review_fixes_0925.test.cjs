@@ -206,7 +206,7 @@ test('passage action buttons have distinct names even for repeated text and seve
 test('library book covers are decorative so each card announces its title and author once', () => {
   assert.match(app, /<div className=\{cn\('book-cover','cover-'\+index%4\)\} aria-hidden="true">\{item\.cover\?<AssetImage kind="book" id=\{item\.cover\} book=\{item\.id\} alt="" /);
   const {sourceTree} = require('./layout_source.cjs');
-  const {tree} = sourceTree('src/App.tsx', {states: {connected: true, book: null, library: [{id: 'b', title: 'Harbor', author: 'Fixture', chapter_count: 2, format: 'epub', cover: null, generations: []}], settings: {theme: 'light', language: 'en'}, health: {ready: true, missing: []}}});
+  const {tree} = sourceTree('src/App.tsx', {states: {connected: true, book: null, library: [{id: 'b', title: 'Harbor', author: 'Fixture', chapter_count: 2, format: 'epub', cover: null, generations: []}], settings: {theme: 'light', language: 'en',online_recommendations:false,recommendation_genres:[]}, health: {ready: true, missing: []}}});
   const walk = node => Array.isArray(node) ? node.flatMap(walk) : !node || typeof node !== 'object' ? [] : [node, ...walk(node.props?.children)];
   const card = walk(tree).find(node => node.props?.className === 'book-card-main');
   const headings = walk(card).filter(node => node.tag === 'h3');

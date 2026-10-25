@@ -118,8 +118,8 @@ test('editing controls and playback shortcuts do not pause narration follow',()=
 });
 
 test('selecting a chapter flushes the previous scroll before writing the new chapter',()=>{
-  const writes=[];const manualReading={current:false};
-  variable('selectChapter',{flushReading:{current:()=>writes.push('old-scroll')},manualReading,setNavigation:()=>{},setBrowsing:()=>{},setChapterId:()=>{},setSelectedSource:()=>{},scrollReaderTo:()=>{},viewRef:{current:{}},book:{id:'book'},focusIfLost:()=>{},storeReading:variable('storeReading',{setBook:()=>{},api:async(op,data)=>writes.push(data.position.chapter_id),setError:()=>{},t:()=>'',errorText:String})})('next');
+  const writes=[];const manualReading={current:false};const chapterStartIntent={current:''};
+  variable('selectChapter',{chapterStartIntent,flushReading:{current:()=>writes.push('old-scroll')},manualReading,setNavigation:()=>{},setBrowsing:()=>{},setChapterId:()=>{},setSelectedSource:()=>{},scrollReaderTo:()=>{},viewRef:{current:{}},book:{id:'book'},focusIfLost:()=>{},storeReading:variable('storeReading',{setBook:()=>{},api:async(op,data)=>writes.push(data.position.chapter_id),setError:()=>{},t:()=>'',errorText:String})})('next');
   assert.deepEqual(writes,['old-scroll','next']);assert.equal(manualReading.current,true);
 });
 

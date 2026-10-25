@@ -424,7 +424,10 @@ def _build_export(store,gid,format,chapters,binaries: Path,stop,guard,music,snap
             validate_coverage(book, selected, segments)
             holds = speaker_review_holds(generation['segments'], generation['analysis'].get('speaker_resolution', []), generation['analysis'].get('speaker_verdicts'))[1]
             pending = {s['id'] for s in generation['segments'] if s['status'] == 'review'} | holds
-            pending.difference_update(s['id']for s in generation['segments']if s.get('replacement_status')and s['status']=='ready'and s['audio_hash'])
+            for segment in generation['segments']:
+                if not segment.get('replacement_status')or segment['status']!='ready'or not segment['audio_hash']:continue
+                if segment.get('export_blocked')is False:pending.discard(segment['id'])
+                elif segment.get('export_blocked')is True:pending.add(segment['id'])
             held = len({s['id'] for s in segments} & pending)
             if held:
                 raise AppError(f'{held} held passage(s) still need review. A complete export was not made; held text is never omitted or narrated as accepted audio.', 'held_segments', held=held)

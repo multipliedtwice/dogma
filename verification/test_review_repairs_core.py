@@ -108,30 +108,33 @@ class ReviewRepairsCore(unittest.TestCase):
         generation = self.completed()
         first = generation['segments'][0]
         self.store.execute('UPDATE segments SET spoken=? WHERE generation_id=? AND id=?', ('x < y & z > q', generation['id'], first['id']))
+        # Initial synthetic ready-caption fixture, with no older current audio.
+        self.store.execute('DELETE FROM audiobook_replacements WHERE generation_id=?',(generation['id'],))
         srt = build_export(self.store, generation['id'], 'srt', None, self.root)
         vtt = build_export(self.store, generation['id'], 'vtt', None, self.root)
         self.assertIn('x < y & z > q', (self.store.root / 'exports' / srt['file']).read_text('utf-8'))
         self.assertIn('x &lt; y &amp; z &gt; q', (self.store.root / 'exports' / vtt['file']).read_text('utf-8'))
 
-    def test_chained_revision_names_stay_bounded(self):
+    def test_chained_corrections_keep_the_current_name_bounded(self):
         generation = self.completed()
         self.store.execute('UPDATE generations SET name=? WHERE id=?', ('N' * 200, generation['id']))
         segment = generation['segments'][0]['id']
         for index in range(25):
             generation = self.store.revise(generation['id'], [{'id': segment, 'spoken': f'Correction {index}'}])
             self.assertLessEqual(len(generation['name']), 200)
-        self.assertTrue(generation['name'].endswith(' · revision 25'))
-        self.assertTrue(generation['name'].startswith('N'))
+        self.assertEqual('N'*200,generation['name'])
+        self.assertEqual(1,len(self.store.generation_list(self.book['id'])))
 
-    def test_revision_names_number_short_names(self):
+    def test_corrections_preserve_the_current_short_name(self):
         generation = self.completed()
+        base=generation['name'];gid=generation['id']
         segment = generation['segments'][0]['id']
         names = []
         for index in range(3):
             generation = self.store.revise(generation['id'], [{'id': segment, 'spoken': f'Correction {index}'}])
             names.append(generation['name'])
-        base = self.store.generation(generation['parent_id'])['name'].split(' · revision')[0]
-        self.assertEqual([base + ' · revision', base + ' · revision 2', base + ' · revision 3'], names)
+        self.assertEqual([base]*3,names)
+        self.assertEqual(gid,generation['id'])
 
     def test_warning_append_is_idempotent(self):
         existing = 'Unresolved speaker; narrator voice is used. Model note.'

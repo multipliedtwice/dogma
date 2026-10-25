@@ -285,7 +285,11 @@ class Application:
             except Exception as error:
                 # The human report is durable even when generation cannot start.
                 # Surface the queue hold without asking the listener to report it again.
-                report['retake_queue']={'id':report['id'],'status':'held','error':str(error)}
+                from rimsky.listener_stress_retake import record_enqueue_failure
+                try:report['retake_queue']=record_enqueue_failure(store,report,error)
+                except Exception as persistence_error:
+                    report['retake_queue']={'id':report['id'],'status':'held','durable':False,
+                        'error':str(error)+'; saving correction hold failed: '+str(persistence_error)}
             return report
         if op=='generation_poll':
             return store.playback_generation_poll(data['id'], data.get('revision'))

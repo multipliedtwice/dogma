@@ -90,7 +90,7 @@ class CurrentRepairTests(CurrentOutputTests):
 
     def test_current_dispatch_never_falls_back_to_legacy_asr(self):
         folder = c.output_root(self.data, self.book_id)
-        c.write(folder / 'ready.json', {'policy': c.POLICY})
+        c.write(folder / 'ready.json', {'policy': c.POLICY, 'current_output_manifest': 'current-output.json'})
         def command(argv, **kwargs):
             c.write(Path(argv[argv.index('--result') + 1]), {'status': 'applied', 'published_generation_id': 'g', 'revision': 5})
         with patch.object(q.subprocess, 'run', side_effect=command) as run, patch.object(q, 'build_revision', side_effect=AssertionError('legacy ASR')):
@@ -101,7 +101,7 @@ class CurrentRepairTests(CurrentOutputTests):
 
     def test_failed_current_dispatch_keeps_previous_audio_no_legacy_fallback(self):
         folder = c.output_root(self.data, self.book_id)
-        c.write(folder / 'ready.json', {'policy': c.POLICY})
+        c.write(folder / 'ready.json', {'policy': c.POLICY, 'current_output_manifest': 'current-output.json'})
         before = self.store.generation('g')
         def command(argv, **kwargs):
             c.write(Path(argv[argv.index('--result') + 1]), {'status': 'held', 'published_generation_id': 'g'})
@@ -110,6 +110,19 @@ class CurrentRepairTests(CurrentOutputTests):
                 q._process_locked(folder, self.data, 'g', self.queue)
         self.assertEqual(before, self.store.generation('g'))
         self.assertNotEqual('applied', c.read(self.queue)['status'])
+
+    def test_broken_compact_controls_never_start_legacy_or_native_work(self):
+        folder = c.output_root(self.data, self.book_id)
+        for control in (None, {'policy': 'wrong-policy'}, {'policy': c.POLICY, 'current_output_manifest': '../other.json'}):
+            with self.subTest(control=control):
+                ready = folder / 'ready.json'
+                if control is None:ready.unlink(missing_ok=True)
+                else:c.write(ready, control)
+                with patch.object(q.subprocess, 'run') as run, patch.object(q, 'build_revision') as legacy:
+                    with self.assertRaisesRegex(Exception, 'legacy correction is disabled'):
+                        q._process_locked(folder, self.data, 'g', self.queue)
+                run.assert_not_called();legacy.assert_not_called()
+                self.assertEqual('queued', c.read(self.queue)['status'])
 
 
 class CurrentPublicationTests(CurrentRepairTests):

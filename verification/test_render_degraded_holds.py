@@ -95,7 +95,10 @@ class BackfillTests(unittest.TestCase):
         self.library_root, self.folder, self.reports = base / 'library', base / 'render', base / 'reports'
         store = Store(self.library_root)
         with store.db:
-            store.db.execute("INSERT INTO books(id,title,manifest) VALUES('book','B','{}')")
+            manifest={'id':'book','title':'B','author':'Test','language':'ru','source_hash':'fixture',
+                'chapters':[{'id':'c0002','title':'Chapter','blocks':[
+                    {'id':'src-'+ident,'kind':'paragraph','text':'Он ушёл.'}for ident in ('s1','s2','s3')]}]}
+            store.db.execute("INSERT INTO books(id,title,manifest) VALUES('book','B',?)",(json.dumps(manifest),))
             store.db.execute("INSERT INTO generations(id,book_id,name,status,config,analysis) VALUES(?,?,?,?,?,?)",
                              ('gen', 'book', 'Higgs draft', 'failed',
                               json.dumps({'engine': 'higgs_audio_tts_q8_external_review'}), json.dumps({'provisional': True})))

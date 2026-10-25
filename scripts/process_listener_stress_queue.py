@@ -515,6 +515,11 @@ def _process_locked(folder, data_dir, generation_id, item_path):
     ready=folder/'one-shot-ready.json'
     if not ready.exists():ready=folder/'ready.json'
     debug_ready=read(ready) if ready.exists() else {}
+    if ((folder/'current-output.json').exists() or debug_ready.get('current_output_manifest')
+            or debug_ready.get('policy')=='current-book-output-v1') and (
+            debug_ready.get('policy')!='current-book-output-v1'
+            or debug_ready.get('current_output_manifest')!='current-output.json'):
+        raise AppError('Current audiobook publication controls are incomplete or invalid; legacy correction is disabled.')
     if debug_ready.get('policy')=='current-book-output-v1':
         # The compact current book has no old unit tree or chapter copies.
         # Its helper commits only successful parts into the existing Store ID.

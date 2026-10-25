@@ -376,6 +376,17 @@ test('export callback sends an explicit chapter selection and never invokes gene
   assert.equal(requests.length,2);
 });
 
+test('exporting playable fallback audio discloses pending replacements when saved',async()=>{
+  const requests=[],notices=[];
+  const generation={id:'current',book_id:'book',pending_replacements:1},book={id:'book',title:'Book'};
+  const exportAudio=callback('exportAudio',{run:(_label,fn)=>fn(),generation,book,selectionEpoch:{current:1},ru:false,
+    api:async(op,data)=>{requests.push(op);return op==='export'?{id:'file',file:'snapshot.m4b',format:'m4b',pending_updates:1}:generation;},
+    saveExport:async()=>true,setGeneration:()=>{},acceptGenerationRefresh:()=>generation,setNotice:value=>notices.push(value),setExporting:()=>{}});
+  await exportAudio('m4b',['chapter']);
+  assert.deepEqual(requests,['export','generation']);
+  assert.match(notices[0],/currently playable audio; pending replacements/);
+});
+
 test('illustrated player preparation targets the displayed paragraph rather than a stale text selection',()=>{
   const calls=[];const prepare=callback('openModal',{setError:()=>{},selectedBlock:{id:'old',kind:'paragraph'},chapter:{blocks:[]},readerIndex:{sources:new Map([['current',{block:{id:'current',kind:'paragraph'}}]])},setSelectedSource:id=>calls.push(id),setModal:panel=>calls.push(panel)});
   prepare('illustration','current');assert.deepEqual(calls,['current','illustration']);

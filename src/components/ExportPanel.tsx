@@ -35,6 +35,7 @@ export function ExportPanel({book, generation, chapterId, busy, exporting, langu
   return <>
     <DialogHeader title={ru?'Экспорт сохранённого аудио':'Export saved audio'} description={ru?'Используется готовое аудио; речь не создаётся повторно.':'Uses existing audio. Speech is not generated again.'}/>
     <div className="modal-body">
+      {Boolean(generation.pending_replacements)&&<p className="helper" role="note">{ru?'Экспорт сохранит доступное сейчас аудио. Ожидающие замены отрывки будут обновлены позднее.':'The export will contain the audio playable now. Pending replacements will be published later.'}</p>}
       <label>{ru?'Формат':'Format'}<select ref={formatSelect} value={format} onChange={event => setFormat(event.target.value)}>
         <option value="m4b">{ru?'M4B · аудиокнига с главами':'M4B · audiobook with chapters'}</option>
         <option value="mp3">{ru?'MP3 · один аудиофайл':'MP3 · single audio file'}</option>

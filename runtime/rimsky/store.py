@@ -591,6 +591,8 @@ class Store:
                 built.append(tuple(row[key]for key in FIELDS))
             if metadata is not None and (not isinstance(metadata,dict)or set(metadata)-{'status','config','analysis','name','cast','error'}):
                 raise AppError('Invalid current audiobook metadata.')
+            from .current_audiobook import capture_parts
+            capture_parts(self,generation,seen)
             columns=','.join(FIELDS);updates=','.join(f'{key}=excluded.{key}'for key in FIELDS if key not in ('generation_id','id'))
             self.db.executemany(f'INSERT INTO segments({columns}) VALUES({",".join("?"for _ in FIELDS)}) ON CONFLICT(generation_id,id) DO UPDATE SET {updates}',built)
             for key,value in (metadata or {}).items():
@@ -758,6 +760,8 @@ class Store:
             analysis=dict(original['analysis'])if reusable else {}
             if original:
                 takes=self.takes(book_id);targets=[s for s in original['segments']if s['chapter_id']in selected]
+                from .current_audiobook import capture_parts
+                capture_parts(self,original,[s['id']for s in (targets if reusable else original['segments'])])
                 analysis['takes']={**analysis.get('takes',{}),**{s['id']:takes.get(s['id'],0)+1 for s in targets}}
                 self.db.execute('UPDATE generations SET name=?,updated=?,status=?,config=?,analysis=?,cast=?,error=?,resume_on_launch=0 WHERE id=?',
                     (title,now(),'paused',json.dumps(config,ensure_ascii=False),json.dumps(analysis,ensure_ascii=False),
@@ -1019,6 +1023,12 @@ class Store:
             if 'opening' not in config:
                 from .opening import attach_opening
                 config['opening'] = attach_opening(self, self._book_manifest(original['book_id']))
+            from .current_audiobook import capture_parts
+            # An explicit confirmation can approve the unchanged old speaker or
+            # presentation. Apply those verdicts to the old resolution records;
+            # discarded render holds must still block the retained old take.
+            approval=verdicts if confirmed or part_verdicts or presentation_verdicts else None
+            capture_parts(self,original,{sid for *_,sid in edits}|set(performances)|{sid for _,sid in holds}|{sid for _,sid in releases},verdicts=approval)
             self.db.execute('UPDATE generations SET updated=?,status=?,config=?,analysis=?,error=? WHERE id=?',
                 (now(),status,json.dumps(config),json.dumps(analysis,ensure_ascii=False),'',new_id))
             self.db.executemany("UPDATE segments SET spoken=?,speaker=?,delivery=?,status='pending',audio_hash=NULL,duration=0,cues='[]',warning='' WHERE generation_id=? AND id=?",

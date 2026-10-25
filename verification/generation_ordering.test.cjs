@@ -85,6 +85,26 @@ test('stale polling cannot restore removed passages or rewind generation metadat
   assert.equal(acceptGenerationPoll(current, old, true, []), current);
 });
 
+test('retired generation polling adopts its same-book current alias, including a lower revision', async () => {
+  const previous=fixture(50);
+  const current={...fixture(3),id:'current-output',replaces_generation_id:previous.id};
+  const h=harness(previous,async()=>({id:current.id,revision:3,generation:current,full:true,removed_segment_ids:[]}));
+  await h.poll();
+  assert.equal(h.current(),current);
+  h.dispose();
+});
+
+test('an alias response cannot redirect polling to another book or an unrelated output', async () => {
+  for(const bad of [{...fixture(3),id:'foreign',book_id:'another-book',replaces_generation_id:'generation'},
+                   {...fixture(3),id:'unrelated'}]){
+    const previous=fixture(50);
+    const h=harness(previous,async()=>({id:bad.id,revision:3,generation:bad,full:true,removed_segment_ids:[]}));
+    await h.poll();
+    assert.equal(h.current(),previous);
+    h.dispose();
+  }
+});
+
 test('newer delta merges updates, additions and removals while retaining untouched audio', () => {
   const current = fixture(12);
   const next = {...current, revision: 15, status: 'ready', segments: [ready(current.segments[1]),

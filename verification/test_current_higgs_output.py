@@ -276,6 +276,115 @@ class CurrentOutputTests(unittest.TestCase):
         self.assertEqual(files, set(self.data.rglob('*.wav')))
         self.assertEqual([], self.store.published)
 
+    def test_changed_take_clears_old_word_timing_and_preserves_unchanged_part_timing(self):
+        for segment in self.store.value['segments']:
+            segment['cues'] = [{'word': segment['text'], 'start': 0, 'end': segment['duration']}]
+            self.view['parts'][segment['id']]['playback_sha256'] = c._playback_binding(segment)
+        unchanged = copy.deepcopy(self.store.value['segments'][1])
+        result, view = self.publish()
+        self.assertEqual([], result['segments'][0]['cues'])
+        self.assertEqual(unchanged, result['segments'][1])
+        self.assertEqual(c._playback_binding(result['segments'][0]), view['parts']['u0']['playback_sha256'])
+
+    def test_failed_take_publication_keeps_old_word_timing_playable(self):
+        old = [{'word': 'current take', 'start': 0, 'end': .001}]
+        self.store.value['segments'][0]['cues'] = old
+        self.view['parts']['u0']['playback_sha256'] = c._playback_binding(self.store.value['segments'][0])
+        with patch.object(self.store, 'publish_current_parts', side_effect=OSError('before commit')):
+            with self.assertRaises(OSError):self.publish()
+        self.assertEqual(old, self.store.value['segments'][0]['cues'])
+
+
+
+class CurrentValidationCacheTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_json_cache_detects_same_size_tamper_with_restored_mtime(self):
+        import os
+        path = self.root / 'request.json'; path.write_bytes(b'{"text":"one"}')
+        expected = file_digest(path); stamp = path.stat()
+        self.assertEqual({'text': 'one'}, c.document(path, expected))
+        path.write_bytes(b'{"text":"two"}'); os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        with self.assertRaisesRegex(ValueError, 'ancestry changed'):c.document(path, expected)
+        self.assertEqual({'text': 'two'}, c.document(path))
+
+    def test_caller_mutation_cannot_poison_verified_json_cache(self):
+        path = self.root / 'request.json'; c.write(path, {'nested': {'text': 'original'}})
+        expected = file_digest(path)
+        first = c.document(path, expected); first['nested']['text'] = 'poisoned'
+        self.assertEqual('original', c.document(path, expected)['nested']['text'])
+
+    def test_standalone_binary_check_rejects_same_size_tamper_restored_mtime(self):
+        import os
+        path = self.root / 'model.bin'; path.write_bytes(b'original')
+        expected = file_digest(path); stamp = path.stat()
+        c._binary(path, expected)
+        path.write_bytes(b'modified'); os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        with self.assertRaisesRegex(ValueError, 'checksum changed'):c._binary(path, expected)
+
+    def test_binary_hash_reused_only_inside_one_held_session(self):
+        path = self.root / 'model.bin'; path.write_bytes(b'model')
+        expected = file_digest(path); actual = hashlib.file_digest
+        with patch.object(c.hashlib, 'file_digest', wraps=actual) as hashed:
+            with c.binary_validation_session():
+                for _ in range(2000):c._binary(path, expected)
+                handle = c._BINARY_SESSION.get()['files'][str(path.resolve())]['handle']
+                self.assertFalse(handle.closed)
+            self.assertTrue(handle.closed); self.assertEqual(1, hashed.call_count)
+            with c.binary_validation_session():c._binary(path, expected)
+            self.assertEqual(2, hashed.call_count)
+        self.assertIsNone(c._BINARY_SESSION.get())
+
+    def test_binary_handles_close_when_validation_raises(self):
+        path = self.root / 'model.bin'; path.write_bytes(b'model')
+        with self.assertRaisesRegex(RuntimeError, 'injected'):
+            with c.binary_validation_session():
+                c._binary(path, file_digest(path))
+                handle = c._BINARY_SESSION.get()['files'][str(path.resolve())]['handle']
+                raise RuntimeError('injected')
+        self.assertTrue(handle.closed); self.assertIsNone(c._BINARY_SESSION.get())
+        path.write_bytes(b'available after close')
+
+    def test_parallel_validation_sessions_do_not_share_a_handle_or_cached_verdict(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        path = self.root / 'model.bin'; path.write_bytes(b'model')
+        expected = file_digest(path); barrier = Barrier(2)
+        def validate():
+            with c.binary_validation_session():
+                c._binary(path, expected)
+                handle = c._BINARY_SESSION.get()['files'][str(path.resolve())]['handle']
+                barrier.wait(timeout=10)
+                return handle
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(workers.map(lambda _: validate(), range(2)))
+        self.assertIsNot(results[0], results[1])
+        self.assertTrue(all(handle.closed for handle in results))
+        self.assertIsNone(c._BINARY_SESSION.get())
+
+    @unittest.skipIf(__import__('os').name == 'nt', 'Windows denies the tampering write itself')
+    def test_posix_session_detects_edit_with_restored_mtime(self):
+        import os
+        path = self.root / 'model.bin'; path.write_bytes(b'model')
+        stamp = path.stat(); expected = file_digest(path)
+        with self.assertRaisesRegex(ValueError, 'changed during validation'):
+            with c.binary_validation_session():
+                c._binary(path, expected)
+                path.write_bytes(b'other'); os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                c._binary(path, expected)
+
+    @unittest.skipUnless(__import__('os').name == 'nt', 'Windows sharing contract')
+    def test_pinned_binary_denies_writes_and_delete_until_session_exits(self):
+        path = self.root / 'model.bin'; path.write_bytes(b'model')
+        with c.binary_validation_session():
+            c._binary(path, file_digest(path))
+            with self.assertRaises(OSError):path.write_bytes(b'other')
+            with self.assertRaises(OSError):path.unlink()
+        self.assertEqual(b'model', path.read_bytes())
+        path.unlink()
+
 
 if __name__ == '__main__':
     unittest.main()

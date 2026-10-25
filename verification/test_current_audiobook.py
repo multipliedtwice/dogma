@@ -86,6 +86,65 @@ class CurrentAudiobook(unittest.TestCase):
             shown=self.store.playback_generation(self.g['id'])['segments']
             self.assertEqual(any(s['id']==old['id']for s in shown),index==0)
         self.assertTrue(all(any(s['id']==part['id']for s in shown)for part in children))
+    def test_recorrecting_hidden_split_child_never_creates_a_second_fallback(self):
+        old=self.old;mid=(old['start']+old['end'])//2
+        self.store.execute('DELETE FROM segments WHERE generation_id=? AND id=?',(self.g['id'],old['id']))
+        child={**old,'id':old['id']+'-child','end':mid,'text':old['text'][:mid-old['start']]}
+        child['spoken']=child['text'];child=self.replacement(child)
+        self.store.publish_current_parts(self.g['id'],[child])
+        self.store.execute("UPDATE segments SET status='pending',audio_hash=NULL,duration=0 WHERE generation_id=? AND id=?",(self.g['id'],child['id']))
+        fallback=self.store.rows('SELECT segment_id FROM audiobook_replacements WHERE generation_id=?',(self.g['id'],))
+        self.assertEqual([old['id']],[row['segment_id']for row in fallback])
+        shown=[s for s in self.store.playback_generation(self.g['id'])['segments']if s['source_id']==old['source_id']]
+        self.assertEqual([old['id']],[row['id']for row in shown])
+    def test_capture_parts_freezes_old_export_hold_without_snapshotting_hidden_child(self):
+        from rimsky.current_audiobook import capture_parts,previous_parts
+        old=self.old;analysis={'speaker_resolution':[{'source_id':old['source_id'],'start':old['start'],'end':old['end'],'status':'review','triggers':['backend_limit']}]}
+        with self.store.transaction():capture_parts(self.store,{**self.g,'analysis':analysis},[old['id']])
+        self.assertTrue(previous_parts(self.store,self.g['id'])[0]['export_blocked'])
+        # A later desired analysis cannot change the captured old eligibility.
+        with self.store.transaction():capture_parts(self.store,self.g,[old['id']])
+        self.assertTrue(previous_parts(self.store,self.g['id'])[0]['export_blocked'])
+        self.store.execute('DELETE FROM audiobook_replacements WHERE generation_id=?',(self.g['id'],))
+        with self.store.transaction():capture_parts(self.store,self.g,[old['id']])
+        self.assertFalse(previous_parts(self.store,self.g['id'])[0]['export_blocked'])
+    def test_nested_historical_fallbacks_choose_whole_and_partial_overlap_holds(self):
+        old=self.old;span=old['end']-old['start'];mid=old['start']+span//2
+        def part(sid,start,end):
+            return {**old,'id':sid,'start':start,'end':end,'text':old['text'][start-old['start']:end-old['start']]}
+        def replace_fallbacks(rows):
+            self.store.execute('DELETE FROM audiobook_replacements WHERE generation_id=?',(self.g['id'],))
+            for row in rows:self.store.execute('INSERT INTO audiobook_replacements VALUES(?,?,?,?)',(self.g['id'],row['id'],json.dumps(row),'now'))
+        self.pending()
+        replace_fallbacks([part('nested',old['start'],mid),{**old,'id':'whole'}])
+        shown=[row for row in self.store.playback_generation(self.g['id'])['segments']if row['source_id']==old['source_id']]
+        self.assertEqual(['whole'],[row['id']for row in shown])
+        replace_fallbacks([part('left',old['start'],mid+2),part('right',mid,old['end'])])
+        with self.assertRaisesRegex(AppError,'overlap'):self.store.playback_generation(self.g['id'])
+        replace_fallbacks([part('left',old['start'],mid),part('right',mid,old['end'])])
+        shown=[row for row in self.store.playback_generation(self.g['id'])['segments']if row['source_id']==old['source_id']]
+        self.assertEqual(['left','right'],[row['id']for row in shown])
+    def test_one_ready_whole_replaces_disjoint_fallback_children_together(self):
+        old=self.old;mid=(old['start']+old['end'])//2
+        self.store.execute('DELETE FROM segments WHERE generation_id=? AND id=?',(self.g['id'],old['id']))
+        self.store.execute('DELETE FROM audiobook_replacements WHERE generation_id=?',(self.g['id'],))
+        for index,(start,end)in enumerate(((old['start'],mid),(mid,old['end']))):
+            child={**old,'id':old['id']+'-'+str(index),'start':start,'end':end,'text':old['text'][start-old['start']:end-old['start']]}
+            self.store.execute('INSERT INTO audiobook_replacements VALUES(?,?,?,?)',(self.g['id'],child['id'],json.dumps(child),'now'))
+        self.store.publish_current_parts(self.g['id'],[self.replacement()])
+        self.assertFalse(self.store.rows('SELECT * FROM audiobook_replacements WHERE generation_id=?',(self.g['id'],)))
+    def test_punctuation_fallback_requires_a_valid_ready_replacement(self):
+        from rimsky.current_audiobook import replacement_state
+        from types import SimpleNamespace
+        old={**self.old,'source_id':'punctuation','start':0,'end':3,'text':'...'}
+        fixture=SimpleNamespace(rows=lambda *args:[{'payload':json.dumps(old)}],
+            _generation_metadata=lambda gid:{'book_id':'book'},
+            _book_manifest=lambda bid:{'chapters':[{'blocks':[{'id':'punctuation','text':'...'}]}]},
+            audio_path=self.store.audio_path)
+        candidate={**old,'status':'pending','audio_hash':None}
+        self.assertEqual(([old],[]),replacement_state(fixture,'generation',[candidate]))
+        ready={**old,**{key:value for key,value in self.replacement().items()if key in ('status','audio_hash','duration')}}
+        self.assertEqual(([],[old]),replacement_state(fixture,'generation',[ready]))
     def test_fallback_survives_gc_then_retired_hash_does_not_pin_old_wav(self):
         self.pending();path=self.store.audio_path(self.old['audio_hash']);self.store.collect_audio();self.assertTrue(path.exists())
         self.store.publish_current_parts(self.g['id'],[self.replacement()]);self.store.collect_audio();self.assertFalse(path.exists())
@@ -118,6 +177,54 @@ class CurrentAudiobook(unittest.TestCase):
         snapshot=json.loads(self.store.rows('SELECT payload FROM export_snapshots WHERE export_id=?',(result['id'],))[0]['payload'])
         old=next(s for s in snapshot['parts']if s['id']==self.old['id']);self.assertEqual(old['audio_hash'],self.old['audio_hash'])
         self.assertFalse(self.store.rows('SELECT * FROM audio_leases'))
+    def test_pending_retake_does_not_erase_the_old_audio_review_hold(self):
+        for trigger in ('identity_conflict','render_degraded'):
+            with self.subTest(trigger=trigger):
+                original=self.store.generation(self.g['id'])
+                analysis={**original['analysis'],'speaker_resolution':[{
+                    'target_id':self.old['id'],'source_id':self.old['source_id'],
+                    'start':self.old['start'],'end':self.old['end'],'speaker':self.old['speaker'],
+                    'triggers':[trigger],'status':'review','tier':'backend'}]}
+                self.store.execute('UPDATE generations SET analysis=? WHERE id=?',(json.dumps(analysis),self.g['id']))
+                with self.assertRaises(AppError):build_export(self.store,self.g['id'],'vtt',None,self.root)
+                self.store.revise(self.g['id'],[{'id':self.old['id'],'retake':True}])
+                old=next(s for s in self.store.playback_generation(self.g['id'])['segments']if s['id']==self.old['id'])
+                self.assertTrue(old['export_blocked'])
+                with self.assertRaises(AppError)as error:build_export(self.store,self.g['id'],'vtt',None,self.root)
+                self.assertEqual('held_segments',error.exception.code)
+                self.store.publish_current_parts(self.g['id'],[self.replacement()],metadata={'analysis':original['analysis']})
+    def test_explicit_approval_releases_identity_but_not_a_render_hold_on_old_audio(self):
+        for render_hold in (False,True):
+            with self.subTest(render_hold=render_hold):
+                original=self.store.generation(self.g['id'])
+                record={'target_id':self.old['id'],'source_id':self.old['source_id'],
+                    'start':self.old['start'],'end':self.old['end'],'speaker':self.old['speaker'],
+                    'triggers':['identity_conflict'],'status':'review','tier':'backend'}
+                records=[record,*([{**record,'triggers':['render_degraded']}]if render_hold else [])]
+                self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
+                    (json.dumps({**original['analysis'],'speaker_resolution':records}),self.g['id']))
+                self.store.revise(self.g['id'],[{'id':self.old['id'],'confirm_speaker':True}])
+                old=next(s for s in self.store.playback_generation(self.g['id'])['segments']if s['id']==self.old['id'])
+                if render_hold:
+                    with self.assertRaises(AppError):build_export(self.store,self.g['id'],'vtt',None,self.root)
+                else:
+                    self.assertFalse(old['export_blocked'])
+                    self.assertTrue(build_export(self.store,self.g['id'],'vtt',None,self.root)['id'])
+                self.store.publish_current_parts(self.g['id'],[self.replacement()],metadata={'analysis':original['analysis']})
+    def test_legacy_fallback_without_export_flag_is_upgraded_before_old_hold_is_removed(self):
+        self.pending()
+        self.store.execute("UPDATE audiobook_replacements SET payload=json_remove(payload,'$.export_blocked') WHERE generation_id=?",(self.g['id'],))
+        original=self.store.generation(self.g['id'])
+        record={'target_id':self.old['id'],'source_id':self.old['source_id'],
+            'start':self.old['start'],'end':self.old['end'],'speaker':self.old['speaker'],
+            'triggers':['render_degraded'],'status':'review','tier':'backend'}
+        self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
+            (json.dumps({**original['analysis'],'speaker_resolution':[record]}),self.g['id']))
+        self.store.revise(self.g['id'],[{'id':self.old['id'],'retake':True}])
+        old=next(s for s in self.store.playback_generation(self.g['id'])['segments']if s['id']==self.old['id'])
+        self.assertIs(old['export_blocked'],True)
+        with self.assertRaises(AppError)as error:build_export(self.store,self.g['id'],'vtt',None,self.root)
+        self.assertEqual('held_segments',error.exception.code)
     def test_export_keeps_its_captured_audio_during_a_concurrent_part_commit_and_gc(self):
         from rimsky import export
         self.pending();replacement=self.replacement();original=export.capture_audio;replaced=[]

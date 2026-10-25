@@ -34,8 +34,16 @@ def _origin(report):
 
 def _debug_pending(folder):
     ready=folder/'ready.json'
+    compact=(folder/'current-output.json').exists()
+    if compact and not ready.is_file():
+        raise AppError('The current audiobook controls are missing. Repair its publication before applying a correction.')
     if not ready.is_file():return False
-    document=json.loads(ready.read_text('utf8'))
+    try:document=json.loads(ready.read_text('utf8'))
+    except (OSError,ValueError)as error:
+        if compact:raise AppError('The current audiobook controls are invalid. Repair its publication before applying a correction.')from error
+        raise
+    if compact and (not isinstance(document,dict)or document.get('policy')!='current-book-output-v1'):
+        raise AppError('The current audiobook controls have an incompatible policy. A correction cannot use the legacy renderer.')
     if document.get('policy')=='current-book-output-v1':
         manifest=json.loads((folder/'current-output.json').read_text('utf8'))
         if manifest.get('sha256')!=digest({key:value for key,value in manifest.items()if key!='sha256'}):
@@ -82,6 +90,11 @@ def _inherit_development_barrier(folder,item):
 def _external_folder(store, generation):
     preview = generation.get('analysis', {}).get('external_preview') or {}
     name = preview.get('generation')
+    compact=store.root.parent/('current-book-'+generation['book_id'])
+    if (compact/'current-output.json').exists():
+        if generation.get('config',{}).get('engine')!=ENGINE or name!=compact.name:
+            raise AppError('The current audiobook publication binding is inconsistent. A correction cannot use another renderer.')
+        _debug_pending(compact)
     if generation.get('config', {}).get('engine') != ENGINE or not isinstance(name, str) or not name:
         return None
     folder = (store.root.parent / name).resolve()
@@ -398,12 +411,28 @@ def _queue_status(rows,runtime_jobs):
             **({'error':errors[0]} if errors else {})}
 
 
+def record_enqueue_failure(store, report, error):
+    """Persist the hold even when broken publication controls cannot host a queue."""
+    identifier='enqueue-failure-'+digest({'report_id':report['id'],'book_id':report['book_id']})[:24]
+    generation_id=store.current_generation_id(report['book_id']) or report['generation_id']
+    reason=str(error)[:4000]
+    stamp=now()
+    with store.lock,store.transaction():
+        store.db.execute('''INSERT OR IGNORE INTO listener_correction_jobs
+            (id,report_id,book_id,generation_id,segment_ids,status,created,updated,error)
+            VALUES(?,?,?,?,?,'held',?,?,?)''',
+            (identifier,report['id'],report['book_id'],generation_id,'[]',stamp,stamp,reason))
+    return {'id':identifier,'status':'held','targets':0,'queued':0,'error':reason,
+            'kind':'enqueue_failure','durable':True}
+
+
 def queue_status_index(store,book_id):
     """Read each queue once; never load whole generation segment arrays to poll notes."""
-    external={};jobs={}
+    external={};jobs={};enqueue_failures={}
     for job in store.rows('SELECT * FROM listener_correction_jobs WHERE book_id=?',(book_id,)):
-        jobs.setdefault(job['report_id'],[]).append(job)
-    for row in store.rows('SELECT id,config,analysis FROM generations WHERE book_id=?',(book_id,)):
+        target=enqueue_failures if job['id'].startswith('enqueue-failure-') else jobs
+        target.setdefault(job['report_id'],[]).append(job)
+    for row in store.rows('SELECT id,book_id,config,analysis FROM generations WHERE book_id=?',(book_id,)):
         generation={**row,'config':json.loads(row['config']),'analysis':json.loads(row['analysis'])}
         if generation['config'].get('engine')!=ENGINE:continue
         with contextlib.suppress(AppError,OSError,ValueError):
@@ -412,8 +441,11 @@ def queue_status_index(store,book_id):
             for path in (folder/'listener-stress-queue').glob('*.json'):
                 item=json.loads(path.read_text('utf8'));identifier=(item.get('report') or {}).get('id')
                 if identifier:external.setdefault(identifier,[]).append(item)
-    return {identifier:_queue_status(external.get(identifier,[]),jobs.get(identifier,[]))
-        for identifier in external.keys()|jobs.keys()}
+    # A real accepted queue owns retry/delivery status. Keep the failed enqueue
+    # receipt as history, but never let it mask subsequent successful work.
+    return {identifier:_queue_status(external.get(identifier,[]),jobs.get(identifier,[]) or
+                (enqueue_failures.get(identifier,[]) if not external.get(identifier) else []))
+        for identifier in external.keys()|jobs.keys()|enqueue_failures.keys()}
 
 
 def report_queue_status(store, report, index=None):

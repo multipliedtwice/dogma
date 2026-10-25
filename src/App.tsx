@@ -295,7 +295,8 @@ export default function App(){
     let live=true;const gid=generation.id;let revision:number|undefined=generation.revision;let timer:ReturnType<typeof setTimeout>;
     const poll=async()=>{const epoch=selectionEpoch.current;try{
       const result=await api<{id:string;revision:number;generation:Generation|null;full:boolean;removed_segment_ids:string[]}>('generation_poll',{id:gid,revision});
-      if(live&&epoch===selectionEpoch.current&&result.id===gid){revision=result.revision;const next=result.generation;if(next)setGeneration(current=>acceptGenerationPoll(current,next,result.full,result.removed_segment_ids));}
+      const alias=result.generation?.replaces_generation_id===gid&&result.generation.id===result.id;
+      if(live&&epoch===selectionEpoch.current&&(result.id===gid||alias)){revision=result.revision;const next=result.generation;if(next)setGeneration(current=>acceptGenerationPoll(current,next,result.full,result.removed_segment_ids));}
       if(live)pollResult('generation');
     }catch(reason){if(live)pollResult('generation',t('generationRefreshFailed')+': '+errorText(reason));}finally{if(live)timer=setTimeout(poll,active(generation.status)?3000:6500);}};
     timer=setTimeout(poll,active(generation.status)?3000:6500);

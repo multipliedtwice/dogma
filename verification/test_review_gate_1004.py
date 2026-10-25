@@ -83,6 +83,8 @@ class Gate(unittest.TestCase):
         return self.store.generation(generation['id'])
 
     def reviewed(self, engine=None, pack=None):
+        if self.store.generation_list(self.book['id']):
+            self.book=self.store.import_data(FB2.replace(b'Verification book',('Independent review '+str(len(self.store.library()))).encode()),'independent.fb2')
         engine = engine or Recording()
         jobs = self.jobs(engine)
         done = self.finish(jobs, self.generation(pack))
@@ -313,7 +315,8 @@ class Gate(unittest.TestCase):
         entry = next(item for item in revision['analysis']['casting_inputs'] if (item['source_id'], item['start']) == (segment['source_id'], segment['start']))
         self.assertEqual('unknown', entry['speaker'])
         self.assertIn('unresolved_speech', {notice['code'] for notice in revision['analysis']['casting_notices']})
-        self.assertNotIn('unresolved_speech', {notice['code'] for notice in self.store.generation(ready['id'])['analysis']['casting_notices']})
+        self.assertNotIn('unresolved_speech', {notice['code'] for notice in ready['analysis']['casting_notices']})
+        self.assertEqual(ready['id'],revision['id'])
 
     def test_retake_renders_a_new_take_of_unchanged_text(self):
         self.store.update_settings({'cast_review': False})
@@ -339,13 +342,10 @@ class Gate(unittest.TestCase):
     def test_active_is_cleared_before_the_terminal_status_is_published(self):
         jobs = self.jobs(Recording())
         observed = []
-        real = self.store.status
-        def spy(gid, status, error=''):
-            if status in ('ready', 'failed', 'paused', 'review'):
-                observed.append((status, jobs.active))
-            return real(gid, status, error)
-        with patch.object(self.store, 'status', side_effect=spy):
-            self.finish(jobs, self.generation())
+        self.store.db.create_function('observe_terminal_active',1,lambda status:observed.append((status,jobs.active)))
+        self.store.execute("""CREATE TRIGGER observe_terminal_active AFTER UPDATE OF status ON generations
+            WHEN NEW.status IN ('ready','failed','paused','review') BEGIN SELECT observe_terminal_active(NEW.status); END""")
+        self.finish(jobs, self.generation())
         self.assertEqual([('review', None)], observed)
 
 

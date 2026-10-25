@@ -286,7 +286,12 @@ class SecondRecheck(unittest.TestCase):
         app = Application(self.root/'deletion-library', self.root)
         try:
             book = app.store.import_data(FB2, 'book.fb2')
-            histories = [app.store.create_generation(book['id'], {'device':'cpu'}) for _ in range(2)]
+            first=app.store.create_generation(book['id'], {'device':'cpu'})
+            # A pre-migration history fixture; normal generation now reuses ID.
+            app.store.execute('INSERT INTO generations(id,book_id,name,created,updated,status,config,cast,analysis) SELECT ?,book_id,name,created,updated,status,config,"cast",analysis FROM generations WHERE id=?',('legacy-output',first['id']))
+            columns='id,ordinal,chapter_id,source_id,start,end,text,spoken,speaker,delivery,status,audio_hash,duration,cues,warning,performance'
+            app.store.execute(f'INSERT INTO segments(generation_id,{columns}) SELECT ?,{columns} FROM segments WHERE generation_id=?',('legacy-output',first['id']))
+            histories=[first,app.store.generation('legacy-output')]
             exports = []
             for generation in histories:
                 complete_audio(app.store, generation)

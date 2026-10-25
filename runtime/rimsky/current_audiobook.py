@@ -42,6 +42,11 @@ def install(db):
         db.execute(f'''CREATE TRIGGER audiobook_keep_part_{operation.lower()}
             BEFORE {operation} ON segments WHEN OLD.status='ready' AND OLD.audio_hash IS NOT NULL
             AND ({condition}) AND EXISTS(SELECT 1 FROM generations WHERE id=OLD.generation_id)
+            AND NOT EXISTS(SELECT 1 FROM audiobook_replacements AS prior
+                WHERE prior.generation_id=OLD.generation_id
+                AND json_extract(prior.payload,'$.source_id')=OLD.source_id
+                AND json_extract(prior.payload,'$.start')<OLD.end
+                AND OLD.start<json_extract(prior.payload,'$.end'))
             BEGIN INSERT OR IGNORE INTO audiobook_replacements(generation_id,segment_id,payload,created)
             VALUES(OLD.generation_id,OLD.id,{payload},strftime('%Y-%m-%dT%H:%M:%fZ','now')); END''')
 
@@ -54,7 +59,30 @@ def decoded(payload):
 
 
 def previous_parts(store,gid):
-    return [decoded(row['payload'])for row in store.rows('SELECT payload FROM audiobook_replacements WHERE generation_id=?',(gid,))]
+    return [decoded(row['payload'])for row in store.rows('SELECT payload FROM audiobook_replacements WHERE generation_id=? ORDER BY created,rowid',(gid,))]
+
+
+def capture_parts(store,generation,segment_ids,*,verdicts=None):
+    """Freeze playable parts and their old export eligibility before edits.
+
+    Transaction-neutral: the caller owns the atomic desired-input mutation.
+    Hidden ready children are absent from playable(), so never become fallback.
+    """
+    from .store import speaker_review_holds
+    ids=set(segment_ids);gid=generation['id']
+    shown=playable(store,gid,generation['segments'])
+    analysis=generation.get('analysis')or{}
+    held=speaker_review_holds(shown,analysis.get('speaker_resolution',[]),
+        analysis.get('speaker_verdicts')if verdicts is None else verdicts)[1]
+    for part in shown:
+        if part['id']not in ids or part['status']!='ready'or not part.get('audio_hash'):continue
+        payload={key:part[key]for key in FIELDS}
+        payload['export_blocked']=part.get('export_blocked',part['id']in held)
+        store.db.execute('''INSERT INTO audiobook_replacements VALUES(?,?,?,?)
+            ON CONFLICT(generation_id,segment_id) DO UPDATE SET
+                payload=json_set(audiobook_replacements.payload,'$.export_blocked',json(?))
+            WHERE json_type(audiobook_replacements.payload,'$.export_blocked') IS NULL''',
+            (gid,part['id'],json.dumps(payload,ensure_ascii=False),now(),json.dumps(payload['export_blocked'])))
 
 
 def replacement_state(store,gid,working):
@@ -69,7 +97,7 @@ def replacement_state(store,gid,working):
     for old in previous:
         candidates=[row for row in by_source.get(old['source_id'],[])
                     if row['start']<old['end'] and old['start']<row['end']]
-        flags=bytearray(old['end']-old['start'])
+        flags=bytearray(old['end']-old['start']);validated=False
         for row in candidates:
             if row['status']!='ready' or not row['audio_hash']:continue
             if (blocks.get(row['source_id'],'')[row['start']:row['end']]!=row['text']or
@@ -79,8 +107,9 @@ def replacement_state(store,gid,working):
                 actual=checked_audio(str(audio),audio.stat().st_mtime_ns,audio.stat().st_size,metadata.stat().st_mtime_ns)
                 if abs(row['duration']-actual['duration'])>1/actual['sample_rate']:continue
             except (AppError,OSError):continue
+            validated=True
             for i in range(max(old['start'],row['start']),min(old['end'],row['end'])):flags[i-old['start']]=1
-        covered=bool(candidates)and all(flags[i]or ch.isspace()or unicodedata.category(ch).startswith('P')for i,ch in enumerate(old['text']))
+        covered=validated and all(flags[i]or ch.isspace()or unicodedata.category(ch).startswith('P')for i,ch in enumerate(old['text']))
         (complete if covered else pending).append(old)
     return pending,complete
 
@@ -94,6 +123,17 @@ def checked_audio(path,mtime,size,metadata_mtime):
 
 def playable(store,gid,working):
     pending,_=replacement_state(store,gid,working)
+    # A replacement child hidden by an older whole part was never current.
+    # Historical nested snapshots can be ignored, but overlapping whole WAVs
+    # which cannot form a source partition must never be played twice or cut.
+    selected=[]
+    for old in sorted(pending,key=lambda row:(row['source_id'],row['start'],-row['end'])):
+        previous=next((row for row in reversed(selected)if row['source_id']==old['source_id']),None)
+        if previous and old['start']<previous['end']:
+            if old['end']<=previous['end']:continue
+            raise AppError('Saved audiobook fallback parts overlap. Repair their source coverage before playback.')
+        selected.append(old)
+    pending=selected
     rows=[row for row in working if not any(old['source_id']==row['source_id']and
           old['start']<row['end']and row['start']<old['end']for old in pending)]
     for old in pending:

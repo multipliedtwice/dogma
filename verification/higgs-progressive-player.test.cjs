@@ -13,6 +13,7 @@ function fixture(){
  const select={value:'',options:[],replaceChildren(){this.options=[];},append(option){this.options.push(option);},addEventListener(){}};
  const nodes={'#player':audio,'#chapter':select,'#download':{},'#status':{},'#checks':{},
   '#music-enabled':{checked:true},'#music-volume':{value:'1'},'#music-credit':{}};
+ for(const id of ['reader-text','reader-status','report-dialog','stress-options','report-status','report-comment','report-other','report-title'])nodes['#'+id]={replaceChildren(){},querySelectorAll:()=>[]};
  const music=[];
  class MusicAudio {constructor(src){this.src=src;this.paused=true;this.currentTime=0;music.push(this);}play(){this.paused=false;return Promise.resolve();}pause(){this.paused=true;}}
  const context=vm.createContext({document:{activeElement:null,querySelector:key=>nodes[key],createElement:()=>({})},

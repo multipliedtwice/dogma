@@ -443,7 +443,7 @@ test('navigating to the hidden first heading focuses a named target and marks th
   const chapter = {id: 'chapter', title: 'Harbor morning', blocks: [heading, paragraph]};
   const readerIndex = {sources: new Map([[heading.id, {chapter, block: heading}], [paragraph.id, {chapter, block: paragraph}]])};
   let selected = '', navigation = null, mode = '';
-  const navigate = variable('navigateSource', {useCallback: fn => fn, book: {id: 'book'}, readerIndex, flushReading: {current: () => {}}, manualReading: {current: false},
+  const navigate = variable('navigateSource', {useCallback: fn => fn, book: {id: 'book'}, readerIndex, chapterStartIntent:{current:''}, flushReading: {current: () => {}}, manualReading: {current: false},
     setBrowsing: () => {}, setMode: value => { mode = value; }, setChapterId: () => {}, setSelectedSource: value => { selected = value; },
     setNavigation: value => { navigation = value; }, storeReading: () => {}});
   navigate(heading.id);

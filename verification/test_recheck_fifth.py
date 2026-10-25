@@ -58,11 +58,12 @@ class FifthRecheck(unittest.TestCase):
     def assert_frozen_export(self, *, during_capture=False):
         generation = self.generation()
         audio = self.store.root / 'audio' / f'{generation["segments"][0]["audio_hash"]}.wav'
-        expected = sum(segment['duration'] for segment in generation['segments'])
+        from rimsky.opening import select_opening
+        expected = sum(segment['duration'] for segment in generation['segments']) + select_opening(generation)['duration']
         replaced = []
         original = os.link if during_capture else concat_list
         def race(*args):
-            if not replaced:
+            if not replaced and (not during_capture or Path(args[0])==audio):
                 replaced.append(True)
                 self.replace_audio(audio)
             return original(*args)

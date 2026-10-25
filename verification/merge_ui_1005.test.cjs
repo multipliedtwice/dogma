@@ -115,7 +115,7 @@ test('confirm speaker sends an explicit verdict only for a held segment with a k
     revisionName: () => 'Narration (corrected)', api: async (operation, body) => { sent.push([operation, body]); return {name: 'Narration (corrected)'}; },
     setGeneration: () => {}, closeModal: () => {}, refreshBook: async () => {}, setNotice: () => {}});
   return reviseSegment('confirmingSpeaker', [review.confirmSpeakerRequest(known, {...known})]).then(() => {
-    assert.deepEqual(sent, [['revise', {id: 'g', name: 'Narration (corrected)', changes: [{id: 's1', confirm_speaker: true}]}]]);
+    assert.deepEqual(sent, [['revise', {id: 'g', name: 'Narration', changes: [{id: 's1', confirm_speaker: true}]}]]);
   });
 });
 
@@ -228,14 +228,14 @@ test('the correction modal offers per-part speaker selects and Confirm part only
   assert.deepEqual(confirms.map(node => node.props.disabled), [false, false, true]);
   assert.match(text(nodes), /Confirm speaker accepts only the parts spoken by the shown speaker\. Other parts stay held/);
   assert.equal(button(nodes, 'Confirm speaker').props.disabled, false);
-  assert.equal(button(nodes, 'Save corrected version').props.disabled, true);
+  assert.equal(button(nodes, 'Save correction').props.disabled, true);
   const edited = render(review.withPartSpeaker(mixedHeld, 0, 'narrator'));
   assert.deepEqual(edited.filter(node => node.tag === 'button' && /^Confirm part \d$/.test(node.props['aria-label'])).map(node => node.props.disabled), [true, true, true]);
   assert.equal(button(edited, 'Confirm speaker').props.disabled, true);
-  assert.equal(button(edited, 'Save corrected version').props.disabled, false);
+  assert.equal(button(edited, 'Save correction').props.disabled, false);
   assert.doesNotMatch(text(edited), /Change the spoken text, speaker or delivery/);
   const both = render({...review.withPartSpeaker(mixedHeld, 0, 'narrator'), delivery: 'soft'});
-  assert.equal(button(both, 'Save corrected version').props.disabled, true);
+  assert.equal(button(both, 'Save correction').props.disabled, true);
   assert.match(text(both), /Part speakers and whole-passage changes are saved separately\./);
   const notHeld = render({...mixedHeld, status: 'ready'}, {segments: [{...mixedHeld, status: 'ready'}], analysis: {complete: true}});
   assert.ok(!notHeld.some(node => node.tag === 'select' && /^Speaker for part/.test(node.props['aria-label'] || '')), 'parts stay read-only when nothing is held');

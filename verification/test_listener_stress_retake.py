@@ -34,6 +34,22 @@ class FakeStore:
 
 
 class ListenerStressRetakeTest(unittest.TestCase):
+    def test_compact_output_with_missing_or_wrong_controls_never_falls_back(self):
+        from rimsky.listener_stress_retake import _debug_pending,_external_folder,ENGINE
+        with tempfile.TemporaryDirectory()as temporary:
+            data=Path(temporary)/'library';data.mkdir();folder=data.parent/'current-book-book';folder.mkdir()
+            write_json(folder/'current-output.json',{'policy':'current-book-output-v1'})
+            for ready in (None,{}, {'policy':'development-private-one-shot'},'malformed'):
+                path=folder/'ready.json';path.unlink(missing_ok=True)
+                if ready is not None:
+                    if ready=='malformed':path.write_text('{','utf8')
+                    else:write_json(path,ready)
+                with self.subTest(ready=ready),self.assertRaises(AppError):_debug_pending(folder)
+            store=types.SimpleNamespace(root=data)
+            with self.assertRaises(AppError):
+                _external_folder(store,{'book_id':'book','config':{},'analysis':{}})
+            with self.assertRaises(AppError):
+                _external_folder(store,{'book_id':'book','config':{'engine':ENGINE},'analysis':{'external_preview':{'generation':'old-output'}}})
     def test_queue_origin_preserves_explicit_heard_identity_without_rehashing_legacy_fields(self):
         from rimsky.listener_stress_retake import _origin
         old={'id':'report','audio_hash':'a'*64}
@@ -131,6 +147,7 @@ class ListenerStressRetakeTest(unittest.TestCase):
                 json.dumps({'generation': external.name}), encoding='utf-8')
             generation = {
                 'id': 'g' * 24,
+                'book_id':'b'*32,
                 'config': {'engine': 'higgs_audio_tts_q8_external_preview'},
                 'analysis': {'external_preview': {'generation': external.name}},
                 'segments': [{'id': 'c0001-u0001', 'audio_hash': 'a' * 64,

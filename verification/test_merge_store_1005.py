@@ -151,6 +151,10 @@ class Revisions(unittest.TestCase):
         self.book = self.store.import_data(FB2, 'fixture.fb2')
 
     def generation(self, speakers=None, items=(), performance=None, policy='hold_flagged_segments', approved=None, split=False):
+        # Calls in this factory are independent review scenarios, not requests
+        # to regenerate the same current audiobook.
+        if self.store.generation_list(self.book['id']):
+            self.book=self.store.import_data(FB2.replace(b'Merge book',('Merge fixture '+str(len(self.store.library()))).encode()),'independent.fb2')
         generation = self.store.create_generation(self.book['id'], {'pack_path': '', 'pack_fingerprint': 'x', 'pack_name': 'p', 'device': 'cpu',
                                                                     'align_words': False, 'unresolved_policy': policy})
         gid = generation['id']
@@ -282,7 +286,8 @@ class Revisions(unittest.TestCase):
         revised = self.store.revise(original['id'], [{'id': sid, 'speaker': 'masha'}])
         changed = self.by_id(revised)[sid]['performance']
         self.assertEqual(['narrator', 'masha', 'narrator'], [part['speaker'] for part in changed['analysis_parts']])
-        self.assertEqual(performance, self.by_id(self.store.generation(original['id']))[sid]['performance'])
+        self.assertEqual(performance, self.by_id(original)[sid]['performance'])
+        self.assertEqual(original['id'],revised['id'])
         untouched = self.by_id(revised)['c0001-p00003-0-34']
         self.assertEqual({}, untouched['performance'])
 
@@ -313,7 +318,8 @@ class Revisions(unittest.TestCase):
         self.assertEqual(('review', PRESENTATION_NOTICE), (segments[ids[5]]['status'], segments[ids[5]]['warning']))
         self.assertEqual(['resolved', 'review'], [item['status'] for item in revised['analysis']['speaker_resolution']])
         self.assertEqual({'presentation_review': 1, 'neighbour': 2}, revised['analysis']['speaker_review_holds']['reasons'])
-        partial = self.store.revise(original['id'], [{'id': ids[1], 'confirm_speaker': True}])
+        independent=self.generation(speakers,[lambda s:resolution(s[1]),lambda s:resolution(s[5],'presentation_review')],policy='render_with_warning')
+        partial = self.store.revise(independent['id'], [{'id': ids[1], 'confirm_speaker': True}])
         self.assertEqual(['resolved', 'review'], [item['status'] for item in partial['analysis']['speaker_resolution']])
         self.assertEqual('review', self.by_id(partial)[ids[5]]['status'])
 
@@ -383,7 +389,8 @@ class PartVerdicts(unittest.TestCase):
         self.assertEqual(('ivan', 'pending', None), (segment['speaker'], segment['status'], segment['audio_hash']))
         with self.assertRaisesRegex(AppError, 'not both at once'):
             self.store.revise(original['id'], [{'id': sid, 'part': 1, 'confirm_speaker': True}, {'id': sid, 'confirm_speaker': True}])
-        unknown = self.store.revise(original['id'], [{'id': sid, 'part': 1, 'speaker': 'unknown'}, {'id': sid, 'part': 2, 'confirm_speaker': True}])
+        independent,sid=self.mixed()
+        unknown = self.store.revise(independent['id'], [{'id': sid, 'part': 1, 'speaker': 'unknown'}, {'id': sid, 'part': 2, 'confirm_speaker': True}])
         segment = self.by_id(unknown)[sid]
         self.assertEqual(('unknown', 'review'), (segment['speaker'], segment['status']))
         part = segment['performance']['analysis_parts'][1]
@@ -416,6 +423,9 @@ class PartVerdicts(unittest.TestCase):
         self.assertNotIn(f'{sid}@presentation', corrected['analysis']['speaker_verdicts'])
         self.assertEqual(['resolved', 'review'], [item['status'] for item in corrected['analysis']['speaker_resolution']])
         self.assertEqual(('review', PRESENTATION_NOTICE), (self.by_id(corrected)[sid]['status'], self.by_id(corrected)[sid]['warning']))
+        independent=self.generation({sid:'ivan'},[lambda s:resolution(s[1]),lambda s:resolution(s[1],'presentation_review')],
+                                    {sid:{'presentation_binding':[binding(None,0,43)]}})
+        both=self.store.revise(independent['id'],[{'id':sid,'confirm_presentation':True}])
         with self.assertRaises(AppError) as stale:
             self.store.revise(both['id'], [{'id': sid, 'speaker': 'masha'}, {'id': sid, 'confirm_presentation': True}])
         self.assertEqual('stale_presentation', stale.exception.code)
@@ -461,7 +471,11 @@ class Recovery(unittest.TestCase):
             store = Store(root)
             book = store.import_data(FB2, 'fixture.fb2')
             plain = store.create_generation(book['id'], {'pack_path': ''})
-            external = store.create_generation(book['id'], {'pack_path': '', 'engine': 'higgs_audio_tts_q8_external'})
+            other=store.import_data(FB2.replace(b'Merge book',b'External fixture'),'external.fb2')
+            external = store.create_generation(other['id'], {'pack_path': '', 'engine': 'higgs_audio_tts_q8_external'})
+            # External publishers set their ownership marker explicitly;
+            # normal app preparation deliberately clears external mode.
+            store.execute('UPDATE generations SET config=? WHERE id=?',(json.dumps({**external['config'],'engine':'higgs_audio_tts_q8_external'}),external['id']))
             for generation in (plain, external):
                 store.status(generation['id'], 'rendering')
             store.close()
