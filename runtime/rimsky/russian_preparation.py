@@ -123,7 +123,7 @@ def resolve_entry(text,spec):
 def module_pins():
     names=('russian_preparation','russian_preparation_providers','independent_luna_passes','auto_pronunciation',
         'homograph_stress','yo_restoration','proper_noun_stress','name_stress','spoken_pronunciation','respelling',
-        'cli_process','claude_analysis','codex_analysis','source_name_stress')
+        'cli_process','claude_analysis','codex_analysis','source_name_stress','heading_stress')
     return {name:providers.module_digest('rimsky.'+name) for name in names}
 
 
@@ -238,6 +238,26 @@ def _yo(folder,rows,call,validate_provider):
     return yo.decisions_from(rows,answer),receipts
 
 
+def _heading_layer(folder,entry,unit,names,online,call,validate_provider):
+    """Only source-typed headings; exact high-Opus receipts, never body scans."""
+    from . import heading_stress as heading
+    key=entry_key(unit['text'],unit['source']);output=folder/'heading'/key
+    witness_path=output/'witness.json'
+    if witness_path.exists():witness=read(witness_path)
+    else:
+        witness=heading.analyze(entry['automatic_text'],unit['source'],kind=unit['kind'],names=names)
+        independent.immutable(witness_path,witness)
+    if (witness.get('source_kind')!=unit['kind']or witness.get('source')!=source_binding(unit['source'])
+            or witness.get('text')!=entry['automatic_text']):raise ValueError('Heading witness lost its source/kind/input binding')
+    if witness['disagreements']and not online:
+        raise AppError('Offline Russian heading preparation is held: lexical-stress adjudication needs the pinned online provider. No text was sent online.')
+    answer,receipts=_stress(output,heading.request(witness),call,validate_provider)
+    derived=heading.derive_entry(entry,entry['automatic_text'],witness,answer,
+        provider_receipts=receipts,module_sha256=entry['module_pins']['heading_stress'])
+    return derived,{'source_kind':unit['kind'],'witness_sha256':witness['sha256'],
+        'answer_sha256':digest(answer),'provider_receipts':receipts}
+
+
 def prepare(data,*,call=providers.call,validate_provider=providers.validate,model_pins=None):
     """Bounded worker batch, cached on all source/preparation inputs; no TTS."""
     from . import auto_pronunciation as automatic,homograph_stress as hs,yo_restoration as yo
@@ -267,8 +287,19 @@ def prepare(data,*,call=providers.call,validate_provider=providers.validate,mode
         witnesses=read(folder/'witnesses.json')
         _,stress_receipts=_stress(folder,hs.request(witnesses['homograph']),call,validate_provider)
         _,yo_receipts=_yo(folder,witnesses['yo'],call,validate_provider)
-        if saved['evidence']!={'homograph':stress_receipts,'yo':yo_receipts}:raise ValueError('Frozen adjudication evidence changed')
+        if ({k:saved['evidence'].get(k)for k in ('homograph','yo')}!={'homograph':stress_receipts,'yo':yo_receipts}
+                or set(saved['evidence'])-{'homograph','yo','heading'}):raise ValueError('Frozen adjudication evidence changed')
         for entry in saved['prepared_units'].values():validate_entry(entry)
+        heading_receipts={}
+        for unit in units:
+            key=entry_key(unit['text'],unit['source']);entry=validate_entry(saved['prepared_units'][key])
+            if unit.get('kind')in('heading','title'):
+                base=(entry.get('heading_stress')or{}).get('base_entry')
+                if base is None:raise ValueError('Frozen heading preparation is missing its base evidence')
+                rebuilt,receipt=_heading_layer(folder,base,unit,names,data['recipe']['online_allowed'],call,validate_provider)
+                if rebuilt!=entry:raise ValueError('Frozen heading preparation changed')
+                heading_receipts[key]=receipt
+        if heading_receipts!=saved['evidence'].get('heading',{}):raise ValueError('Frozen heading provider evidence changed')
         return saved
     try:
         inputs=[];transforms=[]
@@ -291,7 +322,7 @@ def prepare(data,*,call=providers.call,validate_provider=providers.validate,mode
         yo_decisions,yo_receipts=_yo(folder,yo_rows,call,validate_provider)
         hs_block={'rule':hs.RULE,'answer_sha256':digest(hs_answer),'overrides':hs.overrides(hs_rows,hs_answer)}
         yo_block={'rule':yo.RULE,'answer_sha256':digest(yo_receipts),'decisions':yo_auto+yo_decisions}
-        prepared={}
+        prepared={};heading_receipts={}
         for unit,text,transform in zip(units,inputs,transforms,strict=True):
             native,evidence=automatic.auto_pronunciation(text,names,spec.get('common',[]),rare_words=True,
                 implicit_single=True,homograph=hs_block,yo=yo_block)
@@ -302,11 +333,14 @@ def prepare(data,*,call=providers.call,validate_provider=providers.validate,mode
                 'preautomatic':transform,'automatic_evidence':evidence}
             entry['sound_sha256']=digest(sound_binding(entry));entry['sha256']=digest(entry)
             key=entry_key(unit['text'],unit['source'])
+            if unit.get('kind')in('heading','title'):
+                entry,heading_receipts[key]=_heading_layer(folder,entry,unit,names,data['recipe']['online_allowed'],call,validate_provider)
             if key in prepared and prepared[key]!=entry:raise ValueError('Conflicting preparation for one source occurrence')
             prepared[key]=entry
         saved={'policy':POLICY,'request_sha256':digest(request),'prepared_units':prepared,
             'evidence':{'homograph':hs_receipts,'yo':yo_receipts},'human_approval':False,
             'artifacts':{p.relative_to(folder).as_posix():file_digest(p)for p in folder.rglob('*')if p.is_file() and p.name not in ('prepared.json','held.json')}}
+        if heading_receipts:saved['evidence']['heading']=heading_receipts
         saved['sha256']=digest(saved);independent.immutable(done,saved);return saved
     except Exception as error:
         write_json(folder/'held.json',{'policy':POLICY,'status':'held','error':str(error),'human_approval':False})

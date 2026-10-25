@@ -2027,12 +2027,17 @@ class Jobs:
 
     def _prepare_russian_chapter(self,gid,book,chapter_id,recipe,*,work_ids=None,human_names=None):
         """Freeze bounded preparation before rendering this chapter, retaining resume evidence."""
-        from .russian_preparation import POLICY,BATCH,validate_config,entry_key,validate_entry,resolve_entry,book_binding,proper_inventory,names_input_digest
+        from .russian_preparation import POLICY,BATCH,validate_config,entry_key,validate_entry,resolve_entry,book_binding,proper_inventory,names_input_digest,module_pins
         validate_config(recipe)
         current=self.store.generation(gid);spec=dict(current['analysis'].get('pronunciation')or{})
         if spec.get('listener_projection_holds'):
             raise AppError('Name pronunciation authority is held; validate the full name baseline before preparation.')
         book_sha=book_binding(book)
+        if spec.get('book_sha256')not in(None,book_sha):
+            # Source metadata (including heading kind) is part of the immutable
+            # book binding; never reuse derived entries from the old binding.
+            spec=invalidate_name_preparation(spec)
+        source_kinds={b['id']:b.get('kind','paragraph')for c in book['chapters']for b in c['blocks']}
         blocks={b['id']:b['text']for c in book['chapters']for b in c['blocks']}
         from .name_stress import name_spans
         source_names_text='. '.join(blocks.values())
@@ -2051,15 +2056,16 @@ class Jobs:
             if work_ids is not None and segment['id']not in work_ids:continue
             for part in render_parts(segment)or[]:
                 if not audible(part['text']):continue
-                units.append({'text':part['text'],'source':{'source_id':segment['source_id'],
+                units.append({'text':part['text'],'kind':source_kinds[segment['source_id']],'source':{'source_id':segment['source_id'],
                     'source_text':blocks[segment['source_id']],'source_start':part.get('start',segment['start']),
                     'source_end':part.get('end',segment['end'])}})
         # Identical source/text may be shared, but homographs in different source
         # passages never share an occurrence binding.
         units=list({entry_key(u['text'],u['source']):u for u in units}.values())
-        source_input_sha=digest({'units':units,'recipe':recipe,'book_sha256':book_sha})
+        source_input_sha=digest({'units':units,'recipe':recipe,'book_sha256':book_sha,'module_pins':module_pins()})
         saved=(spec.get('prepared_chapters')or{}).get(chapter_id)
-        if saved and all(entry_key(u['text'],u['source'])in spec.get('prepared_units',{})for u in units):
+        if (saved and saved.get('source_input_sha256')==source_input_sha
+                and all(entry_key(u['text'],u['source'])in spec.get('prepared_units',{})for u in units)):
             for unit in units:
                 resolve_entry(unit['text'],{**spec,'book_sha256':book_sha,'listener_source':unit['source']})
             return spec

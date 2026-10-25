@@ -48,7 +48,10 @@ def validate_coverage(book, selected, segments):
             raise AppError('An audio passage has no spoken text.')
         expected[source_id] = end
         previous_order = order
-    if not sources or any(expected[key] != len(text) for key, (_, text) in sources.items()):
+    if (not sources or not any(expected.values())
+            or any(expected[key] != len(text) and (expected[key] != 0
+                   or not all(char.isspace() or unicodedata.category(char).startswith('P') for char in text))
+                   for key, (_, text) in sources.items())):
         raise AppError('Audio manifest does not cover every expected source passage.')
 
 

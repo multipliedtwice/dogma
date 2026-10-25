@@ -43,14 +43,15 @@ def analyze(text,source,*,kind,names=None,silero=None,ruaccent=None,known=None):
     if silero is None:
         from .auto_pronunciation import _silero
         silero=lambda value:_silero(value,[],every_word=True,yo=False)
-    dense=silero(text);validate_marks(dense)
-    if dense.replace(ACUTE,'')!=text.replace(ACUTE,''):
+    plain_text=text.replace(ACUTE,'')
+    dense=silero(plain_text);validate_marks(dense)
+    if dense.replace(ACUTE,'')!=plain_text:
         raise ValueError('Heading stress tagger changed source letters or spacing')
     tagged=hs.occurrences(dense)
     original=hs.occurrences(text)
     if [(k,i)for _,k,i in tagged]!=[(k,i)for _,k,i in original]:
         raise ValueError('Heading stress tagger changed source words')
-    theirs=(ruaccent or hs.ruaccent_stresses)(text)
+    theirs=(ruaccent or hs.ruaccent_stresses)(plain_text)
     hits={(k,i):m[0]for m,k,i in tagged}
     for match,key,index in todo:
         word=match[0];si=hs.stress_index(hits[(key,index)]);ri=theirs.get((key,index))

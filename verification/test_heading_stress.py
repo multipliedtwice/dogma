@@ -35,6 +35,27 @@ class HeadingStressTests(unittest.TestCase):
             self.assertEqual(heading.apply(text,witness)[0],text)
             self.assertEqual(witness['rows'],[])
 
+    def test_mixed_marked_name_and_dictionary_word_use_plain_tagger_inputs(self):
+        text='\u0413\u0443\u043d\u0434\u0430\u0301\u0445\u0430\u0440 \u0425\u0430\u043c\u0435\u043b\u0435\u043e\u043d'
+        plain=text.replace('\u0301',''); received=[]
+        title='\u0425\u0430\u043c\u0435\u043b\u0435\u043e\u043d'; marked_title=title[:-1]+'\u0301'+title[-1]
+        source={'source_id':'title','source_text':text,'source_start':0,'source_end':len(text)}
+        def silero(value):
+            received.append(('silero',value))
+            # Dense tagging would duplicate a protected acute if given the marked input.
+            return value.replace(plain.split()[0][:5],text.split()[0][:6]).replace(title,marked_title)
+        def ruaccent(value):
+            received.append(('ruaccent',value))
+            return {(plain.split()[0].casefold(),0):1,(title.casefold(),0):6}
+        witness=heading.analyze(text,source,kind='heading',names={'g':text.split()[0]},
+            silero=silero,ruaccent=ruaccent,known=lambda word:True)
+        final,receipt=heading.apply(text,witness)
+        self.assertEqual([('silero',plain),('ruaccent',plain)],received)
+        self.assertEqual(text.replace(title,marked_title),final)
+        self.assertEqual(text.index(title),receipt['edits'][0]['start'])
+        self.assertEqual([title],[row['surface'] for row in witness['rows']])
+        self.assertEqual(text,witness['text']); self.assertEqual(recipe.source_binding(source),witness['source'])
+
     def test_protected_name_and_unknown_dictionary_word_skip(self):
         for names,known in (({'c':'Хамелео́н'},lambda word:True),({},lambda word:False)):
             witness=self.witness(names=names,known=known)
