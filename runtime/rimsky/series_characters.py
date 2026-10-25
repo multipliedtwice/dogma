@@ -6,6 +6,7 @@ it survives deleting individual books and always wins over a bundled field.
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import re
 import unicodedata
@@ -450,28 +451,108 @@ def record_listener_stress(store, report: dict) -> dict:
             'pronunciations': pronunciations}
 
 
+def pronunciation_display(character):
+    return character.get('name','')+(' ('+', '.join(character['aliases'])+')'if character.get('aliases')else'')
+
+
+class _NameOverlayError(ValueError):
+    def __init__(self,message,refresh=False):
+        super().__init__(message);self.refresh_name_analysis=refresh
+
+
+def _pronunciation_binding(book,character):
+    return {'book_source_sha256':book.get('source_hash')or digest(book['chapters']),
+            'character_id':character['id'],'display':pronunciation_display(character),
+            'aliases':list(character.get('aliases')or[])}
+
+
+def _automatic_baseline(row,binding):
+    """A previously captured automatic row, never an unbacked human projection."""
+    saved=row.get('series_listener_baseline')
+    if 'series_listener_baseline'not in row:return None
+    if (not isinstance(saved,dict)or saved.get('policy')!='series-name-baseline-v1'
+        or saved.get('sha256')!=digest({k:v for k,v in saved.items()if k!='sha256'})):
+        raise _NameOverlayError('Automatic name baseline checksum changed.')
+    if saved.get('binding')!=binding:
+        old=saved.get('binding')or{}
+        refresh=all(old.get(key)==binding.get(key)for key in ('book_source_sha256','character_id'))
+        raise _NameOverlayError('Automatic name baseline character/source binding changed.',refresh)
+    original=saved['row']
+    if (original.get('source')in ('listener','series_listener')or original.get('listener_respelling')
+        or original.get('name')!=binding['display']):
+        raise _NameOverlayError('Automatic name baseline contains a human or different display binding.')
+    from .auto_pronunciation import validate_name_stress
+    validate_name_stress(original['name'],original['stressed'])
+    return copy.deepcopy(original)
+
+
+def _name_overlay(book,character,row,frozen):
+    from .auto_pronunciation import validate_name_stress
+    from .respelling import _changed_words,names_sources
+    from .listener_stress import _plain_map
+    display=pronunciation_display(character);binding=_pronunciation_binding(book,character)
+    previous=copy.deepcopy(row or {})
+    if previous.get('series_listener_overlay'):names_sources({'previous':previous})
+    baseline=_automatic_baseline(previous,binding)if previous.get('source')=='series_listener'else None
+    base=baseline or(previous if previous.get('source')!='series_listener'else{})
+    if base and base.get('name')!=display:raise _NameOverlayError('Saved name pronunciation belongs to another full display name.',True)
+    if base:
+        try:validate_name_stress(display,base['stressed'])
+        except ValueError as error:raise _NameOverlayError(str(error),True)from error
+    plain_display=display.replace(ACUTE,'')
+    spans=name_spans(plain_display,frozen['names'],implicit_single=True)
+    if not spans:
+        if previous.get('source')=='series_listener'and baseline is None:
+            raise _NameOverlayError('No validated canonical human family backs the retained series projection.')
+        return base or None
+    stressed=base.get('stressed',display)
+    plain,starts,ends=_plain_map(stressed)
+    if len(plain)!=len(plain_display):raise ValueError('Name pronunciation cannot be bound to its full display coordinates.')
+    word_sources={word:('listener'if base.get('source')=='listener'else'model')
+                  for word in _changed_words(display,stressed)}
+    word_sources.update(names_sources({'base':base})if base else{})
+    words=[]
+    for start,end,marked in reversed(spans):
+        before=stressed[starts[start]:ends[end-1]]
+        stressed=stressed[:starts[start]]+marked+stressed[ends[end-1]:]
+        printed=plain_display[start:end]
+        words.append({'start':start,'end':end,'printed':printed,'before':before,'stressed':marked})
+        for word in _changed_words(printed,marked):word_sources[word]='listener'
+    try:validate_name_stress(display,stressed)
+    except ValueError as error:raise _NameOverlayError('A full automatic name baseline is required: '+str(error),True)from error
+    saved=previous.get('series_listener_baseline')if baseline is not None else None
+    if base and base.get('source')not in ('listener','series_listener')and not base.get('listener_respelling'):
+        clean={k:v for k,v in base.items()if k not in ('series_listener_baseline','series_listener_overlay')}
+        saved={'policy':'series-name-baseline-v1','binding':binding,'row':clean}
+        saved['sha256']=digest(saved)
+    overlay={'policy':'series-name-word-overlay-v1','binding':binding,'name':display,'stressed':stressed,
+             'words':list(reversed(words)),'word_sources':word_sources}
+    overlay['sha256']=digest(overlay)
+    primary,_=split_display_name(character.get('name',''))
+    return {**base,'name':display,'stressed':stressed,'source':'series_listener',
+            'series_character_key':normalized(primary),'series_listener_overlay':overlay,
+            **({'series_listener_baseline':saved}if saved else{})}
+
+
 def apply_pronunciations(store, book: dict, cast: list[dict], pronunciation: dict) -> dict:
     """Overlay canonical human families; old series values are projections only."""
     sync_generation(store, book, {'cast': cast, 'analysis': {}}, pronunciation)
     from .listener_stress import snapshot
     frozen=snapshot(store,book,cast)
-    authority=frozen['names']
-    names={key:row for key,row in (pronunciation.get('names') or {}).items() if row.get('source')!='series_listener'}
+    names=copy.deepcopy(pronunciation.get('names')or{})
     holds=[]
     for character in cast:
         if character.get('id') == 'narrator':
             continue
-        primary, _ = split_display_name(character.get('name', ''))
-        spans=name_spans(primary,authority,implicit_single=True)
-        if spans:
-            stressed=primary
-            for start,end,marked in reversed(spans):stressed=stressed[:start]+marked+stressed[end:]
-            previous = names.get(character['id'], {})
-            names[character['id']] = {**previous, 'name': primary, 'stressed': stressed,
-                                      'source': 'series_listener', 'series_id': identity(store,book)['id'],
-                                      'series_character_key':normalized(primary)}
-        elif ((pronunciation.get('names') or {}).get(character['id']) or {}).get('source')=='series_listener':
-            holds.append({'character_id':character['id'],'reason':'No validated canonical human family backs the retained series projection.'})
+        try:
+            row=_name_overlay(book,character,names.get(character['id']),frozen)
+            if row:
+                names[character['id']]={**row,**({'series_id':identity(store,book)['id']}if row.get('source')=='series_listener'else{})}
+            else:names.pop(character['id'],None)
+        except (ValueError,KeyError,TypeError)as error:
+            names.pop(character['id'],None)
+            holds.append({'character_id':character['id'],'reason':str(error),
+                          'refresh_name_analysis':getattr(error,'refresh_name_analysis',False)})
     from .spoken_terms import terms_for_book
     terms = terms_for_book(store, book)
     return {**{key:value for key,value in pronunciation.items() if key!='listener_projection_holds'}, 'names': names,

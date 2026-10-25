@@ -89,6 +89,34 @@ def render_parts(segment):
     return [{'speaker': segment['speaker'], 'delivery': segment['delivery'], 'text': segment['spoken'], 'performance': performance}]
 
 
+def render_work_ids(generation):
+    """Playback coverage and requested replacement work are separate scopes."""
+    selected=generation['config'].get('render_scope')
+    if selected is None:return None # Historical frozen scheduling semantics.
+    if selected!='pending-parts-v1':raise AppError('Unknown narration work-scope policy.')
+    return {s['id']for s in generation['segments']
+        if s['status']not in ('ready','review')or s['status']=='ready'and not s.get('audio_hash')}
+
+
+def name_semantics(spec):
+    """Only lexical decisions/authority invalidate frozen book-name preparation."""
+    return {key:{'name':row.get('name'),'stressed':row.get('stressed'),
+        'human':row.get('source')=='listener',
+        'protected':[{k:word.get(k)for k in ('start','end','printed','stressed')}
+            for word in(row.get('series_listener_overlay')or{}).get('words',[])]}
+        for key,row in(spec.get('names')or{}).items()}
+
+
+def invalidate_name_preparation(spec):
+    result=dict(spec)
+    for key in ('proper_noun_preparation','source_names','source_name_receipts'):
+        result.pop(key,None)
+    if 'prepared_chapters'in result:result['prepared_chapters']={}
+    # Source-bound automatic entries remain evidence until replaced; only
+    # affected pending owners are re-prepared, never ready neighboring audio.
+    return result
+
+
 def merged_descriptor_holds(inputs, merges, cast, common):
     from .analysis import named, scene_of
     by_id = {character['id']: character for character in cast}
@@ -775,6 +803,11 @@ class Jobs:
                 if not targets:continue
                 analysis={**generation['analysis'],'pronunciation':{
                     **generation['analysis'].get('pronunciation',{}),'listener_stress':frozen}}
+                if (report.get('character_state')or{}).get('status')=='updated':
+                    old_families=(generation['analysis'].get('pronunciation',{}).get('listener_stress')or{}).get('names',{})
+                    families=(report.get('character_state')or{}).get('pronunciations')or{}
+                    if any(old_families.get(key)!=frozen.get('names',{}).get(key)for key in families):
+                        analysis['pronunciation']=invalidate_name_preparation(analysis['pronunciation'])
                 takes=dict(analysis.get('takes') or {})
                 for segment,_ in targets:takes[segment['id']]=takes.get(segment['id'],0)+1
                 analysis['takes']=takes
@@ -921,7 +954,40 @@ class Jobs:
             cast, analysis, speakers = change(generation, pack)
             cast = cast_flags(cast, pack, analysis.get('casting_inputs') or generation['segments'])
             analysis = {**analysis, **casting_summary(pack, generation['config'], generation['segments'], cast, analysis)}
+            if name_semantics(analysis.get('pronunciation')or{})!=name_semantics(generation['analysis'].get('pronunciation')or{}):
+                analysis={**analysis,'pronunciation':invalidate_name_preparation(analysis.get('pronunciation')or{})}
+            changed=[]
+            if generation['config'].get('render_scope')=='pending-parts-v1':
+                from .name_stress import name_spans,ACUTE
+                before={c['id']:c.get('voice_id')for c in generation['cast']}
+                after={c['id']:c.get('voice_id')for c in cast}
+                old_names=(generation['analysis'].get('pronunciation')or{}).get('names',{})
+                new_names=(analysis.get('pronunciation')or{}).get('names',{})
+                stresses={cid:row['stressed']for cid,row in new_names.items()
+                    if row.get('stressed')!=(old_names.get(cid)or{}).get('stressed')}
+                for segment in generation['segments']:
+                    if segment['status']!='ready' or not segment['audio_hash']:continue
+                    parts=render_parts(segment)or[]
+                    voice_changed=False
+                    for part in parts:
+                        new_part={**part,'speaker':speakers.get(part['speaker'],part['speaker'])}
+                        new_segment={**segment,'speaker':speakers.get(segment['speaker'],segment['speaker'])}
+                        try:
+                            old_voice=routed_voice(pack,generation['analysis'],before,part,segment)[0]['id']
+                            new_voice=routed_voice(pack,analysis,after,new_part,new_segment)[0]['id']
+                            voice_changed|=old_voice!=new_voice
+                        except AppError:voice_changed=True # unresolved routes must be held, never reused
+                    if voice_changed or stresses and name_spans(segment['spoken'].replace(ACUTE,''),stresses,implicit_single=True):
+                        changed.append(segment['id'])
+                if changed:
+                    takes=dict(analysis.get('takes')or{})
+                    analysis={**analysis,'takes':{**takes,**{sid:takes.get(sid,0)+1 for sid in changed}}}
             with self.store.lock, self.store.db:
+                if changed:
+                    from .current_audiobook import capture_parts
+                    capture_parts(self.store,generation,changed)
+                    self.store.db.executemany("UPDATE segments SET status='pending',audio_hash=NULL,duration=0,cues='[]' WHERE generation_id=? AND id=?",
+                        [(gid,sid)for sid in changed])
                 rename_speakers(self.store.db, gid, speakers)
                 self.store.db.execute('UPDATE generations SET cast=?,analysis=?,updated=? WHERE id=?',
                                       (json.dumps(cast, ensure_ascii=False), json.dumps(analysis), now(), gid))
@@ -1516,15 +1582,22 @@ class Jobs:
         self._check()
         self.store.status(gid,'rendering')
         language=self._speech_language(gid,book)
+        work_ids=render_work_ids(self.store.generation(gid))
+        if work_ids is not None:config={**config,'_render_work_ids':sorted(work_ids)}
+        if config.get('russian_preparation') and language=='Russian' and work_ids!=set():
+            self._ensure_russian_names(gid,book,arguments)
         if is_higgs(pack):
             self._scene_direction(gid,pack,config,book,arguments)
-        self._render(gid,pack,config,book,language)
+        rendered_scope=self._render(gid,pack,config,book,language)
+        if rendered_scope is not None:config={**config,'_render_work_ids':sorted(rendered_scope)}
         # Exhausted machine word checks receive two independent recovery
         # rounds before this job settles. Human/casting holds are never cleared.
         for recovery_round in range(2 if enabled(config)else 0):
             if not self._retry_word_holds(gid):break
             self._check()
-            self._render(gid,pack,config,book,language)
+            recovered_scope=self._render(gid,pack,config,book,language)
+            if recovered_scope is not None:
+                config={**config,'_render_work_ids':sorted(set(config.get('_render_work_ids',[]))|recovered_scope)}
         self.engine.close()
         self.engine=None
         if config.get('align_words'):
@@ -1560,7 +1633,35 @@ class Jobs:
                     if attempt:raise AppError('Invalid performance direction: '+error) from exc
         return infer
 
-    def _name_stress(self,gid,book,cast,arguments):
+    def _ensure_russian_names(self,gid,book,arguments):
+        """Normalize complete display/alias bindings without repeating casting."""
+        from .series_characters import apply_pronunciations,pronunciation_display
+        from .name_stress_analysis import validator
+        current=self.store.generation(gid);cast=current['cast']
+        characters={c['id']:pronunciation_display(c)for c in cast if c['id']!='narrator'and c.get('name')}
+        normalized=apply_pronunciations(self.store,book,cast,current['analysis'].get('pronunciation')or{})
+        holds=normalized.get('listener_projection_holds')or[]
+        if any(item.get('refresh_name_analysis')is not True for item in holds):
+            raise AppError('Name pronunciation authority is held: '+'; '.join(item['reason']for item in holds))
+        try:
+            validator(characters)({'names':[dict(row,character_id=cid)for cid,row in normalized.get('names',{}).items()]})
+            invalid=False
+        except (ValueError,KeyError,TypeError):invalid=True
+        if invalid or holds:
+            normalized=self._name_stress(gid,book,cast,arguments,force=True)
+            normalized=apply_pronunciations(self.store,book,cast,normalized)
+            holds=normalized.get('listener_projection_holds')or[]
+            if holds:raise AppError('Name pronunciation authority is held: '+'; '.join(item['reason']for item in holds))
+            validator(characters)({'names':[dict(row,character_id=cid)for cid,row in normalized.get('names',{}).items()]})
+        latest=self.store.generation(gid)['analysis']
+        if name_semantics(normalized)!=name_semantics(latest.get('pronunciation')or{}):
+            normalized=invalidate_name_preparation(normalized)
+        if normalized!=latest.get('pronunciation'):
+            self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
+                (json.dumps({**latest,'pronunciation':normalized},ensure_ascii=False),gid))
+        return normalized
+
+    def _name_stress(self,gid,book,cast,arguments,*,force=False):
         """Always-on educated guess of every character's name stress (listener overrides kept)."""
         from .analysis import mismatch
         from .auto_pronunciation import POLICY
@@ -1571,7 +1672,7 @@ class Jobs:
         saved=self.store.generation(gid)['analysis'].get('pronunciation') or {}
         from .series_characters import apply_pronunciations, sync_generation
         sync_generation(self.store,book,{'cast':cast,'analysis':{}},saved)
-        if saved.get('policy')==POLICY and saved.get('characters_sha256')==digest(characters):
+        if not force and saved.get('policy')==POLICY and saved.get('characters_sha256')==digest(characters):
             return self._respelling_sources(apply_pronunciations(self.store,book,cast,saved))
         texts=[block['text'] for chapter in book['chapters'] for block in chapter['blocks'] if block.get('text')]
         payload=request(characters,texts);check=validator(characters);error=''
@@ -1660,6 +1761,8 @@ class Jobs:
         from .scene_direction import request,direct
         from .speech_backend import implementation_fingerprint
         current=self.store.generation(gid)
+        work_ids=render_work_ids(current)
+        if work_ids==set():return
         profiles=current['analysis'].get('character_direction')
         if not profiles or not profiles.get('complete'):
             profiles=self._character_direction(gid,book,current['cast'],arguments)
@@ -1671,9 +1774,11 @@ class Jobs:
         # never estimates from whichever chapters happened to finish first.
         for chapter in book['chapters']:
             if chapter['id'] not in config['chapters']:continue
+            if work_ids is not None and not any(s['id']in work_ids and s['chapter_id']==chapter['id']for s in current['segments']):continue
             units=[];owners={}
             for segment in current['segments']:
                 if segment['chapter_id']!=chapter['id']:continue
+                if work_ids is not None and segment['id']not in work_ids:continue
                 for index,part in enumerate(render_parts(segment) or []):
                     if part['speaker'] not in personas:
                         self._render_hold(gid,segment,'Persistent speaker persona or signature is unresolved.')
@@ -1696,10 +1801,14 @@ class Jobs:
             payload['implementation_sha256']=implementation_fingerprint('rimsky.scene_direction')
             def save(state):
                 latest=self.store.generation(gid)['analysis']
+                if work_ids is not None:
+                    previous=latest.get('scene_direction',{}).get(chapter['id'],{})
+                    state={**state,'by_unit':{**previous.get('by_unit',{}),**state.get('by_unit',{})},'work_checkpoint':state}
                 chapters={**latest.get('scene_direction',{}),chapter['id']:state}
                 self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
                     (json.dumps({**latest,'scene_direction':chapters,'voice_signatures':signatures},ensure_ascii=False),gid))
             saved=self.store.generation(gid)['analysis'].get('scene_direction',{}).get(chapter['id'])
+            if work_ids is not None:saved=(saved or{}).get('work_checkpoint')
             if not payload['turns']:
                 save({'complete':True,'by_unit':{},'production_approved':False});continue
             try:
@@ -1710,6 +1819,7 @@ class Jobs:
                 # its affected turns, retain the checkpoint, continue chapters.
                 latest=self.store.generation(gid)['analysis']
                 saved=latest.get('scene_direction',{}).get(chapter['id'],{})
+                if work_ids is not None:saved=saved.get('work_checkpoint')or{}
                 save({**saved,'complete':False,'error':str(exc)})
                 for segment,_,_,_ in owners.values():self._render_hold(gid,segment,'Scene direction unavailable: '+str(exc))
                 continue
@@ -1886,32 +1996,30 @@ class Jobs:
                 'parts':[{'key':p.stem,'audio_sha256':file_digest(p)} for p in paths],
                 'pauses':pauses}}
 
-    def _prepare_russian_chapter(self,gid,book,chapter_id,recipe):
+    def _prepare_russian_chapter(self,gid,book,chapter_id,recipe,*,work_ids=None,human_names=None):
         """Freeze bounded preparation before rendering this chapter, retaining resume evidence."""
-        from .russian_preparation import POLICY,BATCH,validate_config,entry_key,validate_entry,resolve_entry,book_binding,proper_inventory
+        from .russian_preparation import POLICY,BATCH,validate_config,entry_key,validate_entry,resolve_entry,book_binding,proper_inventory,names_input_digest
         validate_config(recipe)
         current=self.store.generation(gid);spec=dict(current['analysis'].get('pronunciation')or{})
+        if spec.get('listener_projection_holds'):
+            raise AppError('Name pronunciation authority is held; validate the full name baseline before preparation.')
         book_sha=book_binding(book)
-        names={key:row['stressed']for key,row in spec.get('names',{}).items()}
-        inventory=proper_inventory(book)
-        lexicon_input=digest({'inventory':inventory,'names':names})
-        name_evidence=spec.get('proper_noun_preparation')or{}
-        if (name_evidence.get('input_sha256')!=lexicon_input or name_evidence.get('book_sha256')!=book_sha
-                or name_evidence.get('sha256')!=digest({k:v for k,v in name_evidence.items()if k!='sha256'})):
-            name_evidence=self._call('prepare_russian_names',{'inventory':inventory,'names':names,'book_sha256':book_sha})
-            if (name_evidence.get('input_sha256')!=lexicon_input or name_evidence.get('book_sha256')!=book_sha
-                    or name_evidence.get('sha256')!=digest({k:v for k,v in name_evidence.items()if k!='sha256'})):
-                raise AppError('Book-wide proper-noun preparation returned invalid evidence')
-        spec={**spec,'proper_nouns':name_evidence['proper_nouns'],'proper_noun_preparation':name_evidence,'book_sha256':book_sha}
-        # A later provider hold must not lose the book-wide name decisions.
-        if spec!=current['analysis'].get('pronunciation'):
-            latest=self.store.generation(gid)['analysis']
-            self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
-                (json.dumps({**latest,'pronunciation':spec},ensure_ascii=False),gid))
         blocks={b['id']:b['text']for c in book['chapters']for b in c['blocks']}
+        from .name_stress import name_spans
+        source_names_text='. '.join(blocks.values())
+        def relevant(families):
+            return {key:value for key,value in families.items()
+                if name_spans(source_names_text,{key:value},implicit_single=True)}
+        protected_human=relevant(human_names or{})
+        previous_human=spec.get('prepared_human_names')
+        if previous_human is None:
+            previous_human=relevant((spec.get('listener_stress')or{}).get('names',{}))
+        if protected_human!=previous_human:
+            spec=invalidate_name_preparation(spec)
         units=[]
         for segment in current['segments']:
             if segment['chapter_id']!=chapter_id or segment['status']=='review':continue
+            if work_ids is not None and segment['id']not in work_ids:continue
             for part in render_parts(segment)or[]:
                 if not audible(part['text']):continue
                 units.append({'text':part['text'],'source':{'source_id':segment['source_id'],
@@ -1920,14 +2028,39 @@ class Jobs:
         # Identical source/text may be shared, but homographs in different source
         # passages never share an occurrence binding.
         units=list({entry_key(u['text'],u['source']):u for u in units}.values())
-        input_sha=digest({'units':units,'recipe':recipe,'book_sha256':book_sha,
-            'pronunciation':{k:spec.get(k)for k in ('names','common','terms','proper_nouns','respelling_sources')}})
         source_input_sha=digest({'units':units,'recipe':recipe,'book_sha256':book_sha})
         saved=(spec.get('prepared_chapters')or{}).get(chapter_id)
-        if saved and saved.get('source_input_sha256')==source_input_sha:
+        if saved and all(entry_key(u['text'],u['source'])in spec.get('prepared_units',{})for u in units):
             for unit in units:
-                resolve_entry(unit['text'],{**spec,'listener_source':unit['source']})
+                resolve_entry(unit['text'],{**spec,'book_sha256':book_sha,'listener_source':unit['source']})
             return spec
+        names={key:row['stressed']for key,row in spec.get('names',{}).items()}
+        name_evidence=spec.get('proper_noun_preparation')or{}
+        if name_evidence:
+            if (name_evidence.get('book_sha256')!=book_sha
+                or name_evidence.get('sha256')!=digest({k:v for k,v in name_evidence.items()if k!='sha256'})):
+                raise AppError('Frozen book-wide proper-noun evidence changed')
+        else:
+            inventory=proper_inventory(book,spec.get('names',{}))
+            from .name_stress import name_spans
+            candidates='. '.join([*inventory['capitalized'],*inventory['coinages'],*[row['name']for row in spec.get('names',{}).values()]])
+            protected={key:value for key,value in(human_names or{}).items()if name_spans(candidates,{key:value},implicit_single=True)}
+            request={'inventory':inventory,'names':names,'names_rows':spec.get('names',{}),'human_names':protected,'book_sha256':book_sha}
+            lexicon_input=names_input_digest(request)
+            name_evidence=self._call('prepare_russian_names',request)
+            if (name_evidence.get('input_sha256')!=lexicon_input or name_evidence.get('book_sha256')!=book_sha
+                    or name_evidence.get('sha256')!=digest({k:v for k,v in name_evidence.items()if k!='sha256'})):
+                raise AppError('Book-wide proper-noun preparation returned invalid evidence')
+        spec={**spec,'proper_nouns':name_evidence['proper_nouns'],'proper_noun_preparation':name_evidence,'book_sha256':book_sha,
+            'prepared_human_names':protected_human,
+            'source_names':name_evidence.get('source_names',{}),'source_name_receipts':name_evidence.get('source_name_receipts',[])}
+        # A later provider hold must not lose the book-wide name decisions.
+        if spec!=current['analysis'].get('pronunciation'):
+            latest=self.store.generation(gid)['analysis']
+            self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
+                (json.dumps({**latest,'pronunciation':spec},ensure_ascii=False),gid))
+        input_sha=digest({'units':units,'recipe':recipe,'book_sha256':book_sha,
+            'pronunciation':{k:spec.get(k)for k in ('names','common','terms','proper_nouns','respelling_sources','source_names','source_name_receipts')}})
         entries={};batches=[]
         cache=self.store.root/'russian-preparation'
         for start in range(0,len(units),BATCH):
@@ -1935,7 +2068,7 @@ class Jobs:
             latest=self.store.generation(gid)['analysis']
             self.store.execute('UPDATE generations SET analysis=? WHERE id=?',(json.dumps({**latest,
                 'progress':{'stage':'russian_preparation','chapter':chapter_id,'done':start,'total':len(units)}},ensure_ascii=False),gid))
-            lexical={k:spec.get(k)for k in ('names','common','terms','proper_nouns','respelling_sources')}
+            lexical={k:spec.get(k)for k in ('names','common','terms','proper_nouns','respelling_sources','source_names','source_name_receipts')}
             result=self._call('prepare_russian',{'units':units[start:start+BATCH],'pronunciation':lexical,
                 'recipe':recipe,'book_sha256':book_sha,'cache_dir':str(cache)})
             if result.get('policy')!=POLICY or result.get('sha256')!=digest({k:v for k,v in result.items()if k!='sha256'}):
@@ -1964,6 +2097,19 @@ class Jobs:
         if higgs:
             config = {**config, '_speech_language': language}
         current = self.store.generation(gid)
+        work_ids=render_work_ids(current)
+        pending_ids=work_ids
+        if higgs and work_ids is not None:
+            # Resume must revalidate this job's completed caches against its
+            # resolved execution plan and optional verifier. Retained playback
+            # chapters belong to an earlier request and stay untouched.
+            owned=set(current['config'].get('render_owned_chapters',current['config']['chapters']))
+            extra=set(current['config'].get('render_owned_parts',[]))|{s['id']for s in current['segments']if s['id']in work_ids and s['chapter_id']not in owned}
+            if extra!=set(current['config'].get('render_owned_parts',[])):
+                current={**current,'config':{**current['config'],'render_owned_parts':sorted(extra)}}
+                self.store.execute('UPDATE generations SET config=? WHERE id=?',(json.dumps(current['config'],ensure_ascii=False),gid))
+            work_ids=work_ids|extra|{s['id']for s in current['segments']if s['chapter_id']in owned}
+        if work_ids is not None:config={**config,'_render_work_ids':sorted(work_ids)}
         if higgs:
             current={**current,'analysis':{**current['analysis'],'post_processing':disclosure(config)}}
             self.store.execute('UPDATE generations SET analysis=? WHERE id=?',
@@ -1983,6 +2129,7 @@ class Jobs:
             # Candidate audio remains inaccessible through the normal asset
             # endpoint until its chapter passes; old ready flags aren't a gate.
             for chapter in config['chapters']:
+                if work_ids is not None and not any(s['id']in work_ids and s['chapter_id']==chapter for s in current['segments']):continue
                 gate=current['analysis'].get('chapter_acceptance',{}).get(chapter) or {}
                 chapter_segments=[s for s in current['segments'] if s['chapter_id']==chapter]
                 try:
@@ -1990,7 +2137,14 @@ class Jobs:
                     accepted_chapters[chapter]=music_released(current,chapter,self.store.root)
                 except (SpeechHoldError,KeyError,TypeError):accepted_chapters[chapter]=False
                 if not accepted_chapters[chapter]:
-                    self.store.execute("UPDATE segments SET status='pending' WHERE generation_id=? AND chapter_id=? AND status='ready'",(gid,chapter))
+                    if work_ids is None:
+                        self.store.execute("UPDATE segments SET status='pending' WHERE generation_id=? AND chapter_id=? AND status='ready'",(gid,chapter))
+                    else:
+                        from .current_audiobook import capture_parts
+                        targets=[s['id']for s in chapter_segments if s['id']in work_ids and s['status']=='ready']
+                        with self.store.lock,self.store.db:
+                            capture_parts(self.store,current,targets)
+                            self.store.db.executemany("UPDATE segments SET status='pending' WHERE generation_id=? AND id=? AND status='ready'",[(gid,sid)for sid in targets])
         validate_coverage(book, config['chapters'], current['segments'])
         analysis = current['analysis']
         voices = {voice['id']: voice for voice in pack['voices']}
@@ -1999,7 +2153,8 @@ class Jobs:
         profile = pack.get('presentation_voices')
         def voice_for(part, segment):
             return routed_voice(pack,analysis,assigned,part,segment)
-        previews = self._holds(gid, pack, config, current, voice_for)
+        hold_input=current if work_ids is None else{**current,'segments':[s for s in current['segments']if s['id']in work_ids]}
+        previews = self._holds(gid, pack, config, hold_input, voice_for)
         current = self.store.generation(gid)
         analysis = current['analysis']
         takes = analysis.get('takes') or {}
@@ -2011,13 +2166,15 @@ class Jobs:
                       if a['chapter_id']!=b['chapter_id']}
         for segment in current['segments']:
             self._check()
+            if work_ids is not None and segment['id']not in work_ids:continue
             if segment['chapter_id'] != checked_chapter:
                 if gated and checked_chapter is not None:
                     self._chapter_acceptance(gid,pack,book,{**config,'chapters':[checked_chapter]})
                 pack_unchanged(pack)
                 checked_chapter = segment['chapter_id']
-                if russian_recipe:
-                    prepared=self._prepare_russian_chapter(gid,book,checked_chapter,russian_recipe)
+                if russian_recipe and (pending_ids is None or any(s['id']in pending_ids and s['chapter_id']==checked_chapter for s in current['segments'])):
+                    prepared=self._prepare_russian_chapter(gid,book,checked_chapter,russian_recipe,
+                        work_ids=work_ids,human_names=frozen_listener.get('names',{}))
                     config={**config,'_pronunciation':{**prepared,'listener_stress':frozen_listener}}
             if segment['status'] == 'review':
                 continue
@@ -2206,6 +2363,7 @@ class Jobs:
         if checked_chapter is not None:
             pack_unchanged(pack)
             if gated:self._chapter_acceptance(gid,pack,book,{**config,'chapters':[checked_chapter]})
+        return work_ids
 
     def _chapter_acceptance(self,gid,pack,book,config):
         from .post_processing import enabled
@@ -2213,6 +2371,7 @@ class Jobs:
         from .chapter_gate import measure,report,audio_binding
         from .util import file_digest
         current=self.store.generation(gid)
+        target_ids=set(config['_render_work_ids'])if'_render_work_ids'in config else render_work_ids(current)
         for chapter in book['chapters']:
             if chapter['id'] not in config['chapters']:continue
             segments=[s for s in current['segments'] if s['chapter_id']==chapter['id']]
@@ -2257,17 +2416,22 @@ class Jobs:
                     raise SpeechHoldError('Chapter changed during verification; no stale audio was published.')
                 if not gate['passed']:
                     from .current_audiobook import capture_parts
-                    capture_parts(self.store,latest_generation,[s['id']for s in latest_segments])
+                    capture_parts(self.store,latest_generation,[s['id']for s in latest_segments if target_ids is None or s['id']in target_ids])
                 self.store.db.execute('UPDATE generations SET analysis=? WHERE id=?',
                     (json.dumps({**latest,'chapter_acceptance':{**latest.get('chapter_acceptance',{}),chapter['id']:gate}},ensure_ascii=False),gid))
                 if gate['passed']:
                     for segment in segments:
+                        if target_ids is not None and segment['id']not in target_ids:continue
                         if segment['audio_hash']:
                             self.store.db.execute("UPDATE segments SET status='ready' WHERE generation_id=? AND id=? AND status='pending' AND audio_hash=?",(gid,segment['id'],segment['audio_hash']))
                 else:
                     # Candidate audio remains pending behind this gate. Do not
                     # turn healthy passages into terminal speaker-review holds.
-                    self.store.db.execute("UPDATE segments SET status='pending' WHERE generation_id=? AND chapter_id=? AND status='ready'",(gid,chapter['id']))
+                    if target_ids is None:
+                        self.store.db.execute("UPDATE segments SET status='pending' WHERE generation_id=? AND chapter_id=? AND status='ready'",(gid,chapter['id']))
+                    else:
+                        self.store.db.executemany("UPDATE segments SET status='pending' WHERE generation_id=? AND id=? AND status='ready'",
+                            [(gid,s['id'])for s in latest_segments if s['id']in target_ids])
 
     def _hold(self, gid, segment, notice):
         self.store.execute(
@@ -2678,7 +2842,8 @@ class Jobs:
 
     def _align(self,gid,pack,language,config):
         import importlib.util
-        pending = [segment for segment in self.store.generation(gid)['segments'] if segment['status'] == 'ready' and not segment['cues'] and audible(segment['spoken'])]
+        pending = [segment for segment in self.store.generation(gid)['segments'] if segment['status'] == 'ready' and not segment['cues'] and audible(segment['spoken'])
+            and ('_render_work_ids'not in config or segment['id']in config['_render_work_ids'])]
         if not pending:
             return
         executable = resolve_binary('rimsky-align', self.binaries)

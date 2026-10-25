@@ -257,6 +257,18 @@ def names_sources(names: dict) -> dict:
     """{folded printed word: 'model'|'listener'} for the final name rows (a listener or series row wins over a model row)."""
     sources = {}
     for row in names.values():
+        overlay=row.get('series_listener_overlay')
+        if overlay:
+            from .util import digest
+            if (overlay.get('policy')!='series-name-word-overlay-v1'
+                or overlay.get('sha256')!=digest({k:v for k,v in overlay.items()if k!='sha256'})
+                or overlay.get('name')!=row.get('name')or overlay.get('stressed')!=row.get('stressed')):
+                raise ValueError('Listener name word attribution lost its exact display/sound binding')
+            for word in _changed_words(row['name'],row['stressed']):
+                source=overlay['word_sources'].get(word)
+                if source not in ('model','listener'):raise ValueError('Missing word-level pronunciation attribution')
+                sources[word]=source
+            continue
         listener = row.get('source') in ('listener', 'series_listener') or row.get('listener_respelling')
         if listener or row.get('hard_e'):
             for word in _changed_words(row['name'], row['stressed']):

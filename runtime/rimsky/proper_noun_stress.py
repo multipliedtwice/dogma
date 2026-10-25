@@ -24,6 +24,18 @@ RULE_SOURCE = 'proper-noun-explicit-source-stress-v3'
 OBLIQUE = ('ами', 'ями', 'ой', 'ом', 'ем', 'ам', 'ям', 'ах', 'ях', 'а', 'я', 'у', 'ю', 'е', 'и', 'ы')
 
 
+def source_stress(word):
+    """One explicit source vowel: acute notation or the letter ё itself."""
+    from .name_stress import parse
+    plain=word.replace(ACUTE,'');yo=[i for i,ch in enumerate(plain)if ch in 'ёЁ']
+    if ACUTE in word:
+        plain,index=parse(word)
+        if yo and yo!=[index]:raise ValueError('Conflicting explicit source stress signals: '+word)
+        return plain,index
+    if len(yo)==1:return plain,yo[0]
+    raise ValueError('Source name needs one explicit stress signal: '+word)
+
+
 @lru_cache(maxsize=1)
 def _morph():
     import pymorphy3
@@ -94,6 +106,10 @@ def proper_noun_lexicon(texts, character_lexicon: dict[str, str], v2: bool = Fal
     known = build(character_lexicon, implicit_single=True)
     lexicon = {}
     source_marks=explicit_stress is not None
+    def family_base(word,bases):
+        if not source_marks:return _base_of(word,bases)
+        fold=lambda w:w.replace('ё','е').replace('Ё','Е')
+        return next((base for base in bases if _base_of(fold(word),[fold(base)])is not None),None)
     families = (('pn:', _candidates(texts, v2,acute_transparent=source_marks)),
                 ('cw:', _coinages([text.replace(ACUTE,'')for text in texts]if source_marks else texts)))
     # v2: sentence-initial candidates overlap the coined words; the any-case 'cw:' entry must win (игв/Игв).
@@ -101,17 +117,17 @@ def proper_noun_lexicon(texts, character_lexicon: dict[str, str], v2: bool = Fal
         words = sorted((w for w in found if w.casefold().replace('ё', 'е') not in known), key=lambda w: (len(w), w))
         bases: list[str] = []
         for word in words:
-            if _base_of(word, bases) is None:bases.append(word)
+            if family_base(word, bases) is None:bases.append(word)
         for base in bases:
             choices=set();sources=[]
             if source_marks:
-                from .name_stress import parse,aligned_stress_index
+                from .name_stress import aligned_stress_index
                 for evidence in explicit_stress:
-                    plain,index=parse(evidence['word'])
+                    plain,index=source_stress(evidence['word'])
                     if evidence.get('plain')!=plain or evidence.get('stress')!=index:
                         raise ValueError('Explicit source-name stress evidence changed')
                     if plain.casefold().replace('ё','е')in known:continue
-                    matching=[candidate for candidate in bases if _base_of(plain,[candidate])is not None]
+                    matching=[candidate for candidate in bases if family_base(plain,[candidate])is not None]
                     if base not in matching:continue
                     if len(matching)!=1:raise ValueError('Ambiguous explicit source-name family: '+plain)
                     mapped=aligned_stress_index(plain,base,index)
@@ -119,7 +135,10 @@ def proper_noun_lexicon(texts, character_lexicon: dict[str, str], v2: bool = Fal
                     choices.add(mapped);sources.append(evidence)
                 if len(choices)>1:raise ValueError('Conflicting explicit source-name stresses: '+base)
             if choices:
-                index=next(iter(choices));stressed=base[:index+1]+ACUTE+base[index+1:]
+                index=next(iter(choices))
+                if any(source['plain'][source['stress']]in'ёЁ'for source in sources):
+                    base=base[:index]+('Ё'if base[index].isupper()else'ё')+base[index+1:]
+                stressed=base if base[index]in'ёЁ'else base[:index+1]+ACUTE+base[index+1:]
             else:stressed = _stress(base, v2)
             if stressed and not any(k[3:].casefold() == base.casefold() for k in lexicon):
                 lexicon[prefix + base] = stressed

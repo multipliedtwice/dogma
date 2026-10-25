@@ -33,7 +33,7 @@ class RuntimeRussianPreparationTests(unittest.TestCase):
         def call(operation,data):
             self.calls.append((operation,copy.deepcopy(data)))
             if operation=='prepare_russian_names':
-                value={'book_sha256':data['book_sha256'],'input_sha256':digest({'inventory':data['inventory'],'names':data['names']}),
+                value={'book_sha256':data['book_sha256'],'input_sha256':prep.names_input_digest(data),
                     'proper_nouns':{'pn:Нимрас':'Ни́мрас'}}
             else:
                 self.assertEqual(data['pronunciation']['proper_nouns'],{'pn:Нимрас':'Ни́мрас'})
@@ -71,6 +71,12 @@ class RuntimeRussianPreparationTests(unittest.TestCase):
         self.prepare()
         self.assertEqual([c[0]for c in self.calls],['prepare_russian','prepare_russian'])
         self.assertEqual(self.calls[0][1]['pronunciation']['proper_nouns'],{'pn:Нимрас':'Ни́мрас'})
+
+    def test_valid_frozen_resume_never_reextracts_names_after_software_update(self):
+        spec=self.prepare();self.calls.clear()
+        with patch.object(prep,'proper_inventory',side_effect=AssertionError('new extraction must not reinterpret a frozen chapter')):
+            resumed=self.jobs._prepare_russian_chapter('current',self.book,'c1',prep.config('codex_cli'))
+        self.assertEqual(spec,resumed);self.assertEqual(self.calls,[])
 
     def test_cross_book_worker_response_rejected_before_any_render(self):
         original=self.jobs._call
@@ -125,6 +131,56 @@ class RuntimeRussianPreparationTests(unittest.TestCase):
             self.assertNotIn(chapter,current['prepared_chapters']);self.assertIn('unselected',current['prepared_chapters'])
             self.assertNotIn('proper_noun_preparation',current)
             self.assertEqual(current['names'],pronunciation['names'])
+
+    def source_family_fixture(self,text,name,automatic):
+        from rimsky.name_stress import mark_names
+        self.book={'source_hash':'b'*64,'chapters':[{'id':'c1','blocks':[{'id':'p1','text':text}]}]}
+        self.generation={'analysis':{'pronunciation':{'names':{'g':{'name':name,'stressed':automatic,'source':'model'}}}},
+            'segments':[{'id':'u1','source_id':'p1','chapter_id':'c1','text':text,'spoken':text,
+                'speaker':'narrator','delivery':'neutral','start':0,'end':len(text),'status':'pending'}]}
+        def call(operation,data):
+            self.calls.append((operation,copy.deepcopy(data)))
+            if operation=='prepare_russian_names':return prep.prepare_names(data,model_pins={})
+            entries={}
+            for unit in data['units']:
+                native=mark_names(unit['text'],data['pronunciation']['source_names'])[0]
+                entry={'policy':prep.POLICY,'book_sha256':data['book_sha256'],'source':prep.source_binding(unit['source']),
+                    'text_sha256':digest(unit['text'].encode()),'automatic_text':native,'module_pins':{},'model_pins':{}}
+                entry['sound_sha256']=digest(prep.sound_binding(entry));entry['sha256']=digest(entry)
+                entries[prep.entry_key(unit['text'],unit['source'])]=entry
+            result={'policy':prep.POLICY,'prepared_units':entries,'request_sha256':digest(data)}
+            result['sha256']=digest(result);return result
+        self.jobs._call=call
+
+    def test_new_human_family_revalidates_frozen_source_names_and_controls_final_native(self):
+        from rimsky import proper_noun_stress as proper,listener_stress,spoken_pronunciation
+        self.source_family_fixture('Гундаха́р ответил. Он видел Гундахара.','Гундахар','Гу́ндахар')
+        with patch.object(proper,'_morph',return_value=SimpleNamespace(word_is_known=lambda word:True)):
+            first=self.jobs._prepare_russian_chapter('current',self.book,'c1',prep.config('local'))
+            self.assertEqual(first['source_names']['g'],'Гундаха́р')
+            self.calls.clear()
+            human={'гундахар':'Гунда́хар'}
+            updated=self.jobs._prepare_russian_chapter('current',self.book,'c1',prep.config('local'),human_names=human)
+        self.assertEqual([c[0]for c in self.calls],['prepare_russian_names','prepare_russian'])
+        frozen={'policy':listener_stress.POLICY,'names':human,'occurrences':[]};frozen['sha256']=digest(frozen)
+        text=self.book['chapters'][0]['blocks'][0]['text']
+        source={'source_id':'p1','source_text':text,'source_start':0,'source_end':len(text)}
+        native,_=spoken_pronunciation.synthesis_text(text,{**updated,'listener_stress':frozen,'listener_source':source})
+        self.assertEqual(native,'Гунда́хар ответил. Он видел Гунда́хара.')
+        self.calls.clear()
+        with patch.object(prep,'proper_inventory',side_effect=AssertionError('unchanged resume must stay frozen')):
+            self.jobs._prepare_russian_chapter('current',self.book,'c1',prep.config('local'),human_names=human)
+        self.assertEqual(self.calls,[])
+
+    def test_new_human_conflicting_with_printed_yo_holds_before_batch_even_when_prepared(self):
+        from rimsky import proper_noun_stress as proper
+        self.source_family_fixture('Мозёс ответил. Он видел Мозеса.','Мозес','Мо́зес')
+        with patch.object(proper,'_morph',return_value=SimpleNamespace(word_is_known=lambda word:True)):
+            self.jobs._prepare_russian_chapter('current',self.book,'c1',prep.config('local'))
+            self.calls.clear()
+            with self.assertRaisesRegex(ValueError,'source ё conflicts'):
+                self.jobs._prepare_russian_chapter('current',self.book,'c1',prep.config('local'),human_names={'мозес':'Мо́зес'})
+        self.assertEqual([c[0]for c in self.calls],['prepare_russian_names'])
 
 
 if __name__=='__main__':unittest.main()

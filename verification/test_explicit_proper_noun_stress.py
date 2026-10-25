@@ -65,6 +65,16 @@ class ExplicitProperNounTests(unittest.TestCase):
         inventory=self.inventory('Он ничего не стои́т. Чужой дом.')
         self.assertEqual(inventory['explicit_stress'],[])
 
+    def test_known_cast_explicit_acute_and_yo_inventory_keep_whole_source_tokens(self):
+        text='Па́влом говорил Мозёс. idПа́влом7 _Мозёс xПа́влом Па́влом\u200d7.'
+        book={'chapters':[{'id':'c1','blocks':[{'id':'p1','text':text}]}]}
+        rows={'p':{'name':'Павел','stressed':'Па́вел'},'m':{'name':'Мозес','stressed':'Мо́зес'}}
+        with patch('rimsky.name_stress.dictionary_name_forms',return_value=('павлом',)):
+            inventory=preparation.proper_inventory(book,rows)
+        self.assertEqual([r['word']for r in inventory['explicit_stress']],['Па́влом','Мозёс'])
+        for row in inventory['explicit_stress']:
+            self.assertEqual(text[row['source_start']:row['source_end']],row['word'])
+
     def test_legacy_frozen_lexicon_mode_retains_its_original_interpretation(self):
         text='Встретил Гундаха́р. Он говорил с Гундахаром.'
         with patch.object(proper,'_stress',side_effect=lambda word,*args:word)as guess:

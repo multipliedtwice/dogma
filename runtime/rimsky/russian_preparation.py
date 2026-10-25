@@ -33,17 +33,26 @@ def book_binding(book):
         for c in book['chapters']]})
 
 
-def proper_inventory(book):
+def proper_inventory(book,names_rows=None):
     """Compact book-wide candidate sets; no tagger or online provider runs here."""
     from .proper_noun_stress import _candidates,_coinages
-    from .name_stress import ACUTE,parse
+    from .name_stress import ACUTE,build
+    from .proper_noun_stress import source_stress
+    from .spoken_pronunciation import _word_character
     blocks=[b for c in book['chapters']for b in c['blocks']if b.get('text')]
     texts=[b['text']for b in blocks];capitalized=_candidates(texts,True,acute_transparent=True)
+    cast_forms=set()
+    for row in (names_rows or{}).values():
+        for word in re.findall('[А-Яа-яЁё́]+',row['name']):cast_forms.update(build({'probe':word.replace(ACUTE,'')},implicit_single=True))
     explicit=[]
     for block in blocks:
         for match in re.finditer('[А-Яа-яЁё́]+',block['text']):
-            if ACUTE not in match[0]or match[0].replace(ACUTE,'')not in capitalized:continue
-            plain,index=parse(match[0])
+            plain=match[0].replace(ACUTE,'')
+            if ACUTE not in match[0]and not any(ch in'ёЁ'for ch in plain):continue
+            if plain not in capitalized and plain.casefold().replace('ё','е')not in cast_forms:continue
+            if (match.start()and _word_character(block['text'][match.start()-1])
+                or match.end()<len(block['text'])and _word_character(block['text'][match.end()])):continue
+            plain,index=source_stress(match[0])
             explicit.append({'word':match[0],'plain':plain,'stress':index,'source_id':block['id'],
                 'source_start':match.start(),'source_end':match.end(),'source_text_sha256':digest(block['text'].encode('utf8'))})
     return {'capitalized':sorted(capitalized),'coinages':sorted(_coinages([t.replace(ACUTE,'')for t in texts])),
@@ -53,13 +62,22 @@ def proper_inventory(book):
 def prepare_names(data,*,model_pins=None):
     from .proper_noun_stress import proper_noun_lexicon,RULE_SOURCE
     models=local_model_pins()if model_pins is None else model_pins
-    inventory=data['inventory'];names=data['names']
+    from .source_name_stress import source_names
+    inventory=data['inventory'];names=data['names'];rows=data.get('names_rows')
+    if rows is None:rows={key:{'name':value.replace('\u0301',''),'stressed':value,'source':'model'}for key,value in names.items()}
+    effective,cast_evidence=source_names(inventory.get('explicit_stress',[]),rows,data.get('human_names')or{})
     texts=['. '.join(inventory['capitalized']),' '.join(inventory['coinages'])]
     explicit_evidence=[]
-    lexicon=proper_noun_lexicon(texts,names,True,explicit_stress=inventory.get('explicit_stress',[]),source_evidence=explicit_evidence)
-    result={'rule':RULE_SOURCE,'book_sha256':data['book_sha256'],'input_sha256':digest({'inventory':inventory,'names':names}),
-        'proper_nouns':lexicon,'explicit_source_families':explicit_evidence,'model_pins':models,'module_pins':module_pins()}
+    lexicon=proper_noun_lexicon(texts,{**effective,**(data.get('human_names')or{})},True,
+        explicit_stress=inventory.get('explicit_stress',[]),source_evidence=explicit_evidence)
+    result={'rule':RULE_SOURCE,'book_sha256':data['book_sha256'],'input_sha256':names_input_digest(data),
+        'proper_nouns':lexicon,'source_names':effective,'source_name_receipts':cast_evidence,
+        'explicit_source_families':explicit_evidence,'model_pins':models,'module_pins':module_pins()}
     result['sha256']=digest(result);return result
+
+
+def names_input_digest(data):
+    return digest({key:data.get(key)for key in ('inventory','names','names_rows','human_names')})
 
 
 def source_binding(value):
@@ -105,7 +123,7 @@ def resolve_entry(text,spec):
 def module_pins():
     names=('russian_preparation','russian_preparation_providers','independent_luna_passes','auto_pronunciation',
         'homograph_stress','yo_restoration','proper_noun_stress','name_stress','spoken_pronunciation','respelling',
-        'cli_process','claude_analysis','codex_analysis')
+        'cli_process','claude_analysis','codex_analysis','source_name_stress')
     return {name:providers.module_digest('rimsky.'+name) for name in names}
 
 
@@ -231,10 +249,11 @@ def prepare(data,*,call=providers.call,validate_provider=providers.validate,mode
     for unit in units:source_binding(unit['source'])
     pins=module_pins();models=local_model_pins() if model_pins is None else model_pins
     spec=data['pronunciation'];names={key:row['stressed'] for key,row in spec.get('names',{}).items()}
+    names.update(spec.get('source_names')or{})
     if not isinstance(spec.get('proper_nouns'),dict):raise ValueError('A frozen book-wide proper-noun lexicon is required')
     names.update(spec.get('proper_nouns')or{})
     request={'policy':POLICY,'book_sha256':data['book_sha256'],'units':units,
-        'pronunciation':{k:spec.get(k)for k in ('names','common','proper_nouns','terms','respelling_sources')},
+        'pronunciation':{k:spec.get(k)for k in ('names','common','proper_nouns','terms','respelling_sources','source_names','source_name_receipts')},
         'recipe':data['recipe'],'module_pins':pins,'model_pins':models}
     folder=Path(data['cache_dir'])/digest(request);done=folder/'prepared.json'
     independent.immutable(folder/'request.json',request)
@@ -256,7 +275,8 @@ def prepare(data,*,call=providers.call,validate_provider=providers.validate,mode
         for unit in units:
             text,phrase=phrase_stress(unit['text'])
             text,respelling=respell_text(text,names,spec.get('common',[]),spec.get('terms'),True,spec.get('respelling_sources'))
-            inputs.append(text);transforms.append({'phrase':phrase,'respelling':respelling})
+            inputs.append(text);transforms.append({'phrase':phrase,'respelling':respelling,
+                **({'source_name_receipts':spec['source_name_receipts']}if spec.get('source_name_receipts')else{})})
         hs_rows=hs.disagreements([{'text':t,'names':names,'common':spec.get('common',[]),'implicit_single':True}for t in dict.fromkeys(inputs)])
         yo_rows=[];yo_auto=[]
         for text in dict.fromkeys(inputs):

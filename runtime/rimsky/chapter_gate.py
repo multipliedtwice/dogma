@@ -62,18 +62,44 @@ def generation_binding(segments,pack_fingerprint,root):
     bound=[{k:s[k] for k in ('id','source_id','start','end','spoken','speaker','performance')} for s in segments]
     return audio_binding(digest({'segments':bound,'pack':pack_fingerprint}),takes)
 
+
+def chapter_parts_binding(segments):
+    return digest([{k:s.get(k)for k in ('id','source_id','start','end','spoken','speaker','performance','audio_hash','duration')}
+        for s in segments])
+
+
+def processing_origin(generation,chapter_id):
+    """A retained playable chapter keeps its original processing provenance."""
+    from .post_processing import mode
+    analysis=generation.get('analysis')or{}
+    segments=[s for s in generation.get('segments',[])if s['chapter_id']==chapter_id]
+    saved=(analysis.get('chapter_processing')or{}).get(chapter_id)
+    if saved:
+        if saved.get('policy')!='chapter-processing-origin-v1'or saved.get('sha256')!=digest({k:v for k,v in saved.items()if k!='sha256'}):
+            raise SpeechHoldError('Retained chapter processing provenance changed.')
+        if saved.get('parts_sha256')==chapter_parts_binding(segments)and all(s['status']=='ready'for s in segments):
+            mode({'post_processing':saved.get('post_processing')})
+            return saved
+    result={'policy':'chapter-processing-origin-v1','post_processing':mode(generation.get('config')or{}),
+        'recognition_status':'not_checked'if mode(generation.get('config')or{})=='off'else'previously_enabled',
+        'pack_fingerprint':generation['config'].get('pack_fingerprint'),
+        'parts_sha256':chapter_parts_binding(segments),'directed':bool(analysis.get('scene_direction')),
+        'gate':analysis.get('chapter_acceptance',{}).get(chapter_id)}
+    result['sha256']=digest(result);return result
+
 def music_released(generation,chapter_id,root):
-    from .post_processing import enabled
-    if not enabled(generation.get('config')or{}):return True
+    try:origin=processing_origin(generation,chapter_id)
+    except SpeechHoldError:return False
+    if origin['post_processing']=='off':return True
     analysis=generation.get('analysis') or {}
     # Legacy generations have no chapter direction/gate and retain their
     # existing behavior. New directed generations never bypass this check.
-    if not analysis.get('scene_direction'):return True
+    if not origin['directed']:return True
     segments=[s for s in generation['segments'] if s['chapter_id']==chapter_id]
-    gate=analysis.get('chapter_acceptance',{}).get(chapter_id)
+    gate=origin['gate']
     if not gate or not gate.get('passed'):return False
     try:
-        require(gate,generation_binding(segments,generation['config']['pack_fingerprint'],root))
+        require(gate,generation_binding(segments,origin['pack_fingerprint'],root))
         return bool(segments) and all(s['status']=='ready' for s in segments)
     except SpeechHoldError:return False
 

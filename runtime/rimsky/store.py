@@ -749,15 +749,29 @@ class Store:
         previous=dict(original['config'])if original else {}
         from .current_audiobook import previous_parts
         retained=[*original['segments'],*previous_parts(self,original['id'])]if original else []
-        combined=set(selected)|{s['chapter_id']for s in retained if s.get('audio_hash')}
-        config = {**previous,**config, 'chapters': [c['id']for c in book['chapters']if c['id']in combined], 'schema': 1}
+        started=bool(original and (original['analysis']or any(s.get('audio_hash')or s['status']!='pending'for s in original['segments'])))
+        unfinished={s['chapter_id']for s in retained if started and s.get('status')!='ready'}
+        combined=set(selected)|unfinished|{s['chapter_id']for s in retained if s.get('audio_hash')}
+        config = {**previous,**config, 'chapters': [c['id']for c in book['chapters']if c['id']in combined], 'schema': 1,
+                  'render_scope':'pending-parts-v1',
+                  'render_owned_chapters':[c['id']for c in book['chapters']if c['id']in set(selected)|unfinished],
+                  'render_owned_parts':[]}
         config.pop('engine',None);config.pop('external_music',None)
         title = bounded_text(name or (original['name']if original else book['title']))
+        reusable=bool(original and original['analysis'].get('complete')and previous.get('pack_fingerprint')==config.get('pack_fingerprint')
+                      and previous.get('engine')!='higgs_audio_tts_q8_external_preview')
+        if original and not reusable and any(s.get('audio_hash')and s['chapter_id']not in selected for s in retained):
+            raise AppError('This partial regeneration requires new character/model analysis. Select all currently narrated chapters, or keep the previous compatible model pack; unselected output was preserved.')
         with self.lock, self.db:
             config['opening'] = previous.get('opening')or attach_opening(self, book)
-            reusable=bool(original and original['analysis'].get('complete')and previous.get('pack_fingerprint')==config.get('pack_fingerprint')
-                          and previous.get('engine')!='higgs_audio_tts_q8_external_preview')
             analysis=dict(original['analysis'])if reusable else {}
+            if original:
+                from .chapter_gate import processing_origin
+                origins=dict(original['analysis'].get('chapter_processing')or{})
+                for chapter in previous.get('chapters',[]):
+                    parts=[s for s in original['segments']if s['chapter_id']==chapter]
+                    if parts and all(s['status']=='ready'and s['audio_hash']for s in parts):origins[chapter]=processing_origin(original,chapter)
+                if origins:analysis['chapter_processing']=origins
             if config.get('russian_preparation') and analysis.get('pronunciation'):
                 # An explicit new generation request refreshes selected
                 # preparation under the released recipe. Resume never comes
@@ -765,6 +779,8 @@ class Store:
                 pronunciation=dict(analysis['pronunciation'])
                 pronunciation['prepared_chapters']={key:value for key,value in pronunciation.get('prepared_chapters',{}).items()if key not in selected}
                 pronunciation.pop('proper_noun_preparation',None)
+                pronunciation.pop('source_names',None)
+                pronunciation.pop('source_name_receipts',None)
                 analysis['pronunciation']=pronunciation
             if original:
                 takes=self.takes(book_id);targets=[s for s in original['segments']if s['chapter_id']in selected]

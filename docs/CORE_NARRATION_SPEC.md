@@ -152,6 +152,23 @@ aliases to read older state, while retaining raw journal identifiers and chronol
 External cast display snapshots require exact book/source/generation binding; nearby
 analysis files never override the live cast.
 
+A human family overlay must preserve the complete character-name binding, including
+aliases and unmatched name words. Retain their validated automatic marks and their
+actual attribution. Repeated overlays require a source/character-bound baseline;
+never recover an unsupported human choice from stale projected state.
+An explicit source-name stress, including printed ё, overrides an automatic name
+guess throughout a uniquely bound family. Human families still take precedence.
+Keep independent hard-е choices during a stress-only correction; hold conflicting
+source or human signals that cannot be represented without changing protected letters.
+
+Retained playback chapters are not an instruction to regenerate them. For a new
+partial generation request, prepare, direct and render only pending work, including
+earlier unfinished work and explicit corrections. A change to a reviewed voice or
+name invalidates the affected parts. Keep unrelated ready audio and its metadata
+unchanged, including when a selected chapter moves to a newer preparation recipe.
+Resume still validates caches owned by the active request, including later corrected
+parts, and aligns any replacement audio without widening work to retained neighbors.
+
 Imported legacy corrections without a verified original timestamp are historical
 evidence below direct human corrections. Copying an old export must never make its
 choices newer. Preserve the raw receipt and use the same precedence for character
