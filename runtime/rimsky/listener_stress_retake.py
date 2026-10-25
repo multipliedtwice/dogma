@@ -260,11 +260,8 @@ def enqueue_listener_stress_retake(store, report):
         return _enqueue_generation(store,report)
     generations=store.generation_list(report['book_id'])
     candidates=[row['id'] for row in generations[:1]]
-    positions=store.rows('SELECT value FROM positions WHERE book_id=?',(report['book_id'],))
-    if positions:
-        with contextlib.suppress(ValueError,TypeError):
-            current=json.loads(positions[0]['value']).get('generation_id')
-            if current in [row['id'] for row in generations]:candidates.append(current)
+    # A saved listening position can belong to an immutable historical version.
+    # Its heard take remains the report's origin, not a second render target.
     receipts=[]
     for gid in dict.fromkeys(candidates):
         generation=store.generation(gid)

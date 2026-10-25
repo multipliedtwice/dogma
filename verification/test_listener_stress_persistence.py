@@ -227,6 +227,70 @@ class ListenerStressPersistenceTest(unittest.TestCase):
         self.assertTrue(item['pending_segment_ids'])
         self.assertEqual('held',report_queue_status(self.store,report)['status'])
 
+    def test_stale_saved_position_does_not_create_second_legacy_render(self):
+        from rimsky.listener_stress_retake import enqueue_listener_stress_retake, ENGINE
+        from process_listener_stress_queue import current_book_debug_base
+        report=self.note()
+        old=self.generation['id']
+        current=self.store.create_generation(self.book['id'],{'engine':ENGINE})
+        folders={}
+        for gid,name in ((old,'legacy-heard'),(current['id'],'current-debug')):
+            folder=self.store.root.parent/name;folder.mkdir();folders[gid]=folder
+            (folder/'manifest.json').write_text('{}')
+            (folder/'progress.json').write_text(json.dumps({'generation':name,'status':'complete'}))
+            self.store.execute('UPDATE generations SET config=?,analysis=? WHERE id=?',
+                (json.dumps({'engine':ENGINE}),json.dumps({'external_preview':{'generation':name}}),gid))
+        (folders[current['id']]/'ready.json').write_text(json.dumps({'plans':[{}],'native_manifest':{'model':'pinned'}}))
+        self.store.execute("UPDATE segments SET status='ready',audio_hash=?,duration=10 WHERE generation_id=?",('b'*64,current['id']))
+        self.store.execute('INSERT OR REPLACE INTO positions VALUES(?,?)',(self.book['id'],json.dumps({'generation_id':old})))
+        with patch('rimsky.listener_stress_retake._start_worker') as launch:
+            receipt=enqueue_listener_stress_retake(self.store,report)
+        self.assertEqual(1,receipt['generations'])
+        self.assertTrue(all(call.args[2]==current['id'] for call in launch.call_args_list))
+        self.assertFalse((folders[old]/'listener-stress-queue').exists())
+        items=[json.loads(p.read_text('utf8')) for p in (folders[current['id']]/'listener-stress-queue').glob('*.json')]
+        self.assertTrue(items)
+        self.assertTrue(all(item['origin_report']['audio_hash']==report['audio_hash'] for item in items))
+        self.assertTrue(all(item['report']['audio_hash']=='b'*64 for item in items))
+        self.assertEqual((folders[current['id']],current['id']),current_book_debug_base(folders[old],self.store.root,old))
+
+    def test_legacy_dispatch_waits_for_full_book_owner(self):
+        from process_listener_stress_queue import process
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);path=root/'old-note.json'
+            item={'id':'note','status':'queued','report':{'book_id':self.book['id']}}
+            path.write_text(json.dumps(item))
+            def delivered(_seconds):path.write_text(json.dumps({**item,'status':'applied'}))
+            with patch('process_listener_stress_queue._locked',return_value=None), \
+                 patch('process_listener_stress_queue.time.sleep',side_effect=delivered), \
+                 patch('process_listener_stress_queue.current_book_debug_base',return_value=(root,'old')), \
+                 patch('process_listener_stress_queue._process_locked') as dispatch:
+                process(root,root/'library','old',path)
+            dispatch.assert_not_called()
+
+    def test_legacy_dispatch_retargets_after_lock_and_preserves_prior_barrier(self):
+        import contextlib
+        from process_listener_stress_queue import process
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);old=root/'old';new=root/'new';old.mkdir();new.mkdir()
+            path=old/'note.json';barrier={'reason':'historic release'}
+            path.write_text(json.dumps({'status':'queued','report':{'book_id':self.book['id']},'development_dispatch_barrier':barrier}))
+            events=[]
+            @contextlib.contextmanager
+            def lock(*_):events.append('lock');yield True
+            with patch('process_listener_stress_queue.wait_for_development_release',side_effect=lambda *_:events.append('barrier')), \
+                 patch('process_listener_stress_queue.current_book_debug_base',side_effect=[(old,'old'),(new,'new')]), \
+                 patch('process_listener_stress_queue.book_correction_lock',side_effect=lock), \
+                 patch('process_listener_stress_queue.rebind_deferred_report') as rebind, \
+                 patch('process_listener_stress_queue._process_locked') as dispatch:
+                process(old,root/'library','old',path)
+            self.assertEqual(['barrier','lock'],events)
+            rebind.assert_called_once_with(new,root/'library','new',path)
+            dispatch.assert_called_once_with(new,root/'library','new',path)
+            result=json.loads(path.read_text())
+            self.assertNotIn('development_dispatch_barrier',result)
+            self.assertEqual(barrier,result['prior_dispatch_barriers'][0]['barrier'])
+
     def test_technical_recovery_topology_routes_to_one_shot_worker(self):
         sys.path.insert(0,str(ROOT/'scripts'))
         from process_listener_stress_queue import process

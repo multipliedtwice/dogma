@@ -459,7 +459,51 @@ def latest_delivered_debug_base(folder,data_dir,generation_id):
     finally:store.close()
 
 
+def current_book_debug_base(folder, data_dir, generation_id):
+    """Old-tab queues follow the current book, retaining their heard evidence."""
+    from rimsky.store import Store
+    from rimsky.listener_stress_retake import _external_folder
+    if not (data_dir/'library.sqlite3').is_file():return folder,generation_id
+    store=Store(data_dir)
+    try:
+        book_id=store.generation(generation_id)['book_id']
+        current=store.generation_list(book_id)
+        if not current:return folder,generation_id
+        identifier=current[0]['id']
+        generation=store.generation(identifier)
+        target=_external_folder(store,generation)
+        if target is None:return folder,generation_id
+        ready=target/'ready.json'
+        if not ready.is_file():return folder,generation_id
+        frozen=read(ready)
+        if not frozen.get('plans') or not frozen.get('native_manifest'):return folder,generation_id
+        return target,identifier
+    finally:store.close()
+
+
 def process(folder, data_dir, generation_id, item_path):
+    # The full-render coordinator takes this same lock. Legacy queues must wait
+    # too, and choose their destination after waiting rather than racing it.
+    if read(item_path).get('status') in ('applied','held'):return
+    # A preparation barrier must never monopolize the book lock needed by the
+    # full render that will satisfy it.
+    wait_for_development_release(folder,item_path)
+    initial,initial_id=current_book_debug_base(folder,data_dir,generation_id)
+    if initial_id!=generation_id:wait_for_development_release(initial,item_path)
+    with book_correction_lock(data_dir,item_path) as acquired:
+        if not acquired:return
+        target,target_id=current_book_debug_base(folder,data_dir,generation_id)
+        if target_id!=generation_id:
+            rebind_deferred_report(target,data_dir,target_id,item_path)
+            item=read(item_path)
+            previous=item.pop('development_dispatch_barrier',None)
+            if previous:
+                item.setdefault('prior_dispatch_barriers',[]).append({'generation_id':generation_id,'barrier':previous})
+                write_json(item_path,item)
+        _process_locked(target,data_dir,target_id,item_path)
+
+
+def _process_locked(folder, data_dir, generation_id, item_path):
     item = read(item_path)
     # A coalesced correction can publish several requests while this owner is
     # working through an earlier scan. Never dispatch an already covered item.
@@ -474,27 +518,23 @@ def process(folder, data_dir, generation_id, item_path):
             rebind_deferred_report(folder,data_dir,generation_id,item_path)
             item=read(item_path)
         wait_for_development_release(folder,item_path)
-        with book_correction_lock(data_dir,item_path) as acquired:
-            if not acquired:return
-            # Re-evaluate after the book lock: a sibling may have delivered a
-            # newer base while this request was waiting behind its render.
-            target,target_id=latest_delivered_debug_base(folder,data_dir,generation_id)
-            if target_id!=generation_id:rebind_deferred_report(target,data_dir,target_id,item_path)
-            item=read(item_path)
-            item.update(status='running',updated=now(),attempts=int(item.get('attempts',0))+1,
-                dispatch_source_generation_id=target_id,dispatch_source_folder=str(target))
-            write_json(item_path,item)
-            result_path=folder/'listener-stress-queue/results'/f"{item['id']}.json"
-            result_path.parent.mkdir(parents=True,exist_ok=True)
-            subprocess.run([sys.executable,'-X','utf8','-u',str(ROOT/'scripts/repair_debug_listener_stress.py'),
-                '--generation',str(target),'--data-dir',str(data_dir),'--generation-id',target_id,
-                '--queue-item',str(item_path),'--result',str(result_path)],cwd=ROOT,check=True)
-            result=read(result_path)
-            if result.get('status')!='applied':raise AppError('The one-shot listener correction was not published.')
-            item=read(item_path)
-            item.update(status='applied',updated=now(),completed=now(),error='',
-                result=result,result_sha256=file_digest(result_path),human_audio_approval=False)
-            write_json(item_path,item)
+        target,target_id=latest_delivered_debug_base(folder,data_dir,generation_id)
+        if target_id!=generation_id:rebind_deferred_report(target,data_dir,target_id,item_path)
+        item=read(item_path)
+        item.update(status='running',updated=now(),attempts=int(item.get('attempts',0))+1,
+            dispatch_source_generation_id=target_id,dispatch_source_folder=str(target))
+        write_json(item_path,item)
+        result_path=folder/'listener-stress-queue/results'/f"{item['id']}.json"
+        result_path.parent.mkdir(parents=True,exist_ok=True)
+        subprocess.run([sys.executable,'-X','utf8','-u',str(ROOT/'scripts/repair_debug_listener_stress.py'),
+            '--generation',str(target),'--data-dir',str(data_dir),'--generation-id',target_id,
+            '--queue-item',str(item_path),'--result',str(result_path)],cwd=ROOT,check=True)
+        result=read(result_path)
+        if result.get('status')!='applied':raise AppError('The one-shot listener correction was not published.')
+        item=read(item_path)
+        item.update(status='applied',updated=now(),completed=now(),error='',
+            result=result,result_sha256=file_digest(result_path),human_audio_approval=False)
+        write_json(item_path,item)
         return
     if reuse_applied(folder, item_path, item):
         return
