@@ -266,6 +266,16 @@ class CurrentOutputTests(unittest.TestCase):
         self.assertEqual(files, set(self.data.rglob('*.wav')))
         self.assertEqual(generation['revision'], view['store_revision'])
 
+    def test_other_writer_part_change_is_rejected_before_stale_manifest_can_replace_it(self):
+        self.store.value['segments'][1]['audio_hash'] = 'b' * 64
+        self.store.value['revision'] = 5
+        files = set(self.data.rglob('*.wav'))
+        with self.assertRaisesRegex(ValueError, 'playback part changed'):
+            c.publish_parts(self.store, self.data, self.view,
+                            {'u0': (self.new_unit, self.receipt, self.raw)}, expected_revision=5)
+        self.assertEqual(files, set(self.data.rglob('*.wav')))
+        self.assertEqual([], self.store.published)
+
 
 if __name__ == '__main__':
     unittest.main()

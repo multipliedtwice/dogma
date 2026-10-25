@@ -380,6 +380,8 @@ def _publish_parts(store, data_dir, view, changes, *, expected_revision):
     current = store.generation(view['generation_id'])
     if current['book_id'] != view['book_id']:
         raise ValueError('Replacement belongs to another book')
+    if not _same_parts(view, current):
+        raise ValueError('A current playback part changed before this replacement; reload its publication')
     if not changes:
         return current, view
     by_id = {x['id']: x for x in current['segments']}
