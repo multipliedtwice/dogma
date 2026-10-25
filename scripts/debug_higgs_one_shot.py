@@ -83,11 +83,66 @@ def canonical_assignments(generation,chapter):
     result=[]
     for chunk in sorted((generation/chapter).glob('chunk-*')):
         paths=[p for p in chunk.rglob('assignment.json') if not any(x.startswith(('take-','word-','recovery-')) for x in p.relative_to(chunk).parts[:-1])]
-        if not paths:continue
+        if not paths:raise ValueError('Requested chapter contains an incomplete chunk without an assignment: '+str(chunk))
         depth=max(len(p.relative_to(chunk).parts) for p in paths);paths=[p for p in paths if len(p.relative_to(chunk).parts)==depth]
         if len(paths)!=1:raise ValueError('Ambiguous final assignment: '+str(chunk))
         result.append(paths[0])
     if not result:raise ValueError('No canonical assignments for '+chapter)
+    return result
+
+
+def source_coverage(book,units,chapters,*,allow_partial=False):
+    """Prove source ranges independently of inherited unit-count metadata.
+
+    Nonlexical exclusions retain exact source/markup hashes. They never cover
+    letters, numbers or symbols that require a spoken-text decision. Partial
+    playback may report missing ranges, but cannot claim complete coverage.
+    """
+    import unicodedata
+    from rimsky import preparation
+    chosen={c['id']:c for c in book['chapters']if c['id']in chapters}
+    if set(chosen)!=set(chapters):raise ValueError('Unknown requested source chapter')
+    blocks={b['id']:(cid,b)for cid,c in chosen.items()for b in c['blocks']}
+    spans={};identifiers=set();inventory=[]
+    for unit in units:
+        if unit.get('chapter_id')not in chosen:continue
+        uid=unit['id'];sid=unit['source_id'];start=unit['start'];end=unit['end']
+        if uid in identifiers or sid not in blocks or blocks[sid][0]!=unit['chapter_id']:
+            raise ValueError('Duplicate or foreign source unit: '+uid)
+        identifiers.add(uid);text=blocks[sid][1].get('text','')
+        if (type(start)is not int or type(end)is not int or not 0<=start<end<=len(text)
+                or text[start:end]!=unit['text']):raise ValueError('Unit does not preserve its exact source range: '+uid)
+        spans.setdefault(sid,[]).append((start,end,uid))
+        inventory.append({'id':uid,'source_id':sid,'chapter_id':unit['chapter_id'],'start':start,'end':end,'text_sha256':digest(unit['text'])})
+    missing=[];excluded=[]
+    for sid,(cid,block)in blocks.items():
+        text=block.get('text','');cursor=0
+        if not preparation.narratable(block):
+            excluded.append({'chapter_id':cid,'source_id':sid,'start':0,'end':len(text),
+                'source_kind':block.get('kind'),'explicit_exclusion':block.get('exclude_from_narration')is True,
+                'source_passage_sha256':digest(text),'source_markup_sha256':digest(block.get('html','')),
+                'range_sha256':digest(text),'rule':'canonical-nonnarratable-source-v1',
+                'narratable_module_sha256':file_digest(Path(preparation.__file__))})
+            continue
+        def gap(start,end):
+            if start>=end:return
+            fragment=text[start:end]
+            reason='whitespace'if not fragment.strip()else 'punctuation'if all(c.isspace()or unicodedata.category(c).startswith('P')for c in fragment)else None
+            record={'chapter_id':cid,'source_id':sid,'start':start,'end':end,'source_kind':block.get('kind'),
+                'source_passage_sha256':digest(text),'source_markup_sha256':digest(block.get('html','')),
+                'range_sha256':digest(fragment)}
+            if reason:excluded.append({**record,'rule':'source-nonlexical-'+reason+'-v1'})
+            else:missing.append({**record,'uncovered_alphanumeric':sum(c.isalnum()for c in fragment)})
+        for start,end,uid in sorted(spans.get(sid,[])):
+            if start<cursor and any(c.isalnum()for c in text[start:min(end,cursor)]):
+                raise ValueError('Overlapping spoken source ranges: '+uid)
+            gap(cursor,start);cursor=max(cursor,end)
+        gap(cursor,len(text))
+    result={'policy':'complete-requested-source-ranges-v1','chapters':list(chapters),
+        'source_document_sha256':digest(book),'unit_inventory_sha256':digest(inventory),
+        'unit_count':len(inventory),'complete':not missing,'excluded_ranges':excluded,'missing_ranges':missing}
+    if missing and not allow_partial:
+        raise ValueError('Requested source text is missing from narration plans: '+', '.join(dict.fromkeys(r['source_id']for r in missing)))
     return result
 
 
@@ -119,6 +174,10 @@ def prepare(source,output,chapters,data_dir=None):
     if (output/'ready.json').exists():
         ready=read(output/'ready.json')
         if ready.get('source')!=str(source) or ready.get('chapters')!=chapters:raise ValueError('Frozen preparation scope differs from requested source/chapters')
+        book_path=basic.checked(output.parent/'source/book.json',ready['source_sha256'])
+        units=[unit for record in ready['plans']
+            for unit in read(basic.checked(output/record['plan'],record['plan_sha256']))['units']]
+        source_coverage(read(book_path),units,chapters)
         return ready
     manifest=read(source/'manifest.json');book_path=source.parent/'source/book.json'
     if manifest['source_sha256']!=file_digest(book_path):raise ValueError('Source book changed')
@@ -126,7 +185,7 @@ def prepare(source,output,chapters,data_dir=None):
     fixes={'entries':{}}
     if manifest.get('book_fixes'):
         spec=manifest['book_fixes'];basic.checked(spec['path'],spec['sha256']);fixes=read(Path(spec['path']))
-    original=[];copied=[];seen=set()
+    original=[];copied=[];seen=set();source_units=[]
     for cid in chapters:
         for path in canonical_assignments(source,cid):
             document=read(path);units=[];changes=[]
@@ -140,6 +199,8 @@ def prepare(source,output,chapters,data_dir=None):
             write(target,document,immutable=True)
             original.append({'path':str(path),'sha256':file_digest(path),'output':relative.as_posix()})
             copied.append({'assignment':relative.as_posix(),'changes':changes})
+            source_units.extend(units)
+    source_coverage(book,source_units,chapters)
     write(output/'prepared-inputs.json',{'policy':POLICY,'source_generation':str(source),'manifest_sha256':file_digest(source/'manifest.json'),
           'source_sha256':file_digest(book_path),'chapters':chapters,'assignments':original,'changes':copied},immutable=True)
     if (source/'section-markers.json').exists():
@@ -247,6 +308,9 @@ def freeze(source,output,chapters,data_dir=None,contextual_policy='restored-sile
     ready['chapter_counts']={cid:sum(u['chapter_id']==cid for u in units) for cid in chapters}
     ready['estimated_spoken_minutes']={cid:round(sum(max(.6,len(re.findall(r'\w+',u['text']))/2.6)+.24 for u in units if u['chapter_id']==cid)/60,2) for cid in chapters}
     for unit in units:validate_synthesis(unit['synthesis'],ready)
+    coverage=source_coverage(book,units,chapters)
+    write(output/'source-coverage.json',coverage,immutable=True)
+    ready['source_coverage_sha256']=file_digest(output/'source-coverage.json')
     write(output/'ready.json',ready,immutable=True)
     print('PREPARED',json.dumps({'unique_units':ready['chapter_counts'],'estimated_spoken_minutes':ready['estimated_spoken_minutes']},ensure_ascii=False),flush=True)
     return ready
@@ -281,6 +345,10 @@ def planned(output,ready):
         basic.checked(output/record['assignment'],record['sha256']);path=basic.checked(output/record['plan'],record['plan_sha256'])
         units.extend({**u,'_prepared_plan':str(path)} for u in read(path)['units'])
     if len(units)!=ready['unit_count']:raise ValueError('Prepared source coverage changed')
+    coverage=source_coverage(read(output.parent/'source/book.json'),units,ready['chapters'])
+    if ready.get('source_coverage_sha256'):
+        if read(basic.checked(output/'source-coverage.json',ready['source_coverage_sha256']))!=coverage:
+            raise ValueError('Frozen source coverage receipt changed')
     for unit in units:validate_synthesis(unit['synthesis'],ready)
     for relative,checksum in ready['music_files'].items():basic.checked(output/'scene-music-v2'/relative,checksum)
     return units
@@ -399,6 +467,7 @@ def publish(output,ready,cid,units,data_dir=None):
         selected.append((unit,read(path)))
     if not selected:return
     full=len(selected)==sum(u['chapter_id']==cid for u in units);chunks=[];timeline=[];position=0.;previous=None
+    coverage=source_coverage(read(output.parent/'source/book.json'),[u for u,_ in selected],[cid],allow_partial=not full)
     for unit,row in selected:
         source=basic.checked(output/row['audio'],row['audio_sha256']);data,rate=sf.read(source,dtype='int16')
         gap=0 if previous is None else .8 if unit.get('kind')=='heading' else 1.15 if unit.get('scene')!=previous.get('scene') else .34 if unit['source_id']!=previous['source_id'] else .24
@@ -411,6 +480,8 @@ def publish(output,ready,cid,units,data_dir=None):
     if not wav.exists():sf.write(wav,pcm,24000,subtype='PCM_16')
     state=read(output/'progress.json') if (output/'progress.json').exists() else {'generation':output.name,'chapters':{}}
     chapter={'complete':full,'units':len(timeline),'seconds':len(pcm)/24000,'stream':PREFIX+wav.name,'wav_sha256':file_digest(wav),**UNCHECKED}
+    chapter['source_coverage']={'policy':coverage['policy'],'complete':coverage['complete'],
+        'unit_inventory_sha256':coverage['unit_inventory_sha256'],'missing_ranges':len(coverage['missing_ranges'])}
     pin_timeline(output,cid,chapter,timeline);state['chapters'][cid]=chapter
     state.update(status='complete' if all(state['chapters'].get(c,{}).get('complete') for c in ready['chapters']) else 'rendering',
                  effects_policy='disabled',limitations=['One-shot development listening; recognition and acoustic checks were not run; no human approval.'],**UNCHECKED)

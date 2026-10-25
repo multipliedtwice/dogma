@@ -22,7 +22,15 @@ class DebugOneShot(unittest.TestCase):
                 m.validate_adjudication({'metadata':{'batches':[metadata,{**metadata,**changed}]}})
     def test_existing_preparation_requires_exact_requested_scope(self):
         source=self.root/'old';output=self.root/'new'
-        ready={'source':str(source),'chapters':['c0001']};m.write(output/'ready.json',ready)
+        text='Prepared words.'
+        m.write(self.root/'source/book.json',{'chapters':[{'id':'c0001','blocks':[
+            {'id':'p','kind':'paragraph','text':text}]}]})
+        m.write(output/'render-plan.json',{'units':[{'id':'u','chapter_id':'c0001',
+            'source_id':'p','start':0,'end':len(text),'text':text}]})
+        ready={'source':str(source),'chapters':['c0001'],
+            'source_sha256':m.file_digest(self.root/'source/book.json'),
+            'plans':[{'plan':'render-plan.json','plan_sha256':m.file_digest(output/'render-plan.json')}]}
+        m.write(output/'ready.json',ready)
         self.assertEqual(m.prepare(source,output,['c0001']),ready)
         for wrong_source,chapters in ((source,['c0002']),(self.root/'other',['c0001'])):
             with self.assertRaisesRegex(ValueError,'scope differs'):m.prepare(wrong_source,output,chapters)
@@ -115,7 +123,9 @@ class DebugOneShot(unittest.TestCase):
     def test_progress_is_unchecked_and_whole_active_edge_pcm_is_playable(self):
         output=self.root/'generation';output.mkdir();assets=output/'assets';assets.mkdir();path=assets/'raw.wav'
         samples=np.ones(2400,dtype=np.int16)*1200;sf.write(path,samples,24000,subtype='PCM_16')
-        unit={'id':'u0','chapter_id':'c0001','source_id':'p','text':'Original words.','speaker':'narrator','voice':'same','mood':'neutral','analysis_parts':[{'mode':'narrator'}]}
+        unit={'id':'u0','chapter_id':'c0001','source_id':'p','start':0,'end':15,'text':'Original words.','speaker':'narrator','voice':'same','mood':'neutral','analysis_parts':[{'mode':'narrator'}]}
+        m.write(self.root/'source/book.json',{'chapters':[{'id':'c0001','blocks':[
+            {'id':'p','kind':'paragraph','text':unit['text']}]}]})
         m.write(output/'units/u0.json',{'status':'rendered','audio':'assets/raw.wav','audio_sha256':m.file_digest(path)})
         m.write(output/'manifest.json',{'tts_engine':{'checkpoint':'custom-voice-plus-stress-scale-v1'}})
         m.write(output/'ready.json',{})

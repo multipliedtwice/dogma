@@ -583,6 +583,11 @@ def configure(base,data_dir,generation_id,item):
     return output,config,ready,units,effective,blocks,frozen,notes
 
 
+def copy_source_coverage(base,output,ready):
+    if ready.get('source_coverage_sha256'):
+        copy_exact(base/'source-coverage.json',output/'source-coverage.json',ready['source_coverage_sha256'])
+
+
 def materialize(output,config,ready,units,effective,blocks,frozen,notes):
     base=Path(config['base']);before=inventory(base)
     if (output/'repair.json').exists():
@@ -600,6 +605,7 @@ def materialize(output,config,ready,units,effective,blocks,frozen,notes):
         else:target.write_bytes(raw)
     for name in ('prepared-inputs.json','section-markers.json','source-copy-manifest.json'):
         if (base/name).exists():copy_exact(base/name,output/name)
+    copy_source_coverage(base,output,ready)
     write(output/'listener-stress-snapshot.json',frozen,immutable=True)
     for queued in config['coalesced_queue_items']:
         path=Path(queued['path']);row=read(path);origin=row.get('origin_report') or row.get('original_report') or row['report']
