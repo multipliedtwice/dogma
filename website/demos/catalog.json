@@ -18,9 +18,9 @@
     "author": "Антон Павлович Чехов",
     "source": "https://ru.wikisource.org/wiki/Хамелеон_(Чехов)/Версия_2",
     "status": "ready",
-    "duration": 487.27866666666665,
-    "audio_sha256": "b7d8faffadb8940ee552fa8c015532b633a1ffcde632c1a452419f0d1af839a5",
-    "audio": "demos/ru/b7d8faffadb8940ee552fa8c015532b633a1ffcde632c1a452419f0d1af839a5.mp3",
-    "captions": "demos/ru/captions-aec3dc0b396ea8557f713cb3997fe794aa716cf1020454b38543e69dc1c83585.json"
+    "duration": 481.83866666666665,
+    "audio_sha256": "8b5419ea627fa7be9b8f0462b4b61e86b49864038968c09e8ae53282a8960956",
+    "audio": "demos/ru/8b5419ea627fa7be9b8f0462b4b61e86b49864038968c09e8ae53282a8960956.mp3",
+    "captions": "demos/ru/captions-b6dfe56b2eb87700e08edd1cf323b5428414a7f1a3f0dd3197152c13cc2a3878.json"
   }
 ]
