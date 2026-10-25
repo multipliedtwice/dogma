@@ -157,6 +157,106 @@ class RenderWorkScopeTests(unittest.TestCase):
         self.assertEqual(after[-1]['cues'],[{'start':0.,'end':.1,'text':target['spoken']}])
         self.assertEqual(after[:-1],before[:-1])
 
+    def test_scoped_hold_recheck_keeps_retained_parts_and_global_hold_evidence(self):
+        from rimsky.jobs import Jobs
+        store,book,generation,config=self.book(extra=True);gid=generation['id'];chapters=generation['config']['chapters']
+        current=store.create_generation(book['id'],config,chapters=[chapters[1]])
+        old,backend,target=current['segments'];old=copy.deepcopy(old)
+        store.execute("UPDATE segments SET status='review',warning='Existing backend hold' WHERE generation_id=? AND id=?",(gid,backend['id']))
+        backend=copy.deepcopy(store.generation(gid)['segments'][1])
+        record={'target_id':old['id'],'source_id':old['source_id'],'start':old['start'],'end':old['end'],
+            'speaker':old['speaker'],'primary_speaker':old['speaker'],'tier':'legacy','triggers':['unresolved_speaker'],'status':'review'}
+        analysis={**current['analysis'],'speaker_resolution':[record], 'backend_holds':{backend['id']:'old-proof'}}
+        store.execute('UPDATE generations SET analysis=? WHERE id=?',(json.dumps(analysis),gid))
+        scoped={**store.generation(gid),'segments':[target]}
+        Jobs._holds(self.jobs,gid,self.pack,current['config'],scoped,
+            lambda *a:(self.pack['voices'][0],None,False,self.pack['voices'][0]))
+        after=store.generation(gid)
+        self.assertEqual(after['segments'][0],old)
+        self.assertIn(record,after['analysis']['speaker_resolution'])
+        self.assertIn(old['id'],after['analysis']['speaker_review_holds']['held_ids'])
+        self.assertEqual(after['segments'][1],backend)
+        self.assertEqual(after['analysis']['backend_holds'],{backend['id']:'old-proof'})
+        self.assertEqual(after['analysis']['speaker_review_holds']['reasons']['speaker_review'],1)
+        self.assertEqual(after['analysis']['speaker_review_holds']['reasons']['neighbour'],1)
+
+    def late_correction(self,stop=True,review=False,unrelated_review=False,returned_status='ready'):
+        store,book,generation,config=self.book();gid=generation['id'];target=generation['segments'][0]
+        self.jobs.lock=threading.RLock();self.jobs.stop=threading.Event();self.jobs.closed=True
+        self.jobs.active=gid;self.jobs.engine=None
+        def prepare(_):
+            # Deterministic handoff: equivalent to a report acquiring the job
+            # lock after the final ready snapshot and before _run finalizes.
+            store.execute("UPDATE segments SET status=?,audio_hash=NULL WHERE generation_id=? AND id=?",('review'if review else'pending',gid,target['id']))
+            if unrelated_review:
+                store.execute("UPDATE segments SET status='review' WHERE generation_id=? AND id=?",(gid,generation['segments'][1]['id']))
+            store.execute('INSERT INTO listener_correction_jobs(id,report_id,book_id,generation_id,segment_ids,status,created,updated) VALUES(?,?,?,?,?,?,?,?)',
+                ('j'*24,'r'*24,book['id'],gid,json.dumps([target['id']]),'queued','now','now'))
+            if stop:self.jobs.stop.set()
+            return returned_status
+        self.jobs._prepare=prepare
+        self.jobs._run(gid)
+        self.assertEqual(store.generation(gid)['status'],returned_status if returned_status!='ready'else'held'if review or unrelated_review else'paused')
+        self.assertEqual(store.rows('SELECT status FROM listener_correction_jobs')[0]['status'],
+            'held'if review or returned_status=='held'and not stop else'queued')
+
+    def test_correction_arriving_after_ready_return_is_queued_not_false_applied(self):
+        self.late_correction()
+
+    def test_pending_correction_target_prevents_false_applied_even_without_stop_signal(self):
+        self.late_correction(stop=False)
+
+    def test_late_correction_human_hold_settles_without_automatic_queue_loop(self):
+        self.late_correction(review=True)
+
+    def test_late_pending_correction_stays_queued_despite_unrelated_retained_hold(self):
+        self.late_correction(unrelated_review=True)
+
+    def test_late_edit_interrupts_an_already_held_worker_and_stays_queued(self):
+        self.late_correction(returned_status='held',unrelated_review=True)
+
+    def test_stable_quality_hold_without_late_edit_does_not_requeue(self):
+        self.late_correction(returned_status='held',stop=False)
+
+    def test_explicit_pause_after_ready_return_is_preserved(self):
+        store,book,generation,config=self.book();gid=generation['id']
+        self.jobs.lock=threading.RLock();self.jobs.stop=threading.Event();self.jobs.closed=True
+        self.jobs.active=gid;self.jobs.engine=None
+        self.jobs._prepare=lambda _:(self.jobs.stop.set()or'ready')
+        self.jobs._run(gid)
+        self.assertEqual(store.generation(gid)['status'],'paused')
+        self.assertEqual(store.rows('SELECT * FROM listener_correction_jobs'),[])
+
+    def test_delivered_correction_is_applied_despite_unrelated_generation_hold(self):
+        store,book,generation,config=self.book();gid=generation['id'];target,unrelated=generation['segments']
+        store.execute("UPDATE segments SET status='review' WHERE generation_id=? AND id=?",(gid,unrelated['id']))
+        store.execute('INSERT INTO listener_correction_jobs(id,report_id,book_id,generation_id,segment_ids,status,created,updated) VALUES(?,?,?,?,?,?,?,?)',
+            ('j'*24,'r'*24,book['id'],gid,json.dumps([target['id']]),'running','now','now'))
+        self.jobs.lock=threading.RLock();self.jobs.stop=threading.Event();self.jobs.closed=True
+        self.jobs.active=gid;self.jobs.engine=None;self.jobs._prepare=lambda _:'held'
+        self.jobs._run(gid)
+        self.assertEqual(store.generation(gid)['status'],'held')
+        outcome=store.rows('SELECT status,error FROM listener_correction_jobs')[0]
+        self.assertEqual(outcome,{'status':'applied','error':''})
+
+    def test_cache_repair_keeps_previous_playable_part_during_native_replacement(self):
+        store,book,generation,config=self.book(extra=True);gid=generation['id'];old=copy.deepcopy(store.generation(gid)['segments'][0])
+        path=store.root/'audio'/f"{old['audio_hash']}.json"
+        receipt=json.loads(path.read_text('utf8'));receipt.pop('synthesis',None)
+        receipt.pop('synthesis_parts',None)
+        path.write_text(json.dumps(receipt),encoding='utf8')
+        native=self.jobs._guarded;observed=[]
+        def guarded(method,payload):
+            if method=='render':
+                shown=next(s for s in store.playback_generation(gid)['segments']if s['id']==old['id'])
+                observed.append(shown)
+                self.assertEqual(shown['status'],'ready')
+                self.assertEqual(shown['audio_hash'],old['audio_hash'])
+            return native(method,payload)
+        self.jobs._guarded=guarded
+        self.jobs._render(gid,self.pack,store.generation(gid)['config'],store.book(book['id']),'Russian')
+        self.assertEqual(len(observed),1)
+
     def test_explicit_postprocessing_gates_only_work_chapter(self):
         store,book,generation,config=self.book();gid=generation['id'];chapters=generation['config']['chapters']
         retained=copy.deepcopy(store.generation(gid)['segments'][0])
@@ -212,6 +312,26 @@ class RenderWorkScopeTests(unittest.TestCase):
             return [{**c,'name':'Display only'}for c in generation['cast']],generation['analysis'],{}
         changed=self.review(store,generation,change)
         self.assertEqual(changed['segments'],before)
+
+    def test_same_voice_character_merge_invalidates_frozen_source_persona_only(self):
+        store,book,generation,config=self.book(extra=True);gid=generation['id']
+        current=store.generation(gid);target=current['segments'][0]
+        cast=[*current['cast'],{'id':'a','name':'Source','aliases':[],'voice_id':'n'},
+            {'id':'b','name':'Target','aliases':[],'voice_id':'n'}]
+        performance={**target['performance'],'higgs_direction':{'fixture':'source direction'},
+            'character_profile':{'pitch':'low'},'voice_signature':{'character_id':'a','reference':'old'}}
+        store.execute('UPDATE segments SET speaker=?,performance=? WHERE generation_id=? AND id=?',('a',json.dumps(performance),gid,target['id']))
+        analysis={**current['analysis'],'character_direction':{'complete':True,'profiles':{'a':{'pitch':'low'},'b':{'pitch':'high'}}},'approved':False}
+        store.execute("UPDATE generations SET cast=?,analysis=?,status='review' WHERE id=?",(json.dumps(cast),json.dumps(analysis),gid))
+        before=store.generation(gid)
+        self.jobs.lock=threading.RLock();self.jobs.active=None;self.jobs._pack=lambda *a:self.pack
+        with patch('rimsky.jobs.cast_flags',side_effect=lambda cast,*a:cast),patch('rimsky.jobs.casting_summary',return_value={}):
+            changed=self.jobs.cast_merge(gid,'a','b')
+        self.assertEqual(changed['segments'][0]['speaker'],'b')
+        self.assertEqual(changed['segments'][0]['status'],'pending')
+        self.assertIsNone(changed['segments'][0]['audio_hash'])
+        self.assertEqual(changed['segments'][1:],before['segments'][1:])
+        self.assertEqual(store.playback_generation(gid)['segments'][0]['audio_hash'],target['audio_hash'])
 
     def test_subset_scene_checkpoint_preserves_ready_neighbors_and_resume_state(self):
         store,book,generation,config=self.book(extra=True);gid=generation['id']

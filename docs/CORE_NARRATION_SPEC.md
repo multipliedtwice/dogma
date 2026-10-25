@@ -168,6 +168,9 @@ name invalidates the affected parts. Keep unrelated ready audio and its metadata
 unchanged, including when a selected chapter moves to a newer preparation recipe.
 Resume still validates caches owned by the active request, including later corrected
 parts, and aligns any replacement audio without widening work to retained neighbors.
+Scoped hold checks preserve unrelated playable parts and the book's full hold evidence.
+Finishing a job must atomically recheck pending corrections and their target parts;
+a newly queued correction cannot be reported as applied before its audio is ready.
 
 Imported legacy corrections without a verified original timestamp are historical
 evidence below direct human corrections. Copying an old export must never make its

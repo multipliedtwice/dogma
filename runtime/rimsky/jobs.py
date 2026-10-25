@@ -972,6 +972,8 @@ class Jobs:
                     for part in parts:
                         new_part={**part,'speaker':speakers.get(part['speaker'],part['speaker'])}
                         new_segment={**segment,'speaker':speakers.get(segment['speaker'],segment['speaker'])}
+                        frozen_controls=part.get('performance')or{}
+                        voice_changed|=new_part['speaker']!=part['speaker']and bool(frozen_controls.get('higgs_direction'))
                         try:
                             old_voice=routed_voice(pack,generation['analysis'],before,part,segment)[0]['id']
                             new_voice=routed_voice(pack,analysis,after,new_part,new_segment)[0]['id']
@@ -1338,13 +1340,33 @@ class Jobs:
                 with self.lock:
                     self.active=None
                     with self.store.lock, self.store.db:
+                        parts={s['id']:s for s in self.store._generation_segments(gid)}
+                        corrections=self.store.rows("SELECT id,segment_ids FROM listener_correction_jobs WHERE generation_id=? AND status IN ('queued','running')",(gid,))
+                        correction_targets=[parts.get(sid)for job in corrections for sid in json.loads(job['segment_ids'])]
+                        correction_review=any(s and s['status']=='review'for s in correction_targets)
+                        pending_correction=any(not s or s['status']not in ('ready','review')or s['status']=='ready'and not s['audio_hash']
+                            for s in correction_targets)
+                        late_pending=status=='ready'and pending_correction
+                        if status=='ready':
+                            if self.stop.is_set()and not corrections:status='paused'
+                            elif correction_review or any(s['status']=='review'for s in parts.values()):status='held'
+                            elif self.stop.is_set()or pending_correction or any(s['status']not in ('ready','review')for s in parts.values()):
+                                status='paused'
                         self.store.db.execute(
                             "UPDATE generations SET status=?,error=?,updated=?,resume_on_launch=CASE WHEN ?='paused' THEN resume_on_launch ELSE 0 END WHERE id=?",
                             (status, message[:4000], now(), status, gid),
                         )
-                        correction_status='applied' if status=='ready' else 'queued' if status=='paused' else 'held'
-                        self.store.db.execute("UPDATE listener_correction_jobs SET status=?,error=?,updated=? WHERE generation_id=? AND status IN ('queued','running')",
-                            (correction_status,message[:4000],now(),gid))
+                        for job in corrections:
+                            targets=[parts.get(sid)for sid in json.loads(job['segment_ids'])]
+                            delivered=bool(targets)and all(s and s['status']=='ready'and s['audio_hash']for s in targets)
+                            bound=bool(targets)and all(targets)
+                            review=any(s and s['status']=='review'for s in targets)
+                            correction_status='applied'if delivered else'queued'if bound and not review and (self.stop.is_set()or status=='paused'or late_pending)else'held'
+                            error=''if delivered else message[:4000]
+                            if not bound:error='The correction target passages are missing; rebind the saved report before retrying.'
+                            elif review and not error:error='The correction target is waiting for passage review.'
+                            self.store.db.execute('UPDATE listener_correction_jobs SET status=?,error=?,updated=? WHERE id=?',
+                                (correction_status,error,now(),job['id']))
         if not self.closed:
             self.store.complete_replacements(gid)
             self.store.collect_audio()
@@ -1853,6 +1875,7 @@ class Jobs:
 
     def _holds(self, gid, pack, config, current, voice_for):
         analysis = current['analysis']
+        targets={s['id']for s in current['segments']}
         from .current_audiobook import capture_parts
         with self.store.lock,self.store.transaction():
             capture_parts(self.store,current,[s['id']for s in current['segments']if PREVIEW_NOTICE in s['warning']])
@@ -1876,7 +1899,9 @@ class Jobs:
             # decision.  Drop legacy locked records and let rendering preserve
             # the desired plan while attaching a visible best-effort notice.
             records = [item for item in records
-                       if 'performance_capability' not in item.get('triggers', [])]
+                       if 'performance_capability' not in item.get('triggers', [])
+                       or not(item.get('target_id')==segment['id']or item.get('source_id')==segment['source_id']
+                           and item.get('start',segment['end'])<segment['end']and segment['start']<item.get('end',segment['start']))]
             mixed = len(parts) > 1
             binding = [{'part': index if mixed else None, 'start': part.get('start', segment['start']), 'end': part.get('end', segment['end']),
                         'voice': voice['id'], 'base_voice': base['id'], 'channel': (part['performance'] or {}).get('presentation_channel', 'direct'),
@@ -1911,19 +1936,24 @@ class Jobs:
         backend = {sid: key for sid, key in (analysis.get('backend_holds') or {}).items()
                    if any(segment['id'] == sid and segment['status'] == 'review' for segment in current['segments'])}
         reasons = Counter()
+        for segment in current['segments']:
+            if segment['id']in backend and segment['id']not in held:
+                reasons['backend_limit']+=1
+            elif segment['id']in held and not preview and segment['id']not in playable_degraded:
+                reasons['presentation_review'if segment['id']in presentation else'speaker_review'if segment['id']in flagged else'neighbour']+=1
         with self.store.lock, self.store.db:
             from .current_audiobook import capture_parts
             capture_parts(self.store,current,[s['id']for s in current['segments']
-                if (s['status']=='review'or PREVIEW_NOTICE in s['warning']or s['id']in held)
+                if s['id']in targets and (s['status']=='review'or PREVIEW_NOTICE in s['warning']or s['id']in held)
                 and not (s['id']in playable_degraded or preview and s['id']in held)])
             for segment in current['segments']:
+                if segment['id']not in targets:continue
                 previewed = PREVIEW_NOTICE in segment['warning']
                 if previewed and preview and segment['id'] in held:
                     continue
                 if segment['status'] != 'review' and not previewed:
                     continue
                 if segment['id'] in backend and segment['id'] not in held:
-                    reasons['backend_limit'] += 1
                     continue
                 warning = segment['warning']
                 for notice in (HOLD_NOTICE, NEIGHBOUR_NOTICE, PRESENTATION_NOTICE, PREVIEW_NOTICE, MIXED_EDIT_NOTICE, CAPABILITY_NOTICE):
@@ -1934,12 +1964,11 @@ class Jobs:
                 else:
                     self.store.db.execute("UPDATE segments SET status='pending',warning=? WHERE generation_id=? AND id=?", (' '.join(warning.split()), gid, segment['id']))
             for segment in current['segments']:
+                if segment['id']not in targets:continue
                 if segment['id'] not in held or preview or segment['id'] in playable_degraded:
                     continue
                 notice = (PRESENTATION_NOTICE if segment['id'] in presentation
                           else HOLD_NOTICE if segment['id'] in flagged else NEIGHBOUR_NOTICE)
-                reasons['presentation_review' if segment['id'] in presentation
-                        else 'speaker_review' if segment['id'] in flagged else 'neighbour'] += 1
                 self.store.db.execute(
                     "UPDATE segments SET status='review',warning=CASE WHEN warning='' THEN ? WHEN instr(warning,?)=0 THEN warning || ' ' || ? ELSE warning END "
                     "WHERE generation_id=? AND id=?", (notice, notice, notice, gid, segment['id']))
@@ -1949,7 +1978,7 @@ class Jobs:
                        'speaker_resolution': records, 'speaker_resolution_metrics': resolution_metrics(records), 'speaker_review_holds': summary,
                        'backend_holds': backend}
             self.store.db.execute('UPDATE generations SET analysis=? WHERE id=?', (json.dumps(updated, ensure_ascii=False), gid))
-        return held if preview else set()
+        return held&targets if preview else set()
 
     def _publish_audio(self,candidate,destination,immutable=True):
         from .util import file_digest
