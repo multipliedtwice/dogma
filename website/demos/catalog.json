@@ -52,5 +52,20 @@
     "audio_sha256": "4c85e66d2d02b2237dfde4db5421f43d188947833188b60732c4b719b1bb69d5",
     "audio": "demos/en/4c85e66d2d02b2237dfde4db5421f43d188947833188b60732c4b719b1bb69d5.mp3",
     "captions": "demos/en/captions-c2af57c81e038376fa6b256755badea3ab7dd231be6439082d83855aa8370c16.json"
+  },
+  {
+    "language": "Russian",
+    "title": "Пиковая дама",
+    "author": "Александр Сергеевич Пушкин",
+    "source": "https://ru.wikisource.org/wiki/Пиковая_дама_(Пушкин)/Версия_2",
+    "description": "Отрывок из главы I повести Александра Пушкина: карточная игра, рассказ Томского и разговор о тайне трёх карт.",
+    "extent": "excerpt",
+    "featured": true,
+    "id": "ru-queen-spades",
+    "status": "ready",
+    "duration": 473.91866666666664,
+    "audio_sha256": "8621302fcdaf5b8bc036c85fb3f078a9efcd9ab11d86c92143bb1802f5953dc4",
+    "audio": "demos/ru/8621302fcdaf5b8bc036c85fb3f078a9efcd9ab11d86c92143bb1802f5953dc4.mp3",
+    "captions": "demos/ru/captions-9b00ec8342c2228b710f3a9faa85d0a65b652742eaae756102778013361a00a9.json"
   }
 ]
