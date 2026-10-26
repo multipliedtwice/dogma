@@ -4,7 +4,7 @@ Basis: the current local pipeline, the official Qwen3-TTS family/training source
 
 ## Direct answer
 
-This is **fine-tuning pretrained Qwen3-TTS**, not learning text-to-speech from scratch. Do not start by requiring 50 or 100 book/audiobook pairs. My proposed first collection is **three matched titles by one narrator**: two available for training/development and one excluded from optimization and speaker-reference selection. A subsequent entirely unseen book should be used for final acceptance after tuning choices are settled.
+This is **fine-tuning pretrained Qwen3-TTS**, not learning text-to-speech from scratch. Do not start by requiring 50 or 100 book/audiobook pairs. The proposed first collection is **three matched titles by one narrator**: two available for training/development and one excluded from optimization and speaker-reference selection. A subsequent entirely unseen book should be used for final acceptance after tuning choices are settled.
 
 Three is a practical collection suggestion, not a minimum or a quality guarantee. A long, clean recording can supply many clips; several noisy, mismatched editions may supply little usable material. Keep Rimsky, Nechaev and Bashkov in separate corpora. Ten titles spread across ten narrators are not ten titles of adaptation data for one narrator.
 

@@ -153,11 +153,11 @@ class Expansion:
         return read(report)["summary"]
 
     def execute(self) -> None:
-        candidate = WORK / "yo-cpt-ru-candidates-54h-v1"
-        consensus = WORK / "yo-cpt-ru-consensus-45h-v1"
+        candidate = WORK / "yo-cpt-ru-candidates-54h-v2-mos39"
+        consensus = WORK / "yo-cpt-ru-consensus-45h-v2"
         previous = WORK / "yo-cpt-ru-consensus-full-v3"
         rehearsal = PRODUCTION / "datasets/reviewed-20261012-v1"
-        dataset = WORK / "production-stress-40h-dataset-v1"
+        dataset = WORK / "production-stress-40h-dataset-v2"
         current_native = PRODUCTION / "models/custom-voice-plus-stress-scale-v1-native"
         current_gguf = PRODUCTION / "models/custom-voice-plus-stress-scale-v1-q8_0.gguf"
 
@@ -199,10 +199,10 @@ class Expansion:
         )
 
         self.wait_for_gpu()
-        baseline_new = self.evaluate("new-holdout-baseline", dataset, WORK / "evaluation-stress-40h-baseline-v1", current_native)
-        baseline_old = self.evaluate("old-holdout-baseline", previous, WORK / "evaluation-stress-40h-old-baseline-v1", current_native)
+        baseline_new = self.evaluate("new-holdout-baseline", dataset, WORK / "evaluation-stress-40h-baseline-v2", current_native)
+        baseline_old = self.evaluate("old-holdout-baseline", previous, WORK / "evaluation-stress-40h-old-baseline-v2", current_native)
 
-        smoke = WORK / "runs/stress-40h-smoke-v1"
+        smoke = WORK / "runs/stress-40h-smoke-v2"
         if not complete_report(smoke / "training-report.json", "smoke_passed"):
             if smoke.exists() and any(smoke.iterdir()):
                 raise RuntimeError(f"Incomplete GPU smoke needs diagnosis: {smoke}")
@@ -213,7 +213,7 @@ class Expansion:
                 "--counterfactual-codebook", "0", "--seed", "20261022",
             ])
 
-        run = WORK / "runs/production-stress-40h-v1"
+        run = WORK / "runs/production-stress-40h-v2"
         if not complete_report(run / "training-report.json", "trained_pending_validation"):
             if run.exists() and any(run.iterdir()):
                 raise RuntimeError(f"Incomplete long training run needs diagnosis: {run}")
@@ -227,10 +227,10 @@ class Expansion:
 
         adapter = run / "adapter"
         post_new = self.evaluate(
-            "new-holdout-post", dataset, WORK / "evaluation-stress-40h-post-v1", current_native, adapter
+            "new-holdout-post", dataset, WORK / "evaluation-stress-40h-post-v2", current_native, adapter
         )
         post_old = self.evaluate(
-            "old-holdout-post", previous, WORK / "evaluation-stress-40h-old-post-v1", current_native, adapter
+            "old-holdout-post", previous, WORK / "evaluation-stress-40h-old-post-v2", current_native, adapter
         )
         gates = {
             "new_correct_not_worse": post_new["correct_preferred_fraction"] >= baseline_new["correct_preferred_fraction"],
@@ -246,15 +246,15 @@ class Expansion:
             )
             return
 
-        native = PRODUCTION / "models/custom-voice-plus-stress-40h-v1-native"
-        gguf = PRODUCTION / "models/custom-voice-plus-stress-40h-v1-q8_0.gguf"
+        native = PRODUCTION / "models/custom-voice-plus-stress-40h-v2-native"
+        gguf = PRODUCTION / "models/custom-voice-plus-stress-40h-v2-q8_0.gguf"
         if not native.exists() and not gguf.exists():
             self.run("merge-40h-candidate", [
                 str(self.python), "-X", "utf8", "-u", str(ROOT / "scripts/merge_higgs_lora.py"),
                 "--base", str(current_native), "--run", str(run), "--output", str(native), "--gguf", str(gguf),
             ])
 
-        generated = WORK / "generated-audio-regression-40h-v1"
+        generated = WORK / "generated-audio-regression-40h-v2"
         if not generated.exists():
             self.run("render-paired-regression", [
                 str(self.python), "-X", "utf8", "-u", str(ROOT / "scripts/rerender_higgs_stress_template.py"),
@@ -305,7 +305,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--candidate-hours", type=float, default=54.0)
     result.add_argument("--consensus-hours", type=float, default=45.0)
-    result.add_argument("--min-mos", type=float, default=4.0)
+    result.add_argument("--min-mos", type=float, default=3.9)
     return result
 
 

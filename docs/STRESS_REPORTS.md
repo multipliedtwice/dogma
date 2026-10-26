@@ -18,8 +18,6 @@ Correction flow after a listening session:
 
 The Book 1 listening generation is labelled provisional. Its character references still need listening review, and it does not yet reproduce the narrator's distinct radio, public-address, and game-interface processing. Stress reports help review pronunciation in this draft; they do not certify voice identity or performance quality.
 
-The Book 1 reported-stress candidate is a separate generation. It changes the TTS text for 19 reports across 12 segments using combining acute marks, while keeping the EPUB and prior audio intact. Four reports remain unresolved because they refer to pacing or need a source-specific pronunciation (`Шихарса`, `ПвП-турнир`). The new output is a listening candidate, not a verified correction. Its audit is in `training-work/book1-listening-app/reported-stress-candidate.json`.
-
 ## Spoken respelling (listener request, 2026-10-21)
 
 Higgs reads a plain е after a consonant as soft, so a hard reading (Мозэс, like English "tech" in тэк-купол) needs э in the synthesis text. A *spoken respelling* may differ from the printed word only by е→э (or Е→Э) and е→ё at explicit positions, plus stress marks; ё is always stressed and is its own mark. `runtime/rimsky/respelling.py` (`validate_respelling`, `validate_respelled_stress`) is the single validator; the printed text never changes.

@@ -297,9 +297,6 @@
   preserve the canonical `review.json` and its matching checksum.
 - The review server mirrors durable saves to this folder. The working review UI
   still reads `training-work/character-rb1/fine-tune-all/review-draft.json`.
-  The current server process predates this hook; a backup watcher mirrors changes
-  every two seconds until the next normal restart. Restarting that server during
-  setup was rejected by automatic approval review; do not claim it was restarted.
 - Future books use `manual-labeling/<book-id>/`; keep experiments, predictions and
   trained weights separate from the human labeling archive.
 - Source-audio labels describe Vlad's actual performance. Text context suggests
