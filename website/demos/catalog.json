@@ -37,5 +37,20 @@
     "audio_sha256": "01864c00ad84f1223c15f741c433ccc99ae339c70000fbe766cd2e17144e10e1",
     "audio": "demos/en/01864c00ad84f1223c15f741c433ccc99ae339c70000fbe766cd2e17144e10e1.mp3",
     "captions": "demos/en/captions-31d17711c52117e04e0799266d7745fd8de6bf87dd024a244db08c1e9d3a2bda.json"
+  },
+  {
+    "language": "English",
+    "title": "A Mad Tea-Party",
+    "author": "Lewis Carroll",
+    "source": "https://www.gutenberg.org/files/11/11-h/11-h.htm",
+    "description": "An excerpt from Chapter VII of Alice’s Adventures in Wonderland: Alice joins the Hatter, the March Hare and the Dormouse for the riddle at their tea-table.",
+    "extent": "excerpt",
+    "featured": false,
+    "id": "en-alice-tea-party",
+    "status": "ready",
+    "duration": 371.1186666666667,
+    "audio_sha256": "4c85e66d2d02b2237dfde4db5421f43d188947833188b60732c4b719b1bb69d5",
+    "audio": "demos/en/4c85e66d2d02b2237dfde4db5421f43d188947833188b60732c4b719b1bb69d5.mp3",
+    "captions": "demos/en/captions-c2af57c81e038376fa6b256755badea3ab7dd231be6439082d83855aa8370c16.json"
   }
 ]

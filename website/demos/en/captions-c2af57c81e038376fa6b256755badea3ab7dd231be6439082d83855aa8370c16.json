@@ -1,0 +1,737 @@
+[
+  {
+    "id": "u0000",
+    "source_id": "c0001-p00001",
+    "text": "A Mad Tea-Party",
+    "start": 8.0,
+    "end": 10.04
+  },
+  {
+    "id": "u0001",
+    "source_id": "c0001-p00002",
+    "text": "There was a table set out under a tree in front of the house, and the March Hare and the Hatter were having tea at it: a Dormouse was sitting between them, fast asleep, and the other two were using it as a cushion, resting their elbows on it, and talking over its head. ",
+    "start": 10.2,
+    "end": 25.479999999999997
+  },
+  {
+    "id": "u0002",
+    "source_id": "c0001-p00002",
+    "text": "“Very uncomfortable for the Dormouse,”",
+    "start": 25.639999999999997,
+    "end": 28.599999999999998
+  },
+  {
+    "id": "u0003",
+    "source_id": "c0001-p00002",
+    "text": " thought Alice; ",
+    "start": 28.759999999999998,
+    "end": 30.119999999999997
+  },
+  {
+    "id": "u0004",
+    "source_id": "c0001-p00002",
+    "text": "“only, as it’s asleep, I suppose it doesn’t mind.”",
+    "start": 30.279999999999998,
+    "end": 33.559999999999995
+  },
+  {
+    "id": "u0005",
+    "source_id": "c0001-p00003",
+    "text": "The table was a large one, but the three were all crowded together at one corner of it: ",
+    "start": 33.71999999999999,
+    "end": 38.959999999999994
+  },
+  {
+    "id": "u0006",
+    "source_id": "c0001-p00003",
+    "text": "“No room! ",
+    "start": 39.11999999999999,
+    "end": 39.959999999999994
+  },
+  {
+    "id": "u0007",
+    "source_id": "c0001-p00003",
+    "text": "No room!”",
+    "start": 40.11999999999999,
+    "end": 41.23999999999999
+  },
+  {
+    "id": "u0008",
+    "source_id": "c0001-p00003",
+    "text": " they cried out when they saw Alice coming. ",
+    "start": 41.399999999999984,
+    "end": 43.95999999999999
+  },
+  {
+    "id": "u0009",
+    "source_id": "c0001-p00003",
+    "text": "“There’s plenty of room!”",
+    "start": 44.11999999999998,
+    "end": 66.63999999999999
+  },
+  {
+    "id": "u0010",
+    "source_id": "c0001-p00003",
+    "text": " said Alice indignantly, and she sat down in a large arm-chair at one end of the table.",
+    "start": 66.79999999999998,
+    "end": 72.35999999999999
+  },
+  {
+    "id": "u0011",
+    "source_id": "c0001-p00004",
+    "text": "“Have some wine,”",
+    "start": 72.51999999999998,
+    "end": 73.79999999999998
+  },
+  {
+    "id": "u0012",
+    "source_id": "c0001-p00004",
+    "text": " the March Hare said in an encouraging tone.",
+    "start": 73.95999999999998,
+    "end": 76.83999999999997
+  },
+  {
+    "id": "u0013",
+    "source_id": "c0001-p00005",
+    "text": "Alice looked all round the table, but there was nothing on it but tea. ",
+    "start": 76.99999999999997,
+    "end": 81.19999999999997
+  },
+  {
+    "id": "u0014",
+    "source_id": "c0001-p00005",
+    "text": "“I don’t see any wine,”",
+    "start": 81.35999999999997,
+    "end": 82.79999999999997
+  },
+  {
+    "id": "u0015",
+    "source_id": "c0001-p00005",
+    "text": " she remarked.",
+    "start": 82.95999999999997,
+    "end": 84.19999999999996
+  },
+  {
+    "id": "u0016",
+    "source_id": "c0001-p00006",
+    "text": "“There isn’t any,”",
+    "start": 84.35999999999996,
+    "end": 85.39999999999996
+  },
+  {
+    "id": "u0017",
+    "source_id": "c0001-p00006",
+    "text": " said the March Hare.",
+    "start": 85.55999999999996,
+    "end": 108.59999999999997
+  },
+  {
+    "id": "u0018",
+    "source_id": "c0001-p00007",
+    "text": "“Then it wasn’t very civil of you to offer it,”",
+    "start": 108.75999999999996,
+    "end": 110.91999999999996
+  },
+  {
+    "id": "u0019",
+    "source_id": "c0001-p00007",
+    "text": " said Alice angrily.",
+    "start": 111.07999999999996,
+    "end": 112.83999999999996
+  },
+  {
+    "id": "u0020",
+    "source_id": "c0001-p00008",
+    "text": "“It wasn’t very civil of you to sit down without being invited,”",
+    "start": 112.99999999999996,
+    "end": 116.03999999999996
+  },
+  {
+    "id": "u0021",
+    "source_id": "c0001-p00008",
+    "text": " said the March Hare.",
+    "start": 116.19999999999996,
+    "end": 117.47999999999996
+  },
+  {
+    "id": "u0022",
+    "source_id": "c0001-p00009",
+    "text": "“I didn’t know it was your table,”",
+    "start": 117.63999999999996,
+    "end": 119.55999999999996
+  },
+  {
+    "id": "u0023",
+    "source_id": "c0001-p00009",
+    "text": " said Alice; ",
+    "start": 119.71999999999996,
+    "end": 120.87999999999995
+  },
+  {
+    "id": "u0024",
+    "source_id": "c0001-p00009",
+    "text": "“it’s laid for a great many more than three.”",
+    "start": 121.03999999999995,
+    "end": 123.51999999999995
+  },
+  {
+    "id": "u0025",
+    "source_id": "c0001-p00010",
+    "text": "“Your hair wants cutting,”",
+    "start": 123.67999999999995,
+    "end": 125.63999999999994
+  },
+  {
+    "id": "u0026",
+    "source_id": "c0001-p00010",
+    "text": " said the Hatter. ",
+    "start": 125.79999999999994,
+    "end": 126.91999999999994
+  },
+  {
+    "id": "u0027",
+    "source_id": "c0001-p00010",
+    "text": "He had been looking at Alice for some time with great curiosity, and this was his first speech.",
+    "start": 127.07999999999994,
+    "end": 132.59999999999994
+  },
+  {
+    "id": "u0028",
+    "source_id": "c0001-p00011",
+    "text": "“You should learn not to make personal remarks,”",
+    "start": 132.75999999999993,
+    "end": 135.47999999999993
+  },
+  {
+    "id": "u0029",
+    "source_id": "c0001-p00011",
+    "text": " Alice said with some severity; ",
+    "start": 135.63999999999993,
+    "end": 137.75999999999993
+  },
+  {
+    "id": "u0030",
+    "source_id": "c0001-p00011",
+    "text": "“it’s very rude.”",
+    "start": 137.91999999999993,
+    "end": 139.51999999999992
+  },
+  {
+    "id": "u0031",
+    "source_id": "c0001-p00012",
+    "text": "The Hatter opened his eyes very wide on hearing this; but all he said was, ",
+    "start": 139.67999999999992,
+    "end": 143.27999999999992
+  },
+  {
+    "id": "u0032",
+    "source_id": "c0001-p00012",
+    "text": "“Why is a raven like a writing-desk?”",
+    "start": 143.4399999999999,
+    "end": 145.9199999999999
+  },
+  {
+    "id": "u0033",
+    "source_id": "c0001-p00013",
+    "text": "“Come, we shall have some fun now!”",
+    "start": 146.0799999999999,
+    "end": 148.1199999999999
+  },
+  {
+    "id": "u0034",
+    "source_id": "c0001-p00013",
+    "text": " thought Alice. ",
+    "start": 148.2799999999999,
+    "end": 149.31999999999988
+  },
+  {
+    "id": "u0035",
+    "source_id": "c0001-p00013",
+    "text": "“I’m glad they’ve begun asking riddles.—I believe I can guess that,”",
+    "start": 149.47999999999988,
+    "end": 151.75999999999988
+  },
+  {
+    "id": "u0036",
+    "source_id": "c0001-p00013",
+    "text": " she added aloud.",
+    "start": 151.91999999999987,
+    "end": 153.2799999999999
+  },
+  {
+    "id": "u0037",
+    "source_id": "c0001-p00014",
+    "text": "“Do you mean that you think you can find out the answer to it?”",
+    "start": 153.43999999999988,
+    "end": 156.5599999999999
+  },
+  {
+    "id": "u0038",
+    "source_id": "c0001-p00014",
+    "text": " said the March Hare.",
+    "start": 156.71999999999989,
+    "end": 158.43999999999988
+  },
+  {
+    "id": "u0039",
+    "source_id": "c0001-p00015",
+    "text": "“Exactly so,”",
+    "start": 158.59999999999988,
+    "end": 160.03999999999988
+  },
+  {
+    "id": "u0040",
+    "source_id": "c0001-p00015",
+    "text": " said Alice.",
+    "start": 160.19999999999987,
+    "end": 161.35999999999987
+  },
+  {
+    "id": "u0041",
+    "source_id": "c0001-p00016",
+    "text": "“Then you should say what you mean,”",
+    "start": 161.51999999999987,
+    "end": 163.15999999999985
+  },
+  {
+    "id": "u0042",
+    "source_id": "c0001-p00016",
+    "text": " the March Hare went on.",
+    "start": 163.31999999999985,
+    "end": 164.99999999999986
+  },
+  {
+    "id": "u0043",
+    "source_id": "c0001-p00017",
+    "text": "“I do,”",
+    "start": 165.15999999999985,
+    "end": 165.87999999999985
+  },
+  {
+    "id": "u0044",
+    "source_id": "c0001-p00017",
+    "text": " Alice hastily replied; ",
+    "start": 166.03999999999985,
+    "end": 167.91999999999985
+  },
+  {
+    "id": "u0045",
+    "source_id": "c0001-p00017",
+    "text": "“at least—at least I mean what I say—that’s the same thing, you know.”",
+    "start": 168.07999999999984,
+    "end": 172.83999999999983
+  },
+  {
+    "id": "u0046",
+    "source_id": "c0001-p00018",
+    "text": "“Not the same thing a bit!”",
+    "start": 172.99999999999983,
+    "end": 174.83999999999983
+  },
+  {
+    "id": "u0047",
+    "source_id": "c0001-p00018",
+    "text": " said the Hatter. ",
+    "start": 174.99999999999983,
+    "end": 176.15999999999983
+  },
+  {
+    "id": "u0048",
+    "source_id": "c0001-p00018",
+    "text": "“You might just as well say that ‘I see what I eat’ is the same thing as ‘I eat what I see’!”",
+    "start": 176.31999999999982,
+    "end": 182.67999999999984
+  },
+  {
+    "id": "u0049",
+    "source_id": "c0001-p00019",
+    "text": "“You might just as well say,”",
+    "start": 182.83999999999983,
+    "end": 184.31999999999982
+  },
+  {
+    "id": "u0050",
+    "source_id": "c0001-p00019",
+    "text": " added the March Hare, ",
+    "start": 184.47999999999982,
+    "end": 185.99999999999983
+  },
+  {
+    "id": "u0051",
+    "source_id": "c0001-p00019",
+    "text": "“that ‘I like what I get’ is the same thing as ‘I get what I like’!”",
+    "start": 186.15999999999983,
+    "end": 190.19999999999982
+  },
+  {
+    "id": "u0052",
+    "source_id": "c0001-p00020",
+    "text": "“You might just as well say,”",
+    "start": 190.35999999999981,
+    "end": 192.2399999999998
+  },
+  {
+    "id": "u0053",
+    "source_id": "c0001-p00020",
+    "text": " added the Dormouse, who seemed to be talking in his sleep, ",
+    "start": 192.3999999999998,
+    "end": 195.7999999999998
+  },
+  {
+    "id": "u0054",
+    "source_id": "c0001-p00020",
+    "text": "“that ‘I breathe when I sleep’ is the same thing as ‘I sleep when I breathe’!”",
+    "start": 195.9599999999998,
+    "end": 201.5999999999998
+  },
+  {
+    "id": "u0055",
+    "source_id": "c0001-p00021",
+    "text": "“It is the same thing with you,”",
+    "start": 201.7599999999998,
+    "end": 204.07999999999979
+  },
+  {
+    "id": "u0056",
+    "source_id": "c0001-p00021",
+    "text": " said the Hatter, and here the conversation dropped, and the party sat silent for a minute, while Alice thought over all she could remember about ravens and writing-desks, which wasn’t much.",
+    "start": 204.23999999999978,
+    "end": 215.07999999999979
+  },
+  {
+    "id": "u0057",
+    "source_id": "c0001-p00022",
+    "text": "The Hatter was the first to break the silence. ",
+    "start": 215.23999999999978,
+    "end": 217.95999999999978
+  },
+  {
+    "id": "u0058",
+    "source_id": "c0001-p00022",
+    "text": "“What day of the month is it?”",
+    "start": 218.11999999999978,
+    "end": 219.9199999999998
+  },
+  {
+    "id": "u0059",
+    "source_id": "c0001-p00022",
+    "text": " he said, turning to Alice: he had taken his watch out of his pocket, and was looking at it uneasily, shaking it every now and then, and holding it to his ear.",
+    "start": 220.07999999999979,
+    "end": 229.83999999999978
+  },
+  {
+    "id": "u0060",
+    "source_id": "c0001-p00023",
+    "text": "Alice considered a little, and then said ",
+    "start": 229.99999999999977,
+    "end": 231.71999999999977
+  },
+  {
+    "id": "u0061",
+    "source_id": "c0001-p00023",
+    "text": "“The fourth.”",
+    "start": 231.87999999999977,
+    "end": 232.99999999999977
+  },
+  {
+    "id": "u0062",
+    "source_id": "c0001-p00024",
+    "text": "“Two days wrong!”",
+    "start": 233.15999999999977,
+    "end": 234.67999999999978
+  },
+  {
+    "id": "u0063",
+    "source_id": "c0001-p00024",
+    "text": " sighed the Hatter. ",
+    "start": 234.83999999999978,
+    "end": 236.11999999999978
+  },
+  {
+    "id": "u0064",
+    "source_id": "c0001-p00024",
+    "text": "“I told you butter wouldn’t suit the works!”",
+    "start": 236.27999999999977,
+    "end": 239.11999999999978
+  },
+  {
+    "id": "u0065",
+    "source_id": "c0001-p00024",
+    "text": " he added looking angrily at the March Hare.",
+    "start": 239.27999999999977,
+    "end": 242.03999999999976
+  },
+  {
+    "id": "u0066",
+    "source_id": "c0001-p00025",
+    "text": "“It was the best butter,”",
+    "start": 242.19999999999976,
+    "end": 243.71999999999977
+  },
+  {
+    "id": "u0067",
+    "source_id": "c0001-p00025",
+    "text": " the March Hare meekly replied.",
+    "start": 243.87999999999977,
+    "end": 245.99999999999977
+  },
+  {
+    "id": "u0068",
+    "source_id": "c0001-p00026",
+    "text": "“Yes, but some crumbs must have got in as well,”",
+    "start": 246.15999999999977,
+    "end": 249.43999999999977
+  },
+  {
+    "id": "u0069",
+    "source_id": "c0001-p00026",
+    "text": " the Hatter grumbled: ",
+    "start": 249.59999999999977,
+    "end": 251.07999999999976
+  },
+  {
+    "id": "u0070",
+    "source_id": "c0001-p00026",
+    "text": "“you shouldn’t have put it in with the bread-knife.”",
+    "start": 251.23999999999975,
+    "end": 253.87999999999974
+  },
+  {
+    "id": "u0071",
+    "source_id": "c0001-p00027",
+    "text": "The March Hare took the watch and looked at it gloomily: then he dipped it into his cup of tea, and looked at it again: but he could think of nothing better to say than his first remark, ",
+    "start": 254.03999999999974,
+    "end": 264.59999999999974
+  },
+  {
+    "id": "u0072",
+    "source_id": "c0001-p00027",
+    "text": "“It was the best butter, you know.”",
+    "start": 264.75999999999976,
+    "end": 266.5599999999998
+  },
+  {
+    "id": "u0073",
+    "source_id": "c0001-p00028",
+    "text": "Alice had been looking over his shoulder with some curiosity. ",
+    "start": 266.7199999999998,
+    "end": 269.8799999999998
+  },
+  {
+    "id": "u0074",
+    "source_id": "c0001-p00028",
+    "text": "“What a funny watch!”",
+    "start": 270.03999999999985,
+    "end": 271.79999999999984
+  },
+  {
+    "id": "u0075",
+    "source_id": "c0001-p00028",
+    "text": " she remarked. ",
+    "start": 271.95999999999987,
+    "end": 273.07999999999987
+  },
+  {
+    "id": "u0076",
+    "source_id": "c0001-p00028",
+    "text": "“It tells the day of the month, and doesn’t tell what o’clock it is!”",
+    "start": 273.2399999999999,
+    "end": 277.1199999999999
+  },
+  {
+    "id": "u0077",
+    "source_id": "c0001-p00029",
+    "text": "“Why should it?”",
+    "start": 277.2799999999999,
+    "end": 278.43999999999994
+  },
+  {
+    "id": "u0078",
+    "source_id": "c0001-p00029",
+    "text": " muttered the Hatter. ",
+    "start": 278.59999999999997,
+    "end": 280.08
+  },
+  {
+    "id": "u0079",
+    "source_id": "c0001-p00029",
+    "text": "“Does your watch tell you what year it is?”",
+    "start": 280.24,
+    "end": 282.88
+  },
+  {
+    "id": "u0080",
+    "source_id": "c0001-p00030",
+    "text": "“Of course not,”",
+    "start": 283.04,
+    "end": 284.24
+  },
+  {
+    "id": "u0081",
+    "source_id": "c0001-p00030",
+    "text": " Alice replied very readily: ",
+    "start": 284.40000000000003,
+    "end": 286.32000000000005
+  },
+  {
+    "id": "u0082",
+    "source_id": "c0001-p00030",
+    "text": "“but that’s because it stays the same year for such a long time together.”",
+    "start": 286.4800000000001,
+    "end": 290.36000000000007
+  },
+  {
+    "id": "u0083",
+    "source_id": "c0001-p00031",
+    "text": "“Which is just the case with mine,”",
+    "start": 290.5200000000001,
+    "end": 293.0400000000001
+  },
+  {
+    "id": "u0084",
+    "source_id": "c0001-p00031",
+    "text": " said the Hatter.",
+    "start": 293.2000000000001,
+    "end": 294.2800000000001
+  },
+  {
+    "id": "u0085",
+    "source_id": "c0001-p00032",
+    "text": "Alice felt dreadfully puzzled, The Hatter’s remark seemed to have no sort of meaning in it, and yet it was certainly English. ",
+    "start": 294.4400000000001,
+    "end": 301.3600000000001
+  },
+  {
+    "id": "u0086",
+    "source_id": "c0001-p00032",
+    "text": "“I don’t quite understand you,”",
+    "start": 301.52000000000015,
+    "end": 303.72000000000014
+  },
+  {
+    "id": "u0087",
+    "source_id": "c0001-p00032",
+    "text": " she said, as politely as she could.",
+    "start": 303.88000000000017,
+    "end": 307.1200000000002
+  },
+  {
+    "id": "u0088",
+    "source_id": "c0001-p00033",
+    "text": "“The Dormouse is asleep again,”",
+    "start": 307.2800000000002,
+    "end": 309.4000000000002
+  },
+  {
+    "id": "u0089",
+    "source_id": "c0001-p00033",
+    "text": " said the Hatter, and he poured a little hot tea upon its nose.",
+    "start": 309.56000000000023,
+    "end": 313.72000000000025
+  },
+  {
+    "id": "u0090",
+    "source_id": "c0001-p00034",
+    "text": "The Dormouse shook its head impatiently, and said, without opening its eyes, ",
+    "start": 313.8800000000003,
+    "end": 318.9200000000003
+  },
+  {
+    "id": "u0091",
+    "source_id": "c0001-p00034",
+    "text": "“Of course, of course; just what I was going to remark myself.”",
+    "start": 319.0800000000003,
+    "end": 322.9600000000003
+  },
+  {
+    "id": "u0092",
+    "source_id": "c0001-p00035",
+    "text": "“Have you guessed the riddle yet?”",
+    "start": 323.12000000000035,
+    "end": 325.00000000000034
+  },
+  {
+    "id": "u0093",
+    "source_id": "c0001-p00035",
+    "text": " the Hatter said, turning to Alice again.",
+    "start": 325.16000000000037,
+    "end": 328.0800000000004
+  },
+  {
+    "id": "u0094",
+    "source_id": "c0001-p00036",
+    "text": "“No, I give it up,”",
+    "start": 328.2400000000004,
+    "end": 328.96000000000043
+  },
+  {
+    "id": "u0095",
+    "source_id": "c0001-p00036",
+    "text": " Alice replied: ",
+    "start": 329.12000000000046,
+    "end": 330.2800000000005
+  },
+  {
+    "id": "u0096",
+    "source_id": "c0001-p00036",
+    "text": "“what’s the answer?”",
+    "start": 330.4400000000005,
+    "end": 331.6800000000005
+  },
+  {
+    "id": "u0097",
+    "source_id": "c0001-p00037",
+    "text": "“I haven’t the slightest idea,”",
+    "start": 331.84000000000054,
+    "end": 333.84000000000054
+  },
+  {
+    "id": "u0098",
+    "source_id": "c0001-p00037",
+    "text": " said the Hatter.",
+    "start": 334.00000000000057,
+    "end": 335.08000000000055
+  },
+  {
+    "id": "u0099",
+    "source_id": "c0001-p00038",
+    "text": "“Nor I,”",
+    "start": 335.2400000000006,
+    "end": 336.1200000000006
+  },
+  {
+    "id": "u0100",
+    "source_id": "c0001-p00038",
+    "text": " said the March Hare.",
+    "start": 336.2800000000006,
+    "end": 337.6000000000006
+  },
+  {
+    "id": "u0101",
+    "source_id": "c0001-p00039",
+    "text": "Alice sighed wearily. ",
+    "start": 337.7600000000006,
+    "end": 339.48000000000064
+  },
+  {
+    "id": "u0102",
+    "source_id": "c0001-p00039",
+    "text": "“I think you might do something better with the time,”",
+    "start": 339.64000000000067,
+    "end": 342.48000000000064
+  },
+  {
+    "id": "u0103",
+    "source_id": "c0001-p00039",
+    "text": " she said, ",
+    "start": 342.64000000000067,
+    "end": 343.72000000000065
+  },
+  {
+    "id": "u0104",
+    "source_id": "c0001-p00039",
+    "text": "“than waste it in asking riddles that have no answers.”",
+    "start": 343.8800000000007,
+    "end": 347.1200000000007
+  }
+]
