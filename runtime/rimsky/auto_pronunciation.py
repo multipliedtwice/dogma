@@ -79,6 +79,31 @@ def validate_name_stress(name: str, stressed: str) -> None:
             parse(part)
 
 
+def _silero_marks(source: str, marked: str) -> str:
+    """Convert only added vowel markers; retain every literal source plus."""
+    def split(value):
+        letters=[];gaps=[0]
+        for char in value:
+            if char=='+':gaps[-1]+=1
+            else:letters.append(char);gaps.append(0)
+        return ''.join(letters),gaps
+    original,literal=split(source);plain,markers=split(marked)
+    fold=lambda value:value.replace('\u0451','\u0435').replace('\u0401','\u0415')
+    if fold(original)!=fold(plain):raise ValueError('Silero changed source letters or spacing')
+    if any(count<keep for count,keep in zip(markers,literal)):
+        raise ValueError('Silero removed a literal source plus')
+    result=[]
+    for index,char in enumerate(plain):
+        result.append('+'*literal[index]);added=markers[index]-literal[index]
+        result.append(char)
+        if added and char in VOWELS:
+            if added!=1:raise ValueError('Silero duplicated a vowel stress marker')
+            if char not in '\u0451\u0401' and plain[index+1:index+2]!=ACUTE:result.append(ACUTE)
+        # Added markers before consonants, punctuation or whitespace are not stress.
+    result.append('+'*literal[-1])
+    return ''.join(result)
+
+
 def _silero(text: str, ignore: list[str], every_word: bool = False, yo: bool = True) -> str:
     marked = _accentor()(text, put_stress=every_word, put_stress_homo=True, put_yo=yo, put_yo_homo=yo,
                          stress_single_vowel=False,
@@ -86,7 +111,7 @@ def _silero(text: str, ignore: list[str], every_word: bool = False, yo: bool = T
                          words_to_ignore=sorted({w.casefold() for w in ignore}) or None)
     # silero writes '+' before the stressed vowel; the synthesis input uses U+0301 after it.
     # ё is always stressed; a mark after it is redundant for the synthesis input.
-    return re.sub(r'\+([' + VOWELS + '])', lambda m: m[1] + ('' if m[1] in 'ёЁ' else ACUTE), marked)
+    return _silero_marks(text, marked)
 
 
 def _zipf(word: str) -> float | None:

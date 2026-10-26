@@ -230,14 +230,30 @@ def terminal_session(session):
     if worker.exists() and live(read(worker)):raise ValueError('Prior native worker remains live')
     if not terminal.exists():
         if not worker.exists():raise ValueError('Unknown physical worker: start exists without terminal/identity proof')
-        write(terminal,{'returncode':None,'error':'Controller interruption; exact saved native identity is stopped'},immutable=True)
+        extra={}
+        if read(session/'physical-start.json').get('capture_policy')=='separate-native-stdout-stderr-v1':
+            extra={'capture_policy':'separate-native-stdout-stderr-v1',
+                'stderr_sha256':file_digest(session/'native.stderr.log') if (session/'native.stderr.log').exists() else None}
+        write(terminal,{'returncode':None,'error':'Controller interruption; exact saved native identity is stopped',**extra},immutable=True)
     return read(terminal)
+
+
+def stderr_text(session,terminal):
+    policy=read(session/'physical-start.json').get('capture_policy')
+    if terminal.get('capture_policy')!=policy:raise ValueError('Native capture policy changed')
+    if policy!='separate-native-stdout-stderr-v1':return ''
+    path=session/'native.stderr.log';checksum=terminal.get('stderr_sha256')
+    if checksum is None:
+        if path.exists():raise ValueError('Previously absent native stderr appeared')
+        return ''
+    return checked(path,checksum).read_text('utf8',errors='replace')
 
 
 def collect(job,session):
     start=read(session/'physical-start.json');terminal=terminal_session(session)
     checked(session/'request.json',start['sequence_sha256']);log=session/'native.log'
     text=log.read_text('utf8',errors='replace') if log.exists() else ''
+    error_text=text+'\n'+stderr_text(session,terminal)
     completed=[]
     for spec in start['specs']:
         raw=session/'native'/(spec['request']['id']+'.wav')
@@ -248,7 +264,7 @@ def collect(job,session):
     # pre-dispatch marker. Only an explicit generation/cap failure or a partial
     # output proves an incomplete request after the contiguous completed prefix.
     raw_next=(session/'native'/(start['specs'][first_missing]['request']['id']+'.wav')) if first_missing<len(completed) else None
-    entered=bool(re.search(r'audiocpp_cli failed:.*Higgs.*(?:generation|max_tokens)|max_tokens.*before.*EOC',text,re.I)
+    entered=bool(re.search(r'audiocpp_cli failed:.*Higgs.*(?:generation|max_tokens)|max_tokens.*before.*EOC',error_text,re.I)
                  or raw_next is not None and raw_next.exists())
     uncertain=first_missing<len(completed) and not entered and 'mode=offline' in text
     undispatched=[]
@@ -273,7 +289,7 @@ def collect(job,session):
                 raise ValueError('Native request has no durable completion marker; incomplete WAV excluded')
             receipt.update(status='rendered',audio=str(raw.relative_to(job)),audio_sha256=file_digest(raw))
         except (OSError,ValueError,RuntimeError) as error:
-            receipt.update(status='technical_incomplete',error=str(error),native_cap_reported=bool(re.search(r'max_tokens|before.*EOC',text,re.I)))
+            receipt.update(status='technical_incomplete',error=str(error),native_cap_reported=bool(re.search(r'max_tokens|before.*EOC',error_text,re.I)))
         write(target,receipt,immutable=True)
     write(session/'undispatched.json',{'units':undispatched,'physical_start_sha256':file_digest(session/'physical-start.json'),
         'physical_result_sha256':file_digest(session/'physical-result.json'),'log_sha256':file_digest(log) if log.exists() else None,
@@ -295,6 +311,7 @@ def selected(job,config):
             if not session.resolve().is_relative_to((job/'sessions').resolve()):raise ValueError('Session escaped its job')
             start=read(checked(session/'physical-start.json',row['physical_start_sha256']))
             terminal=read(checked(session/'physical-result.json',row['physical_result_sha256']))
+            stderr_text(session,terminal) # Independently bound raw error channel.
             if row['log_sha256'] is not None:checked(session/'native.log',row['log_sha256'])
             elif (session/'native.log').exists():raise ValueError('Previously absent native log changed')
             if row['spec'] not in start['specs'] or row['terminal']!=terminal:raise ValueError('Physical request/terminal receipt changed')
@@ -341,16 +358,17 @@ def session_run(folder,output,job,config,specs,timeout):
     command=native_command(config,session)
     if Path(command[0]).resolve()!=runner.resolve() or Path(command[command.index('--model')+1]).resolve()!=pin.path.resolve():
         raise ValueError('Resolved speech model/runner differs from exact frozen command')
-    start={'specs':specs,'launch':launch,'command':command,'sequence_sha256':file_digest(sequence)}
+    start={'specs':specs,'launch':launch,'command':command,'sequence_sha256':file_digest(sequence),
+        'capture_policy':'separate-native-stdout-stderr-v1'}
     with (session/'physical-start.json').open('x',encoding='utf8') as stream:json.dump(start,stream,ensure_ascii=False)
     process=None;error=None
     try:
-        with (session/'native.log').open('ab') as log:
-            process=subprocess.Popen(command,cwd=runner.parent,stdout=log,stderr=subprocess.STDOUT,**native.assets.HIDDEN)
+        with (session/'native.log').open('ab') as log,(session/'native.stderr.log').open('ab') as errors:
+            process=subprocess.Popen(command,cwd=runner.parent,stdout=log,stderr=errors,**native.assets.HIDDEN)
             identity={'pid':process.pid,'create_time':psutil.Process(process.pid).create_time(),'command':command}
             write(session/'worker.json',identity,immutable=True);began=time.monotonic();last=(0,began)
             while process.poll() is None:
-                size=(session/'native.log').stat().st_size
+                size=sum((session/name).stat().st_size for name in ('native.log','native.stderr.log'))
                 if size!=last[0]:last=(size,time.monotonic())
                 state(output,job,config,stage='native',worker=identity,worker_running=True,session=sid,log_bytes=size)
                 if time.monotonic()-began>timeout or time.monotonic()-last[1]>600:
@@ -359,7 +377,9 @@ def session_run(folder,output,job,config,specs,timeout):
     except OSError as problem:error=str(problem)
     finally:
         if process is not None and process.poll() is None:process.kill();process.wait()
-        write(session/'physical-result.json',{'returncode':process.returncode if process else None,'error':error},immutable=True)
+        write(session/'physical-result.json',{'returncode':process.returncode if process else None,'error':error,
+            'capture_policy':'separate-native-stdout-stderr-v1',
+            'stderr_sha256':file_digest(session/'native.stderr.log') if (session/'native.stderr.log').exists() else None},immutable=True)
     try:collect(job,session)
     except Exception as problem:
         state(output,job,config,stage='held',worker_running=False,error=str(problem))
@@ -465,6 +485,25 @@ def render_exclusive(folder,output,batch_size,timeout):
     finally:manager.__exit__(None,None,None)
 
 
+def observed_progress(output,stdout_bytes):
+    """Actual changed work only; timestamps/heartbeat rewrites do not reset idle time."""
+    token=[stdout_bytes]
+    for name,keys in [('preparation-progress.json',('stage','done','total')),
+                      ('progress.json',('stage','session','counts','log_bytes'))]:
+        try:value=read(output/name)
+        except (OSError,ValueError):value={}
+        token.append({key:value.get(key) for key in keys})
+    try:
+        current=read(output/'current-job.json');progress=read(output/'progress.json')
+        job=current['job'];session=progress.get('session','')
+        if re.fullmatch('[0-9a-f]{64}',job) and re.fullmatch('[0-9a-f]{64}',session):
+            folder=output/'jobs'/job/'sessions'/session
+            token.append({name:(folder/name).stat().st_size if (folder/name).exists() else None
+                for name in ('native.log','native.stderr.log')})
+    except (OSError,ValueError,KeyError):pass
+    return digest(token)
+
+
 def supervise(args):
     """Bounded operational resumes. Never converts technical success into ASR pass."""
     output=args.output.resolve();output.mkdir(parents=True,exist_ok=True)
@@ -481,8 +520,8 @@ def supervise(args):
                 identity={'pid':child.pid,'create_time':psutil.Process(child.pid).create_time(),'command':command}
                 last=(0,time.monotonic());began=time.monotonic()
                 while child.poll() is None:
-                    size=log_path.stat().st_size
-                    if size!=last[0]:last=(size,time.monotonic())
+                    size=log_path.stat().st_size;observed=observed_progress(output,size)
+                    if observed!=last[0]:last=(observed,time.monotonic())
                     write(output/'supervision.json',{'policy':POLICY,'stage':stage,'restart':restart,'worker':identity,
                         'worker_running':True,'updated_unix':time.time(),'log_bytes':size,**UNCHECKED})
                     if time.monotonic()-last[1]>2400 or time.monotonic()-began>14400:
