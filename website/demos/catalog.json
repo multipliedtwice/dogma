@@ -63,9 +63,9 @@
     "featured": true,
     "id": "ru-queen-spades",
     "status": "ready",
-    "duration": 473.91866666666664,
-    "audio_sha256": "8621302fcdaf5b8bc036c85fb3f078a9efcd9ab11d86c92143bb1802f5953dc4",
-    "audio": "demos/ru/8621302fcdaf5b8bc036c85fb3f078a9efcd9ab11d86c92143bb1802f5953dc4.mp3",
-    "captions": "demos/ru/captions-9b00ec8342c2228b710f3a9faa85d0a65b652742eaae756102778013361a00a9.json"
+    "duration": 457.3586666666667,
+    "audio_sha256": "5006cb1af5be2236958633258d48cbb8c8d6dbba0c26579c8f81328ef939eba0",
+    "audio": "demos/ru/5006cb1af5be2236958633258d48cbb8c8d6dbba0c26579c8f81328ef939eba0.mp3",
+    "captions": "demos/ru/captions-44b3362be26a65d1c96a452625ac7683de811a4862cfb9de2efcc73bd6e8ea13.json"
   }
 ]
