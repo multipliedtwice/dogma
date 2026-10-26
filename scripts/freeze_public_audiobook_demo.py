@@ -391,7 +391,7 @@ def pronunciation(folder):
     return assignment
 
 
-def freeze(folder, music_path=None):
+def freeze(folder, music_path=None, *, persist=True):
     from rimsky.production_higgs_model import resolve_production_higgs_model
     from rimsky.opening import load_opening_pack, MANIFEST_SHA256
     from rimsky.higgs_reference import check_reference
@@ -464,8 +464,10 @@ def freeze(folder, music_path=None):
                 'opening': {'sha256': opening['audio_hash'], 'language': assignment['language'],
                             'manifest_sha256': MANIFEST_SHA256, 'variant': 'music',
                             'path': str(brand_folder / opening['file']), 'music_policy': 'always_musical_branding'}}
-    immutable(folder / 'manifest.json', manifest)
-    print('FROZEN', folder.name, len(assignment['units']), 'units', flush=True)
+    if persist:
+        immutable(folder / 'manifest.json', manifest)
+        print('FROZEN', folder.name, len(assignment['units']), 'units', flush=True)
+    return manifest
 
 
 def main():

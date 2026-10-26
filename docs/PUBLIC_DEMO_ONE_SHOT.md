@@ -1,8 +1,37 @@
 # One-shot demo generation
 
-The default development-demo entrypoint is now `scripts/render_public_demo_one_shot.py`.
-It supersedes the legacy renderer's audit/recovery `all` command for new listening
-renders. It consumes existing frozen preprocessing and generates one native Higgs
+For new public excerpts, use `scripts/generate_public_demo_current.py`. It prepares
+Russian through the current runtime recipe: Silero/RUAccent stress with pinned
+Opus disagreements, conditional Luna е/ё, source-typed heading stress and frozen
+module/model caches. Shared human instructions apply after automatic preparation;
+the recorded deterministic phonetic layer follows. English avoids Russian text
+analysis and still consumes its frozen shared human profile.
+
+```powershell
+training-work/.venv-asr/Scripts/python.exe -X utf8 -u scripts/generate_public_demo_current.py --folder training-work/public-demos/current-en-alice-tea-party --output training-work/public-demos/current-en-alice-tea-party --stage all
+```
+
+The source workspace must already contain the exact prepared book and completed
+structure/casting analysis. `music/selected.json` supplies previously checked cues
+and honest reuse provenance. The controller supervises preparation, freeze and
+render; `supervision.json` and `progress.json` record actual worker identities,
+counts and exits. Temperature 0.8, top-k 30 and top-p 0.8 are frozen sound inputs.
+There is one completed native take per passage. Explicit incomplete native runs
+can receive a bounded cap extension and then seed+1; unknown dispatch holds, and
+unstarted batch suffixes retain their original requests. These are disclosed
+technical retries, never recognition/quality retakes. No ASR or acoustic audit runs.
+
+One stable light player and `public/current.mp3`/`current.wav` remain current per
+book. Checked temporary mixes replace those files atomically; compact metadata
+receipts do not retain complete earlier audio prefixes. Playback bookmarks use
+the source identity. Recognition stays `not_checked`, with no human or production
+approval. The approved eight-second opening is unchanged; cached music uses
+20-second phrases, four-second gaps and 0.9 amplitude relative to −30 dBFS.
+
+The following older entrypoint remains available for its existing frozen runs.
+
+The earlier `scripts/render_public_demo_one_shot.py` entrypoint remains for
+existing frozen listening runs. It consumes their preprocessing and generates one native Higgs
 take per source unit. It runs no speech recognition, acoustic quality/stress checks,
 witness, adjudication, repair, or automatic retake. It does not modify production
 runtime code, model weights, source assignments, protected labels, or old attempts.
