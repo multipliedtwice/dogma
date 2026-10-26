@@ -9,5 +9,5 @@
     "license_url": "https://creativecommons.org/licenses/by-nc/4.0/"
   },
   "usage": "Opening and background music use YuE2-3B by Multimodal Art Projection, via audio.cpp GGUF. Phrases are mixed with narration, level changes and fades. These demos include CC BY-NC 4.0 music and are for non-commercial use. Retain attribution when sharing.",
-  "verification": "The Russian demo was regenerated after listening feedback, with targeted development checks and replacement takes. The English demo uses a single take per passage. Neither recording has received complete human listening approval. Original texts are credited at their sources; public-domain status varies by territory."
+  "verification": "Source coverage and audio-file integrity were checked. Additional demos use one completed native take per passage, with only bounded technical retries; recognition and acoustic checks were not run. The existing Russian demo received separate development checks and repairs. No human listening approval is recorded. Original texts are credited at their sources; public-domain status varies by territory."
 }

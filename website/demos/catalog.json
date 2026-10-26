@@ -22,5 +22,20 @@
     "audio_sha256": "b0fc16df58d22812524044f18ea1541c1b19e7122dd88433962e3eb6180a285b",
     "audio": "demos/ru/b0fc16df58d22812524044f18ea1541c1b19e7122dd88433962e3eb6180a285b.mp3",
     "captions": "demos/ru/captions-3798cc9e2f7160ccb9e7f29ab85c0d8506dd03c46993f154911a9872ca986947.json"
+  },
+  {
+    "language": "English",
+    "title": "The Open Window",
+    "author": "Saki",
+    "source": "https://www.gutenberg.org/cache/epub/269/pg269-images.html",
+    "description": "The complete short story: a nervous visitor hears Vera’s account of an open French window.",
+    "extent": "complete",
+    "featured": true,
+    "id": "en-open-window",
+    "status": "ready",
+    "duration": 445.91866666666664,
+    "audio_sha256": "01864c00ad84f1223c15f741c433ccc99ae339c70000fbe766cd2e17144e10e1",
+    "audio": "demos/en/01864c00ad84f1223c15f741c433ccc99ae339c70000fbe766cd2e17144e10e1.mp3",
+    "captions": "demos/en/captions-31d17711c52117e04e0799266d7745fd8de6bf87dd024a244db08c1e9d3a2bda.json"
   }
 ]

@@ -6,8 +6,11 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+import sys
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'scripts'))
 spec=importlib.util.spec_from_file_location('github_pages',ROOT/'scripts/github_pages.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
@@ -67,15 +70,86 @@ class PagesBoundary(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'caption'):m.captions_valid(rows,40)
 
     def test_relative_assets_cannot_escape_site(self):
-        for path in ('../secret.mp3','/demos/en/file.mp3','demos/en/../../private', 'https://example.org/a.mp3'):
+        for path in ('../secret.mp3','/demos/en/file.mp3','demos/en/../../private', 'https://example.org/a.mp3',
+                     'demos/en/..\\..\\private.mp3','demos/en/..','demos/ru/%2e%2e'):
             with self.subTest(path=path),self.assertRaises(ValueError):m.local(self.site,path)
+
+    def additional(self,identifier,language):
+        locale={'English':'en','Russian':'ru'}[language];folder=self.site/'demos'/locale;folder.mkdir(exist_ok=True)
+        raw=('Synthetic MP3 '+identifier).encode()*100;checksum=m.sha(raw)
+        (folder/(checksum+'.mp3')).write_bytes(raw)
+        captions=m.encoded([{'id':'u0000','source_id':identifier,'text':'Synthetic public excerpt.','start':8.,'end':20.}])
+        name='captions-'+m.sha(captions)+'.json';(folder/name).write_bytes(captions)
+        return {'id':identifier,'language':language,'locale':locale,'title':identifier,'author':'Public author',
+            'description':'A source-bound excerpt.','extent':'excerpt','source':'https://example.org/'+identifier,
+            'status':'ready','duration':360.,'audio':'demos/'+locale+'/'+checksum+'.mp3','audio_sha256':checksum,
+            'captions':'demos/'+locale+'/'+name}
+
+    def test_six_demos_have_unique_ids_and_separate_language_assets(self):
+        self.catalog[1]=self.additional('ru','Russian')
+        self.catalog.extend(self.additional(identifier,language)for identifier,language in(
+            ('ru-queen-spades','Russian'),('ru-malefactor','Russian'),('en-open-window','English'),('en-alice-tea-party','English')))
+        self.save_catalog();result=m.check(self.site,seo=False)
+        self.assertEqual(result['ready_demos'],6)
+        self.assertEqual(len({r['id']for r in self.catalog}),6)
+
+    def test_duplicate_or_missing_legacy_id_is_rejected(self):
+        self.catalog.append(dict(self.catalog[0]));self.save_catalog()
+        with self.assertRaisesRegex(ValueError,'unique'):m.check(self.site,seo=False)
+        self.catalog=self.catalog[1:2];self.save_catalog()
+        with self.assertRaisesRegex(ValueError,'existing'):m.check(self.site,seo=False)
+
+    def test_featured_requires_one_ready_boolean_selection_per_locale(self):
+        self.catalog[0]['featured']=True;self.save_catalog();m.check(self.site,seo=False)
+        self.catalog.append({**self.additional('en-open-window','English'),'featured':True});self.save_catalog()
+        with self.assertRaisesRegex(ValueError,'one featured'):m.check(self.site,seo=False)
+        self.catalog.pop()
+        for index,value in((1,True),(0,1)):
+            self.catalog[index]['featured']=value;self.save_catalog()
+            with self.assertRaisesRegex(ValueError,'Featured'):m.check(self.site,seo=False)
+            self.catalog[index].pop('featured')
+
+    def test_catalog_language_id_and_asset_scope_cannot_disagree(self):
+        row=self.additional('ru-queen-spades','Russian');self.catalog.append(row)
+        for changes in({'locale':'en'},{'id':'en-impostor'},{'language':'French'},
+                        {'audio':self.catalog[0]['audio']},{'captions':self.catalog[0]['captions']}):
+            self.catalog[-1]={**row,**changes};self.save_catalog()
+            with self.subTest(changes=changes),self.assertRaisesRegex(ValueError,'language'):m.check(self.site,seo=False)
+
+    def test_metadata_rejects_hidden_private_fields_and_untrusted_source_urls(self):
+        for changes in({'private_labels':{}},{'source':'file:///private'},{'source':'https://name:password@example.org/a'},
+                        {'extent':'all-errors-fixed'},{'description':' '}):
+            with self.subTest(changes=changes),self.assertRaises(ValueError):m.catalog_identity({**self.catalog[0],**changes})
+
+    def test_export_adds_by_demo_id_preserving_both_legacy_entries_and_media(self):
+        import package_public_audiobook_demos as package
+        previous=copy.deepcopy(self.catalog)
+        original={p:p.read_bytes()for p in(self.site/'demos/en').iterdir()}
+        metadata={'title':'New story','author':'Public Author','language':'English','source':'https://example.org/new',
+            'extent':'excerpt','description':'A reviewed excerpt.'}
+        audio=b'Synthetic additional MP3.'*100
+        latest={'speech_end':336.,'mp3':'selected.mp3','captions':self.rows}
+        payload={'latest.json':m.encoded(latest),'selected.mp3':audio}
+        with patch.object(package,'completed_book',return_value=(payload,metadata))as completed:
+            m.export(Path('unused'),'en',self.site,360.,demo_id='en-open-window',metadata=metadata)
+        completed.assert_called_once_with(Path('unused'),'en',expected_metadata=metadata)
+        catalog=m.read(self.site/'demos/catalog.json')
+        self.assertEqual(catalog[:2],previous);self.assertEqual(catalog[-1]['id'],'en-open-window')
+        self.assertEqual({p:p.read_bytes()for p in original},original)
+        self.assertEqual(m.check(self.site,seo=False)['ready_demos'],2)
+
+    def test_additional_export_without_reviewed_identity_fails_before_any_write(self):
+        before={p.relative_to(self.site).as_posix():p.read_bytes()for p in self.site.rglob('*')if p.is_file()}
+        with self.assertRaisesRegex(ValueError,'reviewed public metadata'):
+            m.export(Path('unused'),'en',self.site,360.,demo_id='en-new-book')
+        self.assertEqual(before,{p.relative_to(self.site).as_posix():p.read_bytes()for p in self.site.rglob('*')if p.is_file()})
 
 
 class LocalizedSEO(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.site=Path(self.temp.name)
-        for name in ('index.html','ru/index.html','sitemap.xml','assets/social-en.png','assets/social-ru.png'):
+        for name in ('index.html','ru/index.html','sitemap.xml','assets/social-en.png','assets/social-ru.png','demos/catalog.json'):
             target=self.site/name;target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(ROOT/'website'/name,target)
 
@@ -98,9 +172,9 @@ class LocalizedSEO(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'language'):m.check_seo(self.site)
 
     def test_missing_html_language_or_duplicate_description_is_rejected(self):
-        self.change('ru/index.html','<html lang="ru">','<html lang="en">')
+        self.change('ru/index.html','<html lang="ru"','<html lang="en"')
         with self.assertRaisesRegex(ValueError,'language'):m.check_seo(self.site)
-        self.change('ru/index.html','<html lang="en">','<html lang="ru">')
+        self.change('ru/index.html','<html lang="en"','<html lang="ru"')
         self.change('index.html','</head>','<meta name="description" content="Duplicate"></head>')
         with self.assertRaisesRegex(ValueError,'duplicate'):m.check_seo(self.site)
 

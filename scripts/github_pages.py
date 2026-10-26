@@ -12,14 +12,16 @@ import math
 from pathlib import Path
 import re
 import stat
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 HASH = r'[a-f0-9]{64}'
 PRIVATE = re.compile(r'(?i)manual-labeling[\\/]|training-work[\\/]|corpora[\\/]|datasets[\\/]|'
                      r'(?<![a-z0-9])[a-z]:[\\/]|file://|PRIVATE_TRAINING_PATH')
-CATALOG_KEYS = {'id','language','title','author','status','duration','audio','captions','source','audio_sha256'}
+CATALOG_KEYS = {'id','locale','language','title','author','description','extent','featured','status','duration','audio','captions','source','audio_sha256'}
+READY_KEYS = {'duration','audio','captions','audio_sha256'}
+LANGUAGES = {'English':'en','Russian':'ru'}
 CAPTION_FIELDS = ('id','source_id','text','start','end')
 CAPTION_KEYS = set(CAPTION_FIELDS)
 STATIC = {'index.html','ru/index.html','styles.css','script.js','theme.js','.nojekyll','favicon.svg',
@@ -60,6 +62,7 @@ class LandingPage(HTMLParser):
 def check_seo(site):
     """Require crawlable, reciprocal localized documents and honest share data."""
     site=Path(site);urls={'en':SITE_URL,'ru':SITE_URL+'ru/','x-default':SITE_URL}
+    catalog=read(site/'demos/catalog.json')
     for language,path in [('en','index.html'),('ru','ru/index.html')]:
         page=LandingPage();page.feed(safe(site/path).read_text(encoding='utf-8'));page.close()
         if page.language!=language or page.h1!=1 or len(page.titles)!=1 or not page.titles[0].strip():
@@ -101,6 +104,10 @@ def check_seo(site):
         if not any(node.get('@type')=='WebPage' and node.get('url')==urls[language]
                    and node.get('inLanguage')==language and node.get('name')==page.titles[0] for node in nodes):
             raise ValueError('JSON-LD must describe the actual localized page')
+        from build_website_metadata import audio_metadata
+        expected=audio_metadata(language,catalog)
+        actual=[node for node in nodes if node.get('@type')in('AudioObject','ItemList')]
+        if actual!=expected:raise ValueError('Every ready same-language demo needs exact AudioObject/ItemList metadata')
     try:
         tree=ET.parse(safe(site/'sitemap.xml'))
     except ET.ParseError as error:raise ValueError('Invalid XML sitemap') from error
@@ -133,9 +140,32 @@ def read(path):
     return json.loads(safe(path).read_text(encoding='utf-8'))
 
 
-def local(site,value):
-    if not isinstance(value,str) or not re.fullmatch(r'demos/(?:en|ru)/[^/]+',value):
+def catalog_identity(row):
+    if not isinstance(row,dict) or set(row)-CATALOG_KEYS or not {'id','language','title','author','status','source'}<=row.keys():
+        raise ValueError('Unsupported catalog metadata')
+    locale=LANGUAGES.get(row['language']);identifier=row['id']
+    if (not locale or row.get('locale',locale)!=locale or not isinstance(identifier,str)
+            or len(identifier)>80 or not re.fullmatch(locale+r'(?:-[a-z0-9]+)*',identifier)):
+        raise ValueError('Demo identity and explicit language must agree')
+    if any(not isinstance(row[k],str) or not row[k].strip() for k in ('title','author','source')):
+        raise ValueError('Demo title, author and source are required')
+    source=urlsplit(row['source'])
+    if source.scheme!='https' or not source.hostname or source.username or source.password:
+        raise ValueError('Demo source must be a public HTTPS URL')
+    if 'description'in row and(not isinstance(row['description'],str)or not 0<len(row['description'].strip())<=600):
+        raise ValueError('Invalid demo description')
+    if row.get('extent','complete'if identifier==locale else'excerpt')not in('complete','excerpt'):
+        raise ValueError('Demo extent must disclose a complete story or excerpt')
+    if 'featured'in row and(type(row['featured'])is not bool or row['featured']and row['status']!='ready'):
+        raise ValueError('Featured demo must be a ready boolean selection')
+    return locale
+
+
+def local(site,value,locale=None):
+    if not isinstance(value,str) or not re.fullmatch(r'demos/(?:en|ru)/[A-Za-z0-9._-]+',value)or value.rsplit('/',1)[-1]in('.','..'):
         raise ValueError('Demo asset must be a relative, language-scoped local path')
+    if locale and not value.startswith('demos/'+locale+'/'):
+        raise ValueError('Demo media must match its catalog language')
     return safe(site/value)
 
 
@@ -156,28 +186,31 @@ def captions_valid(rows,duration):
 def check(site,*,seo=True):
     site=safe(site)
     catalog=read(site/'demos/catalog.json')
-    if not isinstance(catalog,list) or {r.get('id') for r in catalog}!={'en','ru'} or len(catalog)!=2:
-        raise ValueError('Expected one English and one Russian demo entry')
+    if not isinstance(catalog,list)or not catalog:raise ValueError('Expected a nonempty demo catalog')
+    locales=[catalog_identity(row)for row in catalog]
+    if any(sum(row.get('featured')is True for row,code in zip(catalog,locales)if code==locale)>1 for locale in('en','ru')):
+        raise ValueError('Only one featured demo is allowed per language')
+    ids=[r['id']for r in catalog]
+    if len(set(ids))!=len(ids)or not {'en','ru'}<=set(ids):
+        raise ValueError('Catalog needs unique demo IDs and the existing English/Russian demos')
     allowed=STATIC|{'demos/catalog.json','demos/credits.json'}
     ready=0
-    for row in catalog:
-        if set(row)-CATALOG_KEYS or not {'id','language','title','author','status','source'}<=row.keys():
-            raise ValueError('Unsupported catalog metadata')
+    for row,locale in zip(catalog,locales):
         if row['status']=='preparing':
             if set(row)&{'audio','captions','duration','audio_sha256'}:
                 raise ValueError('Unready demo must not expose audio or captions')
             continue
-        if row['status']!='ready' or not CATALOG_KEYS<=row.keys():
+        if row['status']!='ready' or not READY_KEYS<=row.keys():
             raise ValueError('Incomplete ready demo metadata')
         ready+=1
         duration=row['duration']
         if type(duration) not in (int,float) or not math.isfinite(duration) or duration<=32:
             raise ValueError('Invalid demo duration')
-        audio=local(site,row['audio']);raw=audio.read_bytes()
+        audio=local(site,row['audio'],locale);raw=audio.read_bytes()
         if (not re.fullmatch(HASH+r'\.mp3',audio.name) or sha(raw)!=row['audio_sha256']
                 or audio.stem!=row['audio_sha256'] or not 1000<len(raw)<95*1024*1024):
             raise ValueError('Demo audio checksum, filename or size differs')
-        caption=local(site,row['captions']);data=caption.read_bytes()
+        caption=local(site,row['captions'],locale);data=caption.read_bytes()
         if not re.fullmatch('captions-'+sha(data)+r'\.json',caption.name):
             raise ValueError('Caption checksum differs from immutable filename')
         captions_valid(json.loads(data),duration)
@@ -218,55 +251,158 @@ def check(site,*,seo=True):
             'inventory_sha256':sha(encoded(inventory))}
 
 
-def export(book,language,site,duration):
-    # This strict local exporter validates source coverage, completion, original
-    # captions, MP3 hash, source-bound report and privacy before projecting data.
+def _project(site,language,demo_id,details,audio,rows,duration,*,unchecked=False):
+    """Project only reviewed public metadata, caption columns and selected MP3."""
     import package_public_audiobook_demos as package
-    payload,details=package.completed_book(Path(book),language)
-    latest=json.loads(payload['latest.json'])
-    if not math.isfinite(duration) or abs(duration-(latest['speech_end']+24))>0.1:
-        raise ValueError('Duration must match the complete speech plus ending music')
-    audio=payload[latest['mp3']];checksum=sha(audio)
-    rows=[{k:c[k] for k in CAPTION_FIELDS} for c in latest['captions']]
-    captions_valid(rows,duration);caption_bytes=encoded(rows)
+    checksum=sha(audio);captions_valid(rows,duration);caption_bytes=encoded(rows)
     row={k:details[k] for k in ('language','title','author','source')}
-    row.update(id=language,status='ready',duration=duration,audio_sha256=checksum,
+    row.update({k:details[k]for k in('description','extent','featured')if k in details})
+    row.update(id=demo_id or language,status='ready',duration=duration,audio_sha256=checksum,
                audio=f'demos/{language}/{checksum}.mp3',
                captions=f'demos/{language}/captions-{sha(caption_bytes)}.json')
     site=safe(site);catalog_path=site/'demos/catalog.json'
     catalog=read(catalog_path) if catalog_path.exists() else [
         {'id':key,**{k:b[k] for k in ('language','title','author','source')},'status':'preparing'}
         for key,b in package.BOOKS.items()]
-    catalog=[row if old['id']==language else old for old in catalog]
+    catalog_identity(row)
+    package.clean_json(row);package.clean_json(rows)
+    if any(old['id']==row['id']for old in catalog):catalog=[row if old['id']==row['id']else old for old in catalog]
+    else:catalog.append(row)
+    if any(sum(old.get('featured')is True for old in catalog if catalog_identity(old)==locale)>1 for locale in('en','ru')):
+        raise ValueError('Only one featured demo is allowed per language')
     credits={'schema':1,'music':package.MUSIC,
         'usage':'Opening and background music use YuE2-3B by Multimodal Art Projection, '
                 'via audio.cpp GGUF. Phrases are mixed with narration, level changes and fades. '
                 'These demos include CC BY-NC 4.0 music and are for non-commercial use. Retain attribution when sharing.',
         'verification':'Published demos passed automated source-bound checks. No human listening approval is recorded. '
                        'Original texts are credited at their sources; public-domain status varies by territory.'}
+    if unchecked:
+        credits['verification']=('Source coverage and audio-file integrity were checked. Additional demos use one completed '
+            'native take per passage, with only bounded technical retries; recognition and acoustic checks were not run. '
+            'The existing Russian demo received separate development checks and repairs. No human listening approval is recorded. '
+            'Original texts are credited at their sources; public-domain status varies by territory.')
     for relative,raw in ((row['audio'],audio),(row['captions'],caption_bytes)):
         target=safe(site/relative);target.parent.mkdir(parents=True,exist_ok=True)
         if target.exists() and target.read_bytes()!=raw:
             raise ValueError('Never overwrite a differing immutable demo asset')
-        if not target.exists():
-            target.write_bytes(raw)
+        if not target.exists():target.write_bytes(raw)
     catalog_path.parent.mkdir(parents=True,exist_ok=True)
     catalog_path.write_bytes(encoded(catalog));(site/'demos/credits.json').write_bytes(encoded(credits))
     return {'language':language,'audio_sha256':checksum,'captions':len(rows),'bytes':len(audio)}
 
 
+def export_one_shot(source,output,language,site,*,demo_id,metadata,integrity):
+    """Export a completed current producer with a separately bound CPU proof.
+
+    This is an explicit unchecked producer contract, never a recognition-pass
+    compatibility shim. The private integrity proof is not published.
+    """
+    import package_public_audiobook_demos as package
+    import generate_public_demo_current as producer
+    source=safe(source);output=safe(output);proof=read(integrity)
+    if not isinstance(metadata,dict):raise ValueError('One-shot export requires reviewed public metadata')
+    details=package.public_metadata(language,metadata)
+    pointer_path=output/'current-job.json';pointer_raw=safe(pointer_path).read_bytes();pointer=json.loads(pointer_raw)
+    key=pointer.get('job')
+    if not isinstance(key,str)or not re.fullmatch(HASH,key):raise ValueError('Invalid current one-shot job')
+    job=safe(output/'jobs'/key)
+    for path in job.rglob('*'):safe(path)
+    config_path=job/'config.json';config_raw=safe(config_path).read_bytes();config=json.loads(config_raw)
+    public=safe(output/'public');latest_path=public/'latest.json';latest_raw=safe(latest_path).read_bytes();latest=json.loads(latest_raw)
+    frozen=read(source/'frozen.json');assignment=frozen['assignment'];units=assignment['units'];ids=[u['id']for u in units]
+    safe(source/'prepared/book.json')
+    producer.legacy.verify_assignment_source(source,assignment) # Pure source coverage; no profile or provider access.
+    if (config.get('policy')!=producer.POLICY or config.get('post_processing')!='off'
+            or config.get('frozen')!=frozen or config.get('source_generation')!=producer.digest(frozen)
+            or producer.digest(config)!=key or pointer.get('config_sha256')!=key
+            or config.get('dependencies')!=producer.pins()):
+        raise ValueError('Current producer configuration/source binding changed')
+    if (not units or any(not isinstance(uid,str)or not re.fullmatch(r'u\d{4}',uid)for uid in ids)
+            or len(set(ids))!=len(ids)or assignment.get('language')!=details['language']
+            or any(assignment.get(k)!=details[k] for k in('title','author'))):
+        raise ValueError('One-shot source identity differs from reviewed metadata')
+    if (latest.get('policy')!=producer.POLICY or latest.get('source_generation')!=config['source_generation']
+            or latest.get('render_complete')is not True or latest.get('total_units')!=len(units)
+            or latest.get('rendered_units')!=len(units)or latest.get('opening_seconds')!=8
+            or any(type(latest.get(k))is not type(v)or latest.get(k)!=v for k,v in producer.UNCHECKED.items())
+            or any(latest.get(k)!=details[k]for k in('title','author','language'))):
+        raise ValueError('One-shot publication is incomplete or misstates its unchecked mode')
+    version=latest.get('version')
+    if not isinstance(version,str)or not re.fullmatch(HASH,version)or read(public/(version+'.json'))!=latest:
+        raise ValueError('One-shot publication/version disagree')
+    selected=producer.selected(job,config);bindings=[]
+    captions=latest.get('captions',[])
+    if len(captions)!=len(units):raise ValueError('One-shot caption coverage is incomplete')
+    for unit,row,caption in zip(units,selected,captions,strict=True):
+        chosen=row['selected']
+        if chosen is None:raise ValueError('One-shot native completion is missing')
+        receipt=job/'attempts'/unit['id']/f"{chosen['attempt']}.json"
+        bindings.append({'id':unit['id'],'receipt_sha256':sha(safe(receipt).read_bytes()),'audio_sha256':chosen['audio_sha256']})
+        session=safe(job/'sessions'/chosen['session'])
+        worker=read(session/'worker.json')
+        try:birth_live=abs(producer.psutil.Process(worker['pid']).create_time()-worker['create_time'])<.01
+        except producer.psutil.NoSuchProcess:birth_live=False
+        if birth_live or producer.live(worker)or worker['command']!=read(session/'physical-start.json')['command']:
+            raise ValueError('One-shot native worker remains live or launch binding changed')
+        if (caption.get('id')!=unit['id']or caption.get('source_id')!=unit['source_id']or caption.get('text')!=unit['text']
+                or caption.get('raw_audio_sha256')!=chosen['audio_sha256']or caption.get('recognition_status')!='not_checked'):
+            raise ValueError('One-shot captions differ from actual source/native selection')
+    if latest.get('physical_native_attempts')!=sum(len(r['history'])for r in selected)or latest.get('technical_retries')!=sum(len(r['history'])-1 for r in selected):
+        raise ValueError('One-shot physical attempt disclosure differs')
+    if latest.get('mp3')!='current.mp3'or latest.get('wav')!='current.wav':raise ValueError('Unexpected one-shot media names')
+    audio=safe(public/'current.mp3').read_bytes();wav=safe(public/'current.wav').read_bytes()
+    expected={'schema':1,'policy':'public-demo-one-shot-integrity-v1','producer_policy':producer.POLICY,
+        'config_sha256':sha(config_raw),'latest_sha256':sha(latest_raw),'mp3_sha256':sha(audio),'wav_sha256':sha(wav),
+        'source_generation':config['source_generation'],'total_units':len(units),'selected':bindings,
+        'checks':{k:True for k in('source_coverage','native_pcm','opening','music','mp3_decode')},
+        'post_processing':'off','recognition_status':'not_checked','human_approval':False}
+    if package.canonical(proof)!=package.canonical(expected)or latest.get('mp3_sha256')!=sha(audio)or latest.get('wav_sha256')!=sha(wav):
+        raise ValueError('Independent one-shot integrity proof/media binding differs')
+    duration=latest.get('duration');speech_end=latest.get('speech_end')
+    if (type(duration)not in(int,float)or not math.isfinite(duration)or type(speech_end)not in(int,float)
+            or not math.isfinite(speech_end)or not 8<speech_end<duration
+            or not captions or abs(captions[-1]['end']-speech_end)>1e-6):
+        raise ValueError('One-shot measured duration/ending differs')
+    if safe(pointer_path).read_bytes()!=pointer_raw or safe(latest_path).read_bytes()!=latest_raw or safe(public/'current.mp3').read_bytes()!=audio:
+        raise ValueError('Current one-shot publication changed during snapshot')
+    return _project(site,language,demo_id,details,audio,[{k:c[k]for k in CAPTION_FIELDS}for c in captions],duration,unchecked=True)
+
+
+def export(book,language,site,duration,*,demo_id=None,metadata=None):
+    # This strict local exporter validates source coverage, completion, original
+    # captions, MP3 hash, source-bound report and privacy before projecting data.
+    import package_public_audiobook_demos as package
+    if demo_id not in(None,language)and metadata is None:
+        raise ValueError('Additional demos require explicit reviewed public metadata')
+    payload,details=package.completed_book(Path(book),language,expected_metadata=metadata)
+    latest=json.loads(payload['latest.json'])
+    if not math.isfinite(duration) or abs(duration-(latest['speech_end']+24))>0.1:
+        raise ValueError('Duration must match the complete speech plus ending music')
+    audio=payload[latest['mp3']]
+    rows=[{k:c[k] for k in CAPTION_FIELDS} for c in latest['captions']]
+    return _project(site,language,demo_id,details,audio,rows,duration)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['export','check'])
+    parser.add_argument('command',choices=['export','export-one-shot','check'])
     parser.add_argument('--site',type=Path,default=ROOT/'website')
     parser.add_argument('--book',type=Path);parser.add_argument('--language',choices=['en','ru'])
     parser.add_argument('--duration',type=float)
+    parser.add_argument('--output',type=Path);parser.add_argument('--integrity',type=Path)
+    parser.add_argument('--demo-id');parser.add_argument('--metadata',type=Path,help='Reviewed public metadata for a nonlegacy demo')
     args=parser.parse_args()
     try:
         if args.command=='export':
             if args.book is None or args.language is None or args.duration is None:
                 parser.error('export needs --book, --language and measured --duration')
-            result=export(args.book,args.language,args.site,args.duration)
+            result=export(args.book,args.language,args.site,args.duration,demo_id=args.demo_id,
+                metadata=read(args.metadata)if args.metadata else None)
+        elif args.command=='export-one-shot':
+            if any(value is None for value in(args.book,args.output,args.language,args.demo_id,args.metadata,args.integrity)):
+                parser.error('export-one-shot needs --book (source), --output, --language, --demo-id, --metadata and --integrity')
+            result=export_one_shot(args.book,args.output,args.language,args.site,demo_id=args.demo_id,
+                metadata=read(args.metadata),integrity=args.integrity)
         else:
             result=check(args.site)
         print(json.dumps(result,indent=2))

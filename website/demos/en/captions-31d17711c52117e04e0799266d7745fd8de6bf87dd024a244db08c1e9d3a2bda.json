@@ -1,0 +1,653 @@
+[
+  {
+    "id": "u0000",
+    "source_id": "c0001-p00001",
+    "text": "The Open Window",
+    "start": 8.0,
+    "end": 9.64
+  },
+  {
+    "id": "u0001",
+    "source_id": "c0001-p00002",
+    "text": "“My aunt will be down presently, Mr. Nuttel,”",
+    "start": 9.8,
+    "end": 12.24
+  },
+  {
+    "id": "u0002",
+    "source_id": "c0001-p00002",
+    "text": " said a very self-possessed young lady of fifteen; ",
+    "start": 12.4,
+    "end": 15.68
+  },
+  {
+    "id": "u0003",
+    "source_id": "c0001-p00002",
+    "text": "“in the meantime you must try and put up with me.”",
+    "start": 15.84,
+    "end": 18.8
+  },
+  {
+    "id": "u0004",
+    "source_id": "c0001-p00003",
+    "text": "Framton Nuttel endeavoured to say the correct something which should duly flatter the niece of the moment without unduly discounting the aunt that was to come. ",
+    "start": 18.96,
+    "end": 27.200000000000003
+  },
+  {
+    "id": "u0005",
+    "source_id": "c0001-p00003",
+    "text": "Privately he doubted more than ever whether these formal visits on a succession of total strangers would do much towards helping the nerve cure which he was supposed to be undergoing.",
+    "start": 27.360000000000003,
+    "end": 36.32000000000001
+  },
+  {
+    "id": "u0006",
+    "source_id": "c0001-p00004",
+    "text": "“I know how it will be,”",
+    "start": 36.480000000000004,
+    "end": 38.040000000000006
+  },
+  {
+    "id": "u0007",
+    "source_id": "c0001-p00004",
+    "text": " his sister had said when he was preparing to migrate to this rural retreat; ",
+    "start": 38.2,
+    "end": 42.440000000000005
+  },
+  {
+    "id": "u0008",
+    "source_id": "c0001-p00004",
+    "text": "“you will bury yourself down there and not speak to a living soul, and your nerves will be worse than ever from moping. ",
+    "start": 42.6,
+    "end": 49.36
+  },
+  {
+    "id": "u0009",
+    "source_id": "c0001-p00004",
+    "text": "I shall just give you letters of introduction to all the people I know there. ",
+    "start": 49.519999999999996,
+    "end": 53.12
+  },
+  {
+    "id": "u0010",
+    "source_id": "c0001-p00004",
+    "text": "Some of them, as far as I can remember, were quite nice.”",
+    "start": 53.279999999999994,
+    "end": 56.31999999999999
+  },
+  {
+    "id": "u0011",
+    "source_id": "c0001-p00005",
+    "text": "Framton wondered whether Mrs. Sappleton, the lady to whom he was presenting one of the letters of introduction, came into the nice division.",
+    "start": 56.47999999999999,
+    "end": 64.51999999999998
+  },
+  {
+    "id": "u0012",
+    "source_id": "c0001-p00006",
+    "text": "“Do you know many of the people round here?”",
+    "start": 64.67999999999998,
+    "end": 67.07999999999998
+  },
+  {
+    "id": "u0013",
+    "source_id": "c0001-p00006",
+    "text": " asked the niece, when she judged that they had had sufficient silent communion.",
+    "start": 67.23999999999998,
+    "end": 71.43999999999998
+  },
+  {
+    "id": "u0014",
+    "source_id": "c0001-p00007",
+    "text": "“Hardly a soul,”",
+    "start": 71.59999999999998,
+    "end": 73.35999999999999
+  },
+  {
+    "id": "u0015",
+    "source_id": "c0001-p00007",
+    "text": " said Framton. ",
+    "start": 73.51999999999998,
+    "end": 74.87999999999998
+  },
+  {
+    "id": "u0016",
+    "source_id": "c0001-p00007",
+    "text": "“My sister was staying here, at the rectory, you know, some four years ago, and she gave me letters of introduction to some of the people here.”",
+    "start": 75.03999999999998,
+    "end": 82.83999999999997
+  },
+  {
+    "id": "u0017",
+    "source_id": "c0001-p00008",
+    "text": "He made the last statement in a tone of distinct regret.",
+    "start": 82.99999999999997,
+    "end": 86.51999999999997
+  },
+  {
+    "id": "u0018",
+    "source_id": "c0001-p00009",
+    "text": "“Then you know practically nothing about my aunt?”",
+    "start": 86.67999999999996,
+    "end": 89.15999999999997
+  },
+  {
+    "id": "u0019",
+    "source_id": "c0001-p00009",
+    "text": " pursued the self-possessed young lady.",
+    "start": 89.31999999999996,
+    "end": 91.79999999999997
+  },
+  {
+    "id": "u0020",
+    "source_id": "c0001-p00010",
+    "text": "“Only her name and address,”",
+    "start": 91.95999999999997,
+    "end": 94.07999999999997
+  },
+  {
+    "id": "u0021",
+    "source_id": "c0001-p00010",
+    "text": " admitted the caller. ",
+    "start": 94.23999999999997,
+    "end": 95.59999999999997
+  },
+  {
+    "id": "u0022",
+    "source_id": "c0001-p00010",
+    "text": "He was wondering whether Mrs. Sappleton was in the married or widowed state. ",
+    "start": 95.75999999999996,
+    "end": 100.03999999999996
+  },
+  {
+    "id": "u0023",
+    "source_id": "c0001-p00010",
+    "text": "An undefinable something about the room seemed to suggest masculine habitation.",
+    "start": 100.19999999999996,
+    "end": 104.91999999999996
+  },
+  {
+    "id": "u0024",
+    "source_id": "c0001-p00011",
+    "text": "“Her great tragedy happened just three years ago,”",
+    "start": 105.07999999999996,
+    "end": 108.15999999999995
+  },
+  {
+    "id": "u0025",
+    "source_id": "c0001-p00011",
+    "text": " said the child; ",
+    "start": 108.31999999999995,
+    "end": 109.55999999999995
+  },
+  {
+    "id": "u0026",
+    "source_id": "c0001-p00011",
+    "text": "“that would be since your sister’s time.”",
+    "start": 109.71999999999994,
+    "end": 111.99999999999994
+  },
+  {
+    "id": "u0027",
+    "source_id": "c0001-p00012",
+    "text": "“Her tragedy?”",
+    "start": 112.15999999999994,
+    "end": 113.35999999999994
+  },
+  {
+    "id": "u0028",
+    "source_id": "c0001-p00012",
+    "text": " asked Framton; somehow in this restful country spot tragedies seemed out of place.",
+    "start": 113.51999999999994,
+    "end": 119.71999999999994
+  },
+  {
+    "id": "u0029",
+    "source_id": "c0001-p00013",
+    "text": "“You may wonder why we keep that window wide open on an October afternoon,”",
+    "start": 119.87999999999994,
+    "end": 123.87999999999994
+  },
+  {
+    "id": "u0030",
+    "source_id": "c0001-p00013",
+    "text": " said the niece, indicating a large French window that opened on to a lawn.",
+    "start": 124.03999999999994,
+    "end": 128.71999999999994
+  },
+  {
+    "id": "u0031",
+    "source_id": "c0001-p00014",
+    "text": "“It is quite warm for the time of the year,”",
+    "start": 128.87999999999994,
+    "end": 130.87999999999994
+  },
+  {
+    "id": "u0032",
+    "source_id": "c0001-p00014",
+    "text": " said Framton; ",
+    "start": 131.03999999999994,
+    "end": 132.07999999999993
+  },
+  {
+    "id": "u0033",
+    "source_id": "c0001-p00014",
+    "text": "“but has that window got anything to do with the tragedy?”",
+    "start": 132.23999999999992,
+    "end": 134.99999999999991
+  },
+  {
+    "id": "u0034",
+    "source_id": "c0001-p00015",
+    "text": "“Out through that window, three years ago to a day, her husband and her two young brothers went off for their day’s shooting. ",
+    "start": 135.1599999999999,
+    "end": 142.27999999999992
+  },
+  {
+    "id": "u0035",
+    "source_id": "c0001-p00015",
+    "text": "They never came back. ",
+    "start": 142.4399999999999,
+    "end": 143.8799999999999
+  },
+  {
+    "id": "u0036",
+    "source_id": "c0001-p00015",
+    "text": "In crossing the moor to their favourite snipe-shooting ground they were all three engulfed in a treacherous piece of bog. ",
+    "start": 144.0399999999999,
+    "end": 150.0399999999999
+  },
+  {
+    "id": "u0037",
+    "source_id": "c0001-p00015",
+    "text": "It had been that dreadful wet summer, you know, and places that were safe in other years gave way suddenly without warning. ",
+    "start": 150.1999999999999,
+    "end": 156.4399999999999
+  },
+  {
+    "id": "u0038",
+    "source_id": "c0001-p00015",
+    "text": "Their bodies were never recovered. ",
+    "start": 156.5999999999999,
+    "end": 158.5199999999999
+  },
+  {
+    "id": "u0039",
+    "source_id": "c0001-p00015",
+    "text": "That was the dreadful part of it.”",
+    "start": 158.6799999999999,
+    "end": 160.43999999999988
+  },
+  {
+    "id": "u0040",
+    "source_id": "c0001-p00015",
+    "text": " Here the child’s voice lost its self-possessed note and became falteringly human. ",
+    "start": 160.59999999999988,
+    "end": 166.43999999999988
+  },
+  {
+    "id": "u0041",
+    "source_id": "c0001-p00015",
+    "text": "“Poor aunt always thinks that they will come back some day, they and the little brown spaniel that was lost with them, and walk in at that window just as they used to do. ",
+    "start": 166.59999999999988,
+    "end": 175.3999999999999
+  },
+  {
+    "id": "u0042",
+    "source_id": "c0001-p00015",
+    "text": "That is why the window is kept open every evening till it is quite dusk. ",
+    "start": 175.5599999999999,
+    "end": 179.0799999999999
+  },
+  {
+    "id": "u0043",
+    "source_id": "c0001-p00015",
+    "text": "Poor dear aunt, she has often told me how they went out, her husband with his white waterproof coat over his arm, and Ronnie, her youngest brother, singing ‘Bertie, why do you bound?’ as he always did to tease her, because she said it got on her nerves. ",
+    "start": 179.2399999999999,
+    "end": 195.3599999999999
+  },
+  {
+    "id": "u0044",
+    "source_id": "c0001-p00015",
+    "text": "Do you know, sometimes on still, quiet evenings like this, I almost get a creepy feeling that they will all walk in through that window—”",
+    "start": 195.5199999999999,
+    "end": 203.9199999999999
+  },
+  {
+    "id": "u0045",
+    "source_id": "c0001-p00016",
+    "text": "She broke off with a little shudder. ",
+    "start": 204.0799999999999,
+    "end": 206.1199999999999
+  },
+  {
+    "id": "u0046",
+    "source_id": "c0001-p00016",
+    "text": "It was a relief to Framton when the aunt bustled into the room with a whirl of apologies for being late in making her appearance.",
+    "start": 206.2799999999999,
+    "end": 213.15999999999988
+  },
+  {
+    "id": "u0047",
+    "source_id": "c0001-p00017",
+    "text": "“I hope Vera has been amusing you?”",
+    "start": 213.31999999999988,
+    "end": 215.3999999999999
+  },
+  {
+    "id": "u0048",
+    "source_id": "c0001-p00017",
+    "text": " she said.",
+    "start": 215.5599999999999,
+    "end": 216.71999999999989
+  },
+  {
+    "id": "u0049",
+    "source_id": "c0001-p00018",
+    "text": "“She has been very interesting,”",
+    "start": 216.87999999999988,
+    "end": 219.1199999999999
+  },
+  {
+    "id": "u0050",
+    "source_id": "c0001-p00018",
+    "text": " said Framton.",
+    "start": 219.2799999999999,
+    "end": 220.3999999999999
+  },
+  {
+    "id": "u0051",
+    "source_id": "c0001-p00019",
+    "text": "“I hope you don’t mind the open window,”",
+    "start": 220.5599999999999,
+    "end": 222.71999999999989
+  },
+  {
+    "id": "u0052",
+    "source_id": "c0001-p00019",
+    "text": " said Mrs. Sappleton briskly; ",
+    "start": 222.87999999999988,
+    "end": 224.9999999999999
+  },
+  {
+    "id": "u0053",
+    "source_id": "c0001-p00019",
+    "text": "“my husband and brothers will be home directly from shooting, and they always come in this way. ",
+    "start": 225.15999999999988,
+    "end": 228.43999999999988
+  },
+  {
+    "id": "u0054",
+    "source_id": "c0001-p00019",
+    "text": "They’ve been out for snipe in the marshes to-day, so they’ll make a fine mess over my poor carpets. ",
+    "start": 228.59999999999988,
+    "end": 233.9999999999999
+  },
+  {
+    "id": "u0055",
+    "source_id": "c0001-p00019",
+    "text": "So like you men-folk, isn’t it?”",
+    "start": 234.15999999999988,
+    "end": 236.5599999999999
+  },
+  {
+    "id": "u0056",
+    "source_id": "c0001-p00020",
+    "text": "She rattled on cheerfully about the shooting and the scarcity of birds, and the prospects for duck in the winter. ",
+    "start": 236.71999999999989,
+    "end": 242.9999999999999
+  },
+  {
+    "id": "u0057",
+    "source_id": "c0001-p00020",
+    "text": "To Framton it was all purely horrible. ",
+    "start": 243.15999999999988,
+    "end": 245.87999999999988
+  },
+  {
+    "id": "u0058",
+    "source_id": "c0001-p00020",
+    "text": "He made a desperate but only partially successful effort to turn the talk on to a less ghastly topic; he was conscious that his hostess was giving him only a fragment of her attention, and her eyes were constantly straying past him to the open window and the lawn beyond. ",
+    "start": 246.03999999999988,
+    "end": 261.7999999999999
+  },
+  {
+    "id": "u0059",
+    "source_id": "c0001-p00020",
+    "text": "It was certainly an unfortunate coincidence that he should have paid his visit on this tragic anniversary.",
+    "start": 261.9599999999999,
+    "end": 268.31999999999994
+  },
+  {
+    "id": "u0060",
+    "source_id": "c0001-p00021",
+    "text": "“The doctors agree in ordering me complete rest, an absence of mental excitement, and avoidance of anything in the nature of violent physical exercise,”",
+    "start": 268.47999999999996,
+    "end": 278.79999999999995
+  },
+  {
+    "id": "u0061",
+    "source_id": "c0001-p00021",
+    "text": " announced Framton, who laboured under the tolerably widespread delusion that total strangers and chance acquaintances are hungry for the least detail of one’s ailments and infirmities, their cause and cure. ",
+    "start": 278.96,
+    "end": 290.91999999999996
+  },
+  {
+    "id": "u0062",
+    "source_id": "c0001-p00021",
+    "text": "“On the matter of diet they are not so much in agreement,”",
+    "start": 291.08,
+    "end": 295.08
+  },
+  {
+    "id": "u0063",
+    "source_id": "c0001-p00021",
+    "text": " he continued.",
+    "start": 295.24,
+    "end": 296.36
+  },
+  {
+    "id": "u0064",
+    "source_id": "c0001-p00022",
+    "text": "“No?”",
+    "start": 296.52000000000004,
+    "end": 297.16
+  },
+  {
+    "id": "u0065",
+    "source_id": "c0001-p00022",
+    "text": " said Mrs. Sappleton, in a voice which only replaced a yawn at the last moment. ",
+    "start": 297.32000000000005,
+    "end": 302.52000000000004
+  },
+  {
+    "id": "u0066",
+    "source_id": "c0001-p00022",
+    "text": "Then she suddenly brightened into alert attention—but not to what Framton was saying.",
+    "start": 302.68000000000006,
+    "end": 308.0400000000001
+  },
+  {
+    "id": "u0067",
+    "source_id": "c0001-p00023",
+    "text": "“Here they are at last!”",
+    "start": 308.2000000000001,
+    "end": 309.8400000000001
+  },
+  {
+    "id": "u0068",
+    "source_id": "c0001-p00023",
+    "text": " she cried. ",
+    "start": 310.0000000000001,
+    "end": 311.1200000000001
+  },
+  {
+    "id": "u0069",
+    "source_id": "c0001-p00023",
+    "text": "“Just in time for tea, and don’t they look as if they were muddy up to the eyes!”",
+    "start": 311.28000000000014,
+    "end": 315.60000000000014
+  },
+  {
+    "id": "u0070",
+    "source_id": "c0001-p00024",
+    "text": "Framton shivered slightly and turned towards the niece with a look intended to convey sympathetic comprehension. ",
+    "start": 315.76000000000016,
+    "end": 321.76000000000016
+  },
+  {
+    "id": "u0071",
+    "source_id": "c0001-p00024",
+    "text": "The child was staring out through the open window with dazed horror in her eyes. ",
+    "start": 321.9200000000002,
+    "end": 326.6800000000002
+  },
+  {
+    "id": "u0072",
+    "source_id": "c0001-p00024",
+    "text": "In a chill shock of nameless fear Framton swung round in his seat and looked in the same direction.",
+    "start": 326.8400000000002,
+    "end": 333.3200000000002
+  },
+  {
+    "id": "u0073",
+    "source_id": "c0001-p00025",
+    "text": "In the deepening twilight three figures were walking across the lawn towards the window; they all carried guns under their arms, and one of them was additionally burdened with a white coat hung over his shoulders. ",
+    "start": 333.48000000000025,
+    "end": 346.2000000000003
+  },
+  {
+    "id": "u0074",
+    "source_id": "c0001-p00025",
+    "text": "A tired brown spaniel kept close at their heels. ",
+    "start": 346.3600000000003,
+    "end": 349.6800000000003
+  },
+  {
+    "id": "u0075",
+    "source_id": "c0001-p00025",
+    "text": "Noiselessly they neared the house, and then a hoarse young voice chanted out of the dusk: ",
+    "start": 349.8400000000003,
+    "end": 355.20000000000033
+  },
+  {
+    "id": "u0076",
+    "source_id": "c0001-p00025",
+    "text": "“I said, Bertie, why do you bound?”",
+    "start": 355.36000000000035,
+    "end": 358.56000000000034
+  },
+  {
+    "id": "u0077",
+    "source_id": "c0001-p00026",
+    "text": "Framton grabbed wildly at his stick and hat; the hall-door, the gravel-drive, and the front gate were dimly-noted stages in his headlong retreat. ",
+    "start": 358.72000000000037,
+    "end": 367.80000000000035
+  },
+  {
+    "id": "u0078",
+    "source_id": "c0001-p00026",
+    "text": "A cyclist coming along the road had to run into the hedge to avoid an imminent collision.",
+    "start": 367.9600000000004,
+    "end": 373.5200000000004
+  },
+  {
+    "id": "u0079",
+    "source_id": "c0001-p00027",
+    "text": "“Here we are, my dear,”",
+    "start": 373.6800000000004,
+    "end": 375.3200000000004
+  },
+  {
+    "id": "u0080",
+    "source_id": "c0001-p00027",
+    "text": " said the bearer of the white mackintosh, coming in through the window; ",
+    "start": 375.4800000000004,
+    "end": 379.7600000000004
+  },
+  {
+    "id": "u0081",
+    "source_id": "c0001-p00027",
+    "text": "“fairly muddy, but most of it’s dry. ",
+    "start": 379.9200000000004,
+    "end": 382.64000000000044
+  },
+  {
+    "id": "u0082",
+    "source_id": "c0001-p00027",
+    "text": "Who was that who bolted out as we came up?”",
+    "start": 382.80000000000047,
+    "end": 385.36000000000047
+  },
+  {
+    "id": "u0083",
+    "source_id": "c0001-p00028",
+    "text": "“A most extraordinary man, a Mr. Nuttel,”",
+    "start": 385.5200000000005,
+    "end": 387.2400000000005
+  },
+  {
+    "id": "u0084",
+    "source_id": "c0001-p00028",
+    "text": " said Mrs. Sappleton; ",
+    "start": 387.40000000000055,
+    "end": 389.20000000000056
+  },
+  {
+    "id": "u0085",
+    "source_id": "c0001-p00028",
+    "text": "“could only talk about his illnesses, and dashed off without a word of good-bye or apology when you arrived. ",
+    "start": 389.3600000000006,
+    "end": 395.3600000000006
+  },
+  {
+    "id": "u0086",
+    "source_id": "c0001-p00028",
+    "text": "One would think he had seen a ghost.”",
+    "start": 395.5200000000006,
+    "end": 397.7200000000006
+  },
+  {
+    "id": "u0087",
+    "source_id": "c0001-p00029",
+    "text": "“I expect it was the spaniel,”",
+    "start": 397.8800000000006,
+    "end": 399.6400000000006
+  },
+  {
+    "id": "u0088",
+    "source_id": "c0001-p00029",
+    "text": " said the niece calmly; ",
+    "start": 399.80000000000064,
+    "end": 401.40000000000066
+  },
+  {
+    "id": "u0089",
+    "source_id": "c0001-p00029",
+    "text": "“he told me he had a horror of dogs. ",
+    "start": 401.5600000000007,
+    "end": 404.1600000000007
+  },
+  {
+    "id": "u0090",
+    "source_id": "c0001-p00029",
+    "text": "He was once hunted into a cemetery somewhere on the banks of the Ganges by a pack of pariah dogs, and had to spend the night in a newly dug grave with the creatures snarling and grinning and foaming just above him. ",
+    "start": 404.32000000000073,
+    "end": 415.88000000000073
+  },
+  {
+    "id": "u0091",
+    "source_id": "c0001-p00029",
+    "text": "Enough to make anyone lose their nerve.”",
+    "start": 416.04000000000076,
+    "end": 418.24000000000075
+  },
+  {
+    "id": "u0092",
+    "source_id": "c0001-p00030",
+    "text": "Romance at short notice was her speciality.",
+    "start": 418.4000000000008,
+    "end": 421.92000000000075
+  }
+]

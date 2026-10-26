@@ -9,7 +9,7 @@
   <script src="theme.js"></script>
   <link rel="icon" href="assets/column.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
-  <script src="script.js?v=language-demo-v1" defer></script>
+  <script src="script.js?v=multi-demo-v2" defer></script>
   <!-- seo:start -->
   <meta name="robots" content="index,follow,max-image-preview:large">
   <link rel="canonical" href="https://multipliedtwice.github.io/dogma/">
@@ -33,7 +33,7 @@
   <meta name="twitter:description" content="Read EPUB and FB2 books locally and hear AI narration with Dogma. Listen to English and Russian audiobook demos with read-along text.">
   <meta name="twitter:image" content="https://multipliedtwice.github.io/dogma/assets/social-en.png">
   <meta name="twitter:image:alt" content="Dogma: local reading and AI audiobook narration. English and Russian website.">
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://multipliedtwice.github.io/dogma/#website","name":"Dogma","url":"https://multipliedtwice.github.io/dogma/","inLanguage":["en","ru"]},{"@type":"WebPage","@id":"https://multipliedtwice.github.io/dogma/#webpage","url":"https://multipliedtwice.github.io/dogma/","name":"Dogma — Local EPUB reader & AI audiobook narration","description":"Read EPUB and FB2 books locally and hear AI narration with Dogma. Listen to English and Russian audiobook demos with read-along text.","inLanguage":"en","isPartOf":{"@id":"https://multipliedtwice.github.io/dogma/#website"},"about":{"@type":"Thing","name":"Dogma"}}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://multipliedtwice.github.io/dogma/#website","name":"Dogma","url":"https://multipliedtwice.github.io/dogma/","inLanguage":["en","ru"]},{"@type":"WebPage","@id":"https://multipliedtwice.github.io/dogma/#webpage","url":"https://multipliedtwice.github.io/dogma/","name":"Dogma — Local EPUB reader & AI audiobook narration","description":"Read EPUB and FB2 books locally and hear AI narration with Dogma. Listen to English and Russian audiobook demos with read-along text.","inLanguage":"en","isPartOf":{"@id":"https://multipliedtwice.github.io/dogma/#website"},"about":{"@type":"Thing","name":"Dogma"}},{"@type":"ItemList","@id":"https://multipliedtwice.github.io/dogma/#audiobooks","name":"Audiobook demos","numberOfItems":2,"itemListElement":[{"@type":"ListItem","position":1,"item":{"@id":"https://multipliedtwice.github.io/dogma/?demo=en-open-window#listen-audio"}},{"@type":"ListItem","position":2,"item":{"@id":"https://multipliedtwice.github.io/dogma/?demo=en#listen-audio"}}]},{"@type":"AudioObject","@id":"https://multipliedtwice.github.io/dogma/?demo=en-open-window#listen-audio","url":"https://multipliedtwice.github.io/dogma/?demo=en-open-window#listen","name":"The Open Window","description":"Complete story. The complete short story: a nervous visitor hears Vera’s account of an open French window.","inLanguage":"en","author":{"@type":"Person","name":"Saki"},"contentUrl":"https://multipliedtwice.github.io/dogma/demos/en/01864c00ad84f1223c15f741c433ccc99ae339c70000fbe766cd2e17144e10e1.mp3","encodingFormat":"audio/mpeg","duration":"PT445.918667S","isBasedOn":"https://www.gutenberg.org/cache/epub/269/pg269-images.html","isAccessibleForFree":true,"isPartOf":{"@id":"https://multipliedtwice.github.io/dogma/#webpage"}},{"@type":"AudioObject","@id":"https://multipliedtwice.github.io/dogma/?demo=en#listen-audio","url":"https://multipliedtwice.github.io/dogma/?demo=en#listen","name":"The Gift of the Magi","description":"Complete story. The Gift of the Magi","inLanguage":"en","author":{"@type":"Person","name":"O. Henry"},"contentUrl":"https://multipliedtwice.github.io/dogma/demos/en/539028c6d9c29a2679bf8a379fa8ec624cb8814f1eee1efae42c675c67aab70d.mp3","encodingFormat":"audio/mpeg","duration":"PT758.358667S","isBasedOn":"https://www.gutenberg.org/ebooks/7256","isAccessibleForFree":true,"isPartOf":{"@id":"https://multipliedtwice.github.io/dogma/#webpage"}}]}</script>
   <!-- seo:end -->
 </head>
 <body>
@@ -61,10 +61,10 @@
         <div class="book-spine"></div>
         <div class="book-cover">
           <div class="cover-topline"><span>THE DOGMA LIBRARY</span><span>01</span></div>
-          <div class="gift-ornament"><i></i><i></i><b></b><span></span></div>
-          <div class="cover-title">The Gift<br>of the <em>Magi</em></div>
-          <div class="cover-author">O. HENRY</div>
-          <div class="cover-bottom"><span>A SHORT STORY</span><span>1905</span></div>
+          <div class="cover-seal">W</div>
+          <div class="cover-title">The Open<br><em>Window</em></div>
+          <div class="cover-author">SAKI</div>
+          <div class="cover-bottom"><span>A SHORT STORY</span><span>1914</span></div>
         </div>
         <div class="sound-tag"><span class="sound-bars"><i></i><i></i><i></i><i></i><i></i></span><span>A story, in another form.</span></div>
       </div>
@@ -73,24 +73,25 @@
     <section class="listen-section" id="listen" aria-labelledby="listen-title">
       <div class="wrap">
         <div class="section-heading"><div><p class="eyebrow">THE LISTENING ROOM</p><h2 id="listen-title">Take a story with you.</h2></div><p>Original words. A new way to hear them.</p></div>
+        <div class="demo-picker" id="demo-picker" hidden><label for="demo-select">Choose a story</label><select id="demo-select" aria-controls="player-region story-reader"></select></div>
         <article class="featured-demo" aria-labelledby="demo-title">
           <div class="demo-info">
-            <div class="demo-kicker"><span class="status-pill" id="demo-status">Preparing audio</span><span>ENGLISH · SHORT STORY</span></div>
-            <h3 id="demo-title" lang="en">The Gift of the Magi</h3><p class="demo-author" lang="en">O. Henry</p>
-            <p class="demo-description">Two gifts, one Christmas, and the things that matter most. A small story with a generous heart.</p>
-            <div class="demo-details"><span id="demo-duration">Complete short story</span><span class="detail-dot" aria-hidden="true">·</span><span>Narrated with Dogma</span></div>
+            <div class="demo-kicker"><span class="status-pill" id="demo-status">Ready to listen</span><span id="demo-kind">ENGLISH · COMPLETE STORY</span></div>
+            <h3 id="demo-title" lang="en">The Open Window</h3><p class="demo-author" lang="en">Saki</p>
+            <p class="demo-description">The complete short story: a nervous visitor hears Vera’s account of an open French window.</p>
+            <div class="demo-details"><span id="demo-duration">7:25 · Complete story</span><span class="detail-dot" aria-hidden="true">·</span><span>Narrated with Dogma</span></div>
             <div id="player-region" hidden>
-              <audio id="story-audio" controls preload="metadata" aria-label="Listen to The Gift of the Magi"></audio>
+              <audio id="story-audio" controls preload="metadata" aria-label="Listen to The Open Window"></audio>
               <div class="player-extras"><label for="playback-rate">Playback speed <select id="playback-rate"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><a id="download-audio" download>Download MP3 <span aria-hidden="true">↓</span></a></div>
               <p class="playback-note" id="playback-note">Your listening position is saved in this browser.</p>
             </div>
-            <p id="audio-unavailable" class="unavailable-message" role="status">The English recording is being prepared. Please check back shortly.</p>
-            <div class="demo-source"><a id="story-source" href="https://www.gutenberg.org/ebooks/7256">Read the source at Project Gutenberg <span aria-hidden="true">↗</span></a></div>
+            <p id="audio-unavailable" class="unavailable-message" role="status">Loading the recording and story text.</p>
+            <div class="demo-source"><a id="story-source" href="https://www.gutenberg.org/cache/epub/269/pg269-images.html">Read the original at Project Gutenberg <span aria-hidden="true">↗</span></a></div>
           </div>
           <div class="reader-panel">
             <div class="reader-toolbar"><span class="reader-label">READ ALONG</span><label class="follow-toggle"><input type="checkbox" id="follow-audio" checked> Follow audio</label></div>
-            <div id="story-reader" class="story-reader" lang="en" tabindex="0" aria-label="Story text. Select a passage to seek the audio."><div class="reader-placeholder"><span class="quote-mark" aria-hidden="true">“</span><p>One dollar and eighty-seven cents.<br>That was all.</p><span>O. HENRY</span></div></div>
-            <p class="reader-hint" id="reader-hint">The story text will appear with the recording.</p>
+            <div id="story-reader" class="story-reader" lang="en" tabindex="0" aria-label="Story text. Select a passage to seek the audio."><div class="reader-placeholder"><span class="quote-mark" aria-hidden="true">“</span><p>The read-along text is loading.</p><span>SAKI</span></div></div>
+            <p class="reader-hint" id="reader-hint">Select a passage to move to its beginning in the recording.</p>
           </div>
         </article>
 
@@ -116,7 +117,7 @@
 
   <footer class="site-footer wrap">
     <div class="footer-top"><a class="wordmark" href="./" aria-label="Dogma home"><img src="assets/column.svg" alt="" width="29" height="29"><span>dogma<span class="wordmark-period">.</span></span></a><p>For the love of a good story.</p><a href="https://github.com/multipliedtwice/dogma">Source on GitHub <span aria-hidden="true">↗</span></a></div>
-    <div class="footer-bottom"><p>The English demo uses O. Henry’s original story. <a href="https://www.gutenberg.org/ebooks/7256">Text source</a>.</p><details id="credits"><summary>Audio &amp; music credits</summary><p>Narration generated with Dogma. The branded opening and scene music were generated with <a href="https://huggingface.co/m-a-p/YuE2-3B">YuE2-3B by Multimodal Art Projection (m-a-p)</a>, using the <a href="https://huggingface.co/audio-cpp/Yue2-3B-GGUF">audio.cpp GGUF conversion</a>. Music is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> (non-commercial use with attribution).</p><p>The Russian demo was regenerated after listening feedback, with targeted development checks and replacement takes. The English demo uses a single take per passage. Neither recording has received complete human listening approval.</p></details><p class="music-license">Demo music: <a href="#credits">YuE2 · CC BY-NC 4.0</a></p></div>
+    <div class="footer-bottom"><p>Original texts from <a href="https://www.gutenberg.org/">Project Gutenberg</a> and <a href="https://ru.wikisource.org/">Wikisource</a>, in their original languages. The exact source is linked beside each selected story.</p><details id="credits"><summary>Audio &amp; music credits</summary><p>Narration generated with Dogma. The branded opening and scene music were generated with <a href="https://huggingface.co/m-a-p/YuE2-3B">YuE2-3B by Multimodal Art Projection (m-a-p)</a>, using the <a href="https://huggingface.co/audio-cpp/Yue2-3B-GGUF">audio.cpp GGUF conversion</a>. Music is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> (non-commercial use with attribution).</p><p>Source coverage and audio-file integrity are checked. New demos use one completed take per passage; only incomplete recordings are retried after technical failures. Automatic speech-recognition and acoustic checks are off. “Хамелеон” received separate targeted development checks and replacement takes after listener feedback. No recording has received complete human listening approval.</p></details><p class="music-license">Demo music: <a href="#credits">YuE2 · CC BY-NC 4.0</a></p></div>
   </footer>
 </body>
 </html>

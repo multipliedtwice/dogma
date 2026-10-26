@@ -33,18 +33,38 @@
     hint: 'Select any passage to move the audio to its beginning.',
     pendingText: 'The story text will appear with the completed recording.',
     pendingHint: 'Audio and read-along are not available yet.', pendingDuration: 'Recording in preparation',
-    listen: title => `Listen to ${title}`, source: 'Read the source at Project Gutenberg ↗',
+    listen: title => `Listen to ${title}`, source: 'Read the original text ↗',
     readerLabel: 'Story text. Select a passage to seek the audio.',
     resume: value => `Resumed at ${value}. Your place is saved in this browser.`,
     seek: value => `Seek to ${value}`,
     selected: value => `Ready at ${value}. Press play to listen.`,
     ended: 'The end. Thank you for listening.', album: 'Narrated with Dogma'
   };
-  let book, captions = [], captionButtons = [], current = -1, lastSaved = 0;
+  const selector = document.querySelector('#demo-select');
+  const picker = document.querySelector('#demo-picker');
+  const extra = russian ? {
+    excerpt: 'Отрывок', saved: 'Позиция прослушивания сохраняется в этом браузере.',
+    description: 'Послушайте оригинальный текст и следите за чтением.'
+  } : {
+    excerpt: 'Excerpt', saved: 'Your listening position is saved in this browser.',
+    description: 'Listen to the original text and follow along as it is read.'
+  };
+  let book, books = [], captions = [], captionButtons = [], current = -1, lastSaved = 0;
+  let loadSerial = 0, switching = false, positionReady = false, expectedAudio = '';
+  const extent = () => book?.extent === 'complete' || (!book?.extent && book?.id === selectedLanguage) ? messages.complete : extra.excerpt;
+  const durationText = duration => `${time(duration)} · ${extent()}`;
+
+  function localeFor(row) {
+    const locale = { English: 'en', Russian: 'ru' }[row?.language];
+    if (!locale || (row.locale !== undefined && row.locale !== locale) ||
+        typeof row.id !== 'string' || row.id.length > 80 || !new RegExp(`^${locale}(?:-[a-z0-9]+)*$`).test(row.id)) throw new Error('Invalid demo identity');
+    if (row.featured !== undefined && (typeof row.featured !== 'boolean' || (row.featured && row.status !== 'ready'))) throw new Error('Invalid featured demo');
+    return locale;
+  }
 
   const time = value => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
   function localAsset(path) {
-    if (typeof path !== 'string' || !path.startsWith(`demos/${selectedLanguage}/`)) throw new Error('Unexpected demo asset path');
+    if (typeof path !== 'string' || !new RegExp(`^demos/${selectedLanguage}/[A-Za-z0-9._-]+$`).test(path)) throw new Error('Unexpected demo asset path');
     const url = new URL(path, base);
     if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}demos/${selectedLanguage}/`) || url.search || url.hash) throw new Error('Unexpected demo asset URL');
     return url.href;
@@ -72,7 +92,7 @@
     return result >= 0 && position <= captions[result].end + MEDIA_TIME_EPSILON ? result : -1;
   }
   function savePosition() {
-    if (!book || !Number.isFinite(audio.currentTime)) return;
+    if (!book || switching || !positionReady || !Number.isFinite(audio.currentTime)) return;
     let index = captionAt(audio.currentTime);
     if (index < 0 && audio.currentTime + MEDIA_TIME_EPSILON >= (captions[0]?.start ?? Infinity)) {
       index = captions.findLastIndex(caption => caption.start <= audio.currentTime + MEDIA_TIME_EPSILON);
@@ -101,6 +121,7 @@
     if (position > 1) note.textContent = messages.resume(time(position));
   }
   function updateReader() {
+    if (switching || !positionReady) return;
     const index = captionAt(audio.currentTime);
     if (index !== current) {
       if (current >= 0) captionButtons[current].removeAttribute('aria-current');
@@ -118,7 +139,7 @@
     }
     if (Date.now() - lastSaved > 2000) { savePosition(); lastSaved = Date.now(); }
   }
-  function mountCaptions(rows) {
+  function mountCaptions(rows, serial) {
     if (!Array.isArray(rows) || !rows.length) throw new Error('No read-along text');
     let previousEnd = 0;
     const ids = new Set();
@@ -139,6 +160,7 @@
       button.className = 'caption'; button.type = 'button'; button.textContent = caption.text.trim();
       button.title = messages.seek(time(caption.start));
       button.addEventListener('click', () => {
+        if (serial !== loadSerial) return;
         audio.currentTime = caption.start;
         updateReader(); savePosition();
         if (audio.paused) note.textContent = messages.selected(time(caption.start));
@@ -161,30 +183,40 @@
     reader.replaceChildren(placeholder);
     document.querySelector('#reader-hint').textContent = messages.pendingHint;
   }
-  async function initialize() {
-    follow.disabled = true;
+  async function loadBook(next) {
+    savePosition();
+    const serial = ++loadSerial;
+    switching = true; positionReady = false; expectedAudio = '';
+    audio.pause(); audio.removeAttribute('src'); audio.load?.();
+    try { audio.currentTime = 0; } catch { /* An empty media element has no timeline yet. */ }
+    book = next; captions = []; captionButtons = []; current = -1; lastSaved = 0;
+    reader.replaceChildren(); follow.disabled = true; note.textContent = extra.saved;
+    document.querySelector('#download-audio').removeAttribute('href');
     try {
-      const catalog = await json(new URL('demos/catalog.json', base));
-      if (!Array.isArray(catalog)) throw new Error('Invalid catalog');
-      book = catalog.find(row => row.id === selectedLanguage);
-      if (!book) { unavailable(messages.preparingAudio); return; }
       document.querySelector('#demo-title').textContent = book.title;
       document.querySelector('.demo-author').textContent = book.author;
       document.querySelector('#demo-title').lang = selectedLanguage;
       document.querySelector('.demo-author').lang = selectedLanguage;
+      const kind = document.querySelector('#demo-kind');
+      if (kind) kind.textContent = `${selectedLanguage === 'ru' ? 'РУССКИЙ' : 'ENGLISH'} · ${extent()}`;
       reader.lang = selectedLanguage;
       audio.setAttribute('aria-label', messages.listen(book.title));
       const source = new URL(book.source);
-      if (source.protocol === 'https:') document.querySelector('#story-source').href = source.href;
+      if (source.protocol !== 'https:' || source.username || source.password) throw new Error('Invalid public source');
+      document.querySelector('#story-source').href = source.href;
       document.querySelector('#story-source').textContent = messages.source;
+      const description = document.querySelector('.demo-description');
+      if (description) description.textContent = book.description || extra.description;
       if (book.status !== 'ready') {
         document.querySelector('#demo-duration').textContent = messages.pendingDuration;
         unavailable(messages.preparingAudio); return;
       }
       const audioURL = localAsset(book.audio);
+      const captionsURL = localAsset(book.captions);
       document.querySelectorAll('[data-ready-text]').forEach(element => { element.textContent = element.dataset.readyText; });
       document.querySelectorAll('[data-pending-only]').forEach(element => { element.hidden = true; });
-      if (Number.isFinite(book.duration) && book.duration > 0) document.querySelector('#demo-duration').textContent = `${time(book.duration)} · ${messages.complete}`;
+      if (description) description.textContent = book.description || extra.description;
+      if (Number.isFinite(book.duration) && book.duration > 0) document.querySelector('#demo-duration').textContent = durationText(book.duration);
       document.querySelector('#demo-status').textContent = messages.ready;
       document.querySelector('#audio-unavailable').hidden = true;
       document.querySelector('#player-region').hidden = false;
@@ -196,23 +228,72 @@
         navigator.mediaSession.metadata = new MediaMetadata({ title: book.title, artist: book.author, album: messages.album });
       }
       try {
-        const data = await json(localAsset(book.captions));
-        mountCaptions(Array.isArray(data) ? data : data.captions);
+        const data = await json(captionsURL);
+        if (serial !== loadSerial) return;
+        mountCaptions(Array.isArray(data) ? data : data.captions, serial);
       } catch {
+        if (serial !== loadSerial) return;
+        captions = []; captionButtons = []; reader.replaceChildren();
         document.querySelector('#reader-hint').textContent = messages.missingText;
         document.querySelector('.follow-toggle').hidden = true;
       }
-      audio.addEventListener('loadedmetadata', restorePosition, { once: true });
-      audio.addEventListener('durationchange', () => { if (Number.isFinite(audio.duration)) document.querySelector('#demo-duration').textContent = `${time(audio.duration)} · ${messages.complete}`; });
+      if (serial !== loadSerial) return;
+      expectedAudio = audioURL; switching = false;
+      audio.src = audioURL; audio.load?.();
+    } catch {
+      if (serial === loadSerial) unavailable(messages.unavailable);
+    } finally { if (serial === loadSerial) switching = false; }
+  }
+
+  async function initialize() {
+    follow.disabled = true;
+    try {
+      const catalog = await json(new URL('demos/catalog.json', base));
+      if (!Array.isArray(catalog) || new Set(catalog.map(row => row.id)).size !== catalog.length) throw new Error('Invalid catalog');
+      for (const locale of ['en', 'ru']) {
+        if (catalog.filter(row => localeFor(row) === locale && row.featured === true).length > 1) throw new Error('Duplicate featured demos');
+      }
+      books = catalog.filter(row => localeFor(row) === selectedLanguage);
+      books.sort((a, b) => Number(b.featured === true) - Number(a.featured === true));
+      if (!books.length) { unavailable(messages.preparingAudio); return; }
+      let requested;
+      if (window.location?.href) requested = new URL(window.location.href).searchParams.get('demo');
+      const defaultBook = books.find(row => row.featured === true && row.status === 'ready') || books.find(row => row.id === selectedLanguage) || books[0];
+      const initial = books.find(row => row.id === requested) || defaultBook;
+      if (selector) {
+        selector.replaceChildren();
+        for (const row of books) {
+          const option = document.createElement('option'); option.value = row.id;
+          option.textContent = `${row.title} — ${row.author}`; selector.append(option);
+        }
+        selector.value = initial.id;
+        selector.addEventListener('change', () => {
+          const selected = books.find(row => row.id === selector.value);
+          if (!selected) return;
+          if (window.location?.href && window.history?.replaceState) {
+            const url = new URL(window.location.href);
+            if (selected.id === defaultBook.id) url.searchParams.delete('demo');
+            else url.searchParams.set('demo', selected.id);
+            window.history.replaceState(null, '', url);
+          }
+          loadBook(selected);
+        });
+      }
+      if (picker) picker.hidden = books.length < 2;
+      audio.addEventListener('loadedmetadata', () => {
+        if (switching || !expectedAudio || (audio.currentSrc && audio.currentSrc !== expectedAudio)) return;
+        positionReady = true; restorePosition(); updateReader();
+      });
+      audio.addEventListener('durationchange', () => { if (positionReady && Number.isFinite(audio.duration)) document.querySelector('#demo-duration').textContent = durationText(audio.duration); });
       audio.addEventListener('timeupdate', updateReader);
       audio.addEventListener('pause', savePosition);
       audio.addEventListener('seeked', () => { updateReader(); savePosition(); });
-      audio.addEventListener('error', () => unavailable(messages.failedAudio));
+      audio.addEventListener('error', () => { if (!switching && expectedAudio) unavailable(messages.failedAudio); });
       audio.addEventListener('ended', () => { note.textContent = messages.ended; savePosition(); });
       document.querySelector('#playback-rate').addEventListener('change', event => { audio.playbackRate = Number(event.target.value); savePosition(); });
       document.addEventListener('visibilitychange', () => { if (document.hidden) savePosition(); });
       window.addEventListener('pagehide', savePosition);
-      audio.src = audioURL;
+      await loadBook(initial);
     } catch { unavailable(messages.unavailable); }
   }
   initialize();

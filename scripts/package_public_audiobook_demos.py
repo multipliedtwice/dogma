@@ -216,7 +216,24 @@ def checked_asset(public,name,checksum):
     return raw
 
 
-def completed_book(folder,key,include_wav=False):
+def public_metadata(key,value=None):
+    if value is None:return dict(BOOKS[key])
+    allowed={'title','author','language','source','source_text','year','edition','description','extent','featured'}
+    if(not isinstance(value,dict)or set(value)-allowed or not {'title','author','language','source'}<=value.keys()
+            or value['language']!={'en':'English','ru':'Russian'}.get(key)
+            or any(not isinstance(value[k],str)or not value[k].strip()for k in('title','author','source'))):
+        raise ValueError('Reviewed public demo metadata must match its explicit language')
+    from urllib.parse import urlsplit
+    source=urlsplit(value['source'])
+    if source.scheme!='https'or not source.hostname or source.username or source.password:
+        raise ValueError('Reviewed public source must be HTTPS')
+    if value.get('extent','excerpt')not in('complete','excerpt'):raise ValueError('Invalid excerpt extent')
+    if 'featured'in value and type(value['featured'])is not bool:raise ValueError('Featured selection must be boolean')
+    clean_json(value)
+    return dict(value)
+
+
+def completed_book(folder,key,include_wav=False,*,expected_metadata=None):
     folder = safe_path(folder)
     public = safe_path(folder/'public')
     latest,latest_raw = read_json(public/'latest.json')
@@ -233,7 +250,7 @@ def completed_book(folder,key,include_wav=False):
         raise ValueError('Both demos must be complete, fully verified, musical and have the eight-second opening')
     if complete != latest or version_record != latest:
         raise ValueError('Latest/version/strict completion receipts disagree')
-    expected = BOOKS[key]
+    expected = public_metadata(key,expected_metadata)
     assignment = frozen['assignment']
     ids = [u['id'] for u in assignment['units']]
     if (latest.get('language') != expected['language'] or latest.get('title') != expected['title']

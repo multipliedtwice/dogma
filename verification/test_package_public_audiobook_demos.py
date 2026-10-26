@@ -102,6 +102,23 @@ class StaticDemoPackaging(unittest.TestCase):
             package.package(en,ru,output)
         self.assertFalse(output.exists())
 
+    def test_explicit_public_metadata_supports_additional_books_without_mutating_default_titles(self):
+        en,_=self.book('en');before=dict(package.BOOKS['en'])
+        metadata={**before,'description':'An excerpt from the original text.','extent':'excerpt'}
+        payload,details=package.completed_book(en,'en',expected_metadata=metadata)
+        self.assertEqual(details['extent'],'excerpt');self.assertEqual(details['description'],metadata['description'])
+        self.assertEqual(package.BOOKS['en'],before)
+        with self.assertRaisesRegex(ValueError,'identity'):
+            package.completed_book(en,'en',expected_metadata={**metadata,'title':'Different book'})
+
+    def test_reviewed_metadata_rejects_language_mismatch_private_payload_and_unsafe_sources(self):
+        original={'title':'Public story','author':'Public author','language':'English','source':'https://example.org/story'}
+        self.assertEqual(package.public_metadata('en',original),original)
+        for changes in({'language':'Russian'},{'reference_text':'private labels'},
+                        {'source':'file:///private'},{'source':'https://a:b@example.org/story'},
+                        {'description':'manual-labeling/private'}, {'title':''}):
+            with self.subTest(changes=changes),self.assertRaises(ValueError):package.public_metadata('en',{**original,**changes})
+
     def test_tampered_mp3_or_completion_receipt_is_rejected(self):
         en,meta = self.book('en');ru,_ = self.book('ru')
         audio = en/'public'/meta['mp3'];original = audio.read_bytes();audio.write_bytes(b'wrong audio')
