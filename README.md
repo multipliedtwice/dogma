@@ -2,6 +2,8 @@
 
 A local EPUB/FB2 reader and chapter-based audiobook player built with React, Tauri, SQLite and local inference adapters.
 
+![Dogma with The Queen of Spades open in the English interface and light theme.](docs/assets/dogma-queen-of-spades-en.png)
+
 **Listen to the public demo:** [Dogma listening room](https://multipliedtwice.github.io/dogma/).
 The website publishes selected recordings only. Model weights, training data
 and labeling records stay local. New demos use [one-shot generation](docs/PUBLIC_DEMO_ONE_SHOT.md), with automatic recognition and retakes disabled. See [website publishing](docs/GITHUB_PAGES.md).
